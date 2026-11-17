@@ -521,8 +521,9 @@ Relevant options:
 - `--pn-floor PATH`, `--pn-floor-save` (floor of the board, default `~/.config/litex_m2sdr/pn_floor_<dna>.csv`)
 - `--tx-tone`, `--tx-att DB` (test tone of the RFIC on TX, for a cable from TX to RX; the one case where the utility transmits)
 - `--demod` (with `--report`), `--modulation NAME`, `--symbol-rate HZ`, `--rolloff A`, `--pulse rrc|rc|rect`, `--demod-samples N` (PSK/QAM demodulation: EVM, MER, I/Q errors; found from the signal by default)
+- `--lte` (with `--report`: LTE downlink carrier, FDD, normal cyclic prefix: cell, MIB, EVM, data blocks; sample rate 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS)
 - `--no-rf-init` (leave the RFIC as `m2sdr_rf` set it)
-- `--view spectrum|time|statistics|phase-noise|modulation` (view shown first)
+- `--view spectrum|time|statistics|phase-noise|modulation|lte` (view shown first)
 
 Window: left click places the selected marker, the wheel zooms, a right drag moves the span, a double click shows it all. Space runs or stops, `P` puts the marker on the peak, `F` shows the full span, `R` restarts the traces.
 
@@ -535,6 +536,7 @@ Examples:
 ./m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --report --phase-noise
 ./m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --view modulation
 ./m2sdr_analyzer --file capture.sigmf-meta --report --demod
+./m2sdr_analyzer --freq 1852.5e6 --sample-rate 7.68e6 --view lte
 ./m2sdr_analyzer --file tone.bin --nchannels 1 --sample-rate 1e6 --report --json
 ```
 

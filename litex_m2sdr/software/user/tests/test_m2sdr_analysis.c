@@ -15,6 +15,8 @@
 #include <string.h>
 
 #include "../libm2sdr/m2sdr_analysis.h"
+#include "../libm2sdr/m2sdr_fft.h"
+#include "../libm2sdr/m2sdr_lte_seq.h"
 
 #define FS    1.0e6
 #define COUNT (1u << 18)
@@ -499,6 +501,224 @@ static void test_demod(void)
     free(x);
 }
 
+/* LTE downlink */
+
+#define LTE_TEST_FRAMES 5
+
+struct lte_signal {
+    int    cell_id, n_rb, sfn;
+    int    rate_index;          /* Sample rate: 1.92 MSPS << rate_index. */
+    double cfo_hz;
+    double evm;                 /* Noise added, as the EVM it gives on a resource element. */
+    size_t delay;               /* Samples ahead of the first frame. */
+    double amp;                 /* Of a resource element; 0: 0.02. */
+};
+
+/* Frames of a cell with one antenna port: synchronisation signals, reference signals, PBCH,
+ * and data in the lower half of the blocks, QPSK, 16QAM and 64QAM in turn by slot. Returns the
+ * number of samples written. */
+static size_t make_lte(float complex *x, size_t max, const struct lte_signal *sig)
+{
+    static float complex qpsk[4], qam16[16], qam64[64], crs[2 * LTE_MAX_RB], pss[LTE_SYNC_LEN];
+    static float sss[LTE_SYNC_LEN];
+    static uint8_t bch[LTE_PBCH_BITS];
+    const int d = 1 << sig->rate_index, n = 128 * d, k = 12 * sig->n_rb;
+    const double fs = 1920000.0 * d, amp = sig->amp > 0 ? sig->amp : 0.02;
+    const float complex *cons[3] = { qpsk, qam16, qam64 };
+    const int ncons[3] = { 4, 16, 64 };
+    float complex *grid = calloc((size_t)k, sizeof(*grid));
+    float complex *fd = malloc((size_t)n * sizeof(*fd)), *td = malloc((size_t)n * sizeof(*td));
+    struct m2sdr_fft *fft = m2sdr_fft_alloc((size_t)n, true);
+    uint8_t mib[LTE_MIB_BITS] = { 0 };
+    size_t pos = sig->delay, i;
+    int frame, ns, l, a, j, pbch_at;
+
+    if (!grid || !fd || !td || !fft) {
+        failures++;
+        return 0;
+    }
+    m2sdr_constellation(M2SDR_MOD_QPSK, qpsk);
+    m2sdr_constellation(M2SDR_MOD_16QAM, qam16);
+    m2sdr_constellation(M2SDR_MOD_64QAM, qam64);
+    m2sdr_lte_pss(sig->cell_id % 3, pss);
+    memset(x, 0, max * sizeof(*x));
+
+    for (frame = 0; frame < LTE_TEST_FRAMES; frame++) {
+        const int sfn = sig->sfn + frame;
+        /* MIB: bandwidth, PHICH (normal, one), the eight high bits of the frame number. */
+        const int bw = sig->n_rb == 6 ? 0 : sig->n_rb == 15 ? 1 : sig->n_rb == 25 ? 2 : sig->n_rb == 50 ? 3 : 5;
+
+        memset(mib, 0, sizeof(mib));
+        mib[0] = (uint8_t)((bw >> 2) & 1);
+        mib[1] = (uint8_t)((bw >> 1) & 1);
+        mib[2] = (uint8_t)(bw & 1);
+        mib[4] = 1;
+        for (j = 0; j < 8; j++)
+            mib[6 + j] = (uint8_t)(((sfn >> 2) >> (7 - j)) & 1);
+        m2sdr_lte_bch_encode(mib, 1, sig->cell_id, bch);
+        pbch_at = (sfn & 3) * LTE_PBCH_FRAME;
+
+        for (ns = 0; ns < 20; ns++) {
+            for (l = 0; l < 7; l++) {
+                const int cp = (l ? 9 : 10) * d;
+                const bool centre_sym = (ns == 0 || ns == 10) && (l == 5 || l == 6);
+
+                memset(grid, 0, (size_t)k * sizeof(*grid));
+                if (centre_sym && l == 5)
+                    m2sdr_lte_sss(sig->cell_id / 3, sig->cell_id % 3, ns == 10, sss);
+                if (l == 0 || l == 4)
+                    m2sdr_lte_crs(sig->cell_id, ns, l, crs);
+                for (a = 0; a < k; a++) {
+                    const bool centre = a >= k / 2 - 36 && a < k / 2 + 36;
+
+                    if ((l == 0 || l == 4) && (a % 6) == ((l ? 3 : 0) + sig->cell_id) % 6) {
+                        grid[a] = crs[a / 6 - sig->n_rb + LTE_MAX_RB];
+                    } else if (centre && centre_sym) {
+                        const int at = a - (k / 2 - 31);
+                        if (at >= 0 && at < LTE_SYNC_LEN)
+                            grid[a] = l == 6 ? pss[at] : sss[at];
+                    } else if (centre && ns == 1 && l < 4) {
+                        if (l < 2 && (a % 3) == (sig->cell_id % 3))
+                            continue;
+                        grid[a] = (float)M_SQRT1_2 * ((1 - 2 * bch[pbch_at]) + I * (1 - 2 * bch[pbch_at + 1]));
+                        pbch_at += 2;
+                    } else if ((ns & 1) == 0 && l < 3) {
+                        continue;                           /* Control region: left empty. */
+                    } else if (a / 12 < sig->n_rb / 2) {
+                        const int m = ns % 3;
+                        grid[a] = cons[m][(int)(rng_uniform() * ncons[m]) % ncons[m]];
+                    }
+                }
+                memset(fd, 0, (size_t)n * sizeof(*fd));
+                for (a = 0; a < k; a++) {
+                    const int sub = a < k / 2 ? a - k / 2 : a - k / 2 + 1;
+                    fd[(sub + n) % n] = grid[a];
+                }
+                m2sdr_fft_run(fft, fd, td);
+                if (pos + (size_t)(cp + n) > max)
+                    goto done;
+                for (j = 0; j < cp; j++)
+                    x[pos++] = (float)amp * td[n - cp + j];
+                for (j = 0; j < n; j++)
+                    x[pos++] = (float)amp * td[j];
+            }
+        }
+    }
+done:
+    for (i = 0; i < pos; i++)
+        x[i] *= (float complex)cexp(2.0 * M_PI * I * sig->cfo_hz * (double)i / fs);
+    /* An element is amp after the FFT of the analysis: noise of evm * amp per element is
+     * evm^2 * amp^2 * n per sample. */
+    if (sig->evm > 0) {
+        const double power = sig->evm * sig->evm * amp * amp * n;
+        for (i = 0; i < pos; i++) {
+            const double r = sqrt(-power * log(rng_uniform())), ph = 2.0 * M_PI * rng_uniform();
+            x[i] += (float)(r * cos(ph)) + I * (float)(r * sin(ph));
+        }
+    }
+    m2sdr_fft_free(fft);
+    free(grid);
+    free(fd);
+    free(td);
+    return pos;
+}
+
+static void test_lte(void)
+{
+    static const struct lte_signal signals[] = {
+        {   0,  6, 100, 0,    0.0, 0.02,  1234 },
+        { 388, 15, 517, 1,  812.0, 0.03,  7777 },
+        { 503, 25,   2, 2, -6400.0, 0.02, 30001 },
+        { 141, 25, 1023, 2, 11300.0, 0.05,   500 },
+        { 250, 50,  77, 3,  -150.0, 0.02, 99999 },
+    };
+    const size_t max = (size_t)(0.052 * 1920000.0 * 8);
+    float complex *x = malloc(max * sizeof(*x));
+    struct m2sdr_lte_result *res = malloc(sizeof(*res));
+    unsigned i;
+    int ns, rb;
+
+    if (!x || !res) {
+        failures++;
+        return;
+    }
+    for (i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
+        const struct lte_signal *sig = &signals[i];
+        const double fs = 1920000.0 * (1 << sig->rate_index);
+        const size_t count = make_lte(x, (size_t)(0.052 * fs), sig);
+        int wrong = 0, empty_used = 0, used = 0;
+
+        printf("LTE, cell %d, %d blocks, %.2f MSPS, offset %.0f Hz:\n", sig->cell_id, sig->n_rb, fs / 1e6, sig->cfo_hz);
+        CHECK("analyse", m2sdr_lte_analyse(x, count, fs, res) == 0);
+        CHECK("cell found", res->found);
+        CHECK_NEAR("cell identity", res->cell_id, sig->cell_id, 0);
+        CHECK_NEAR("carrier offset (Hz)", res->freq_error_hz, sig->cfo_hz, 5.0);
+        CHECK("MIB", res->mib);
+        CHECK_NEAR("antenna ports", res->ports, 1, 0);
+        CHECK_NEAR("resource blocks", res->n_rb, sig->n_rb, 0);
+        /* The frame analysed is the first whole one: the first or the second sent. */
+        CHECK("frame number", res->sfn == sig->sfn % 1024 || res->sfn == (sig->sfn + 1) % 1024);
+        CHECK_NEAR("blocks analysed", res->analysed_rb, sig->n_rb, 0);
+        CHECK_NEAR("RSRP (dBFS)", res->rsrp_db, 20.0 * log10(0.02), 0.3);
+        CHECK_NEAR("PSS power (dBFS)", res->pss_db, 20.0 * log10(0.02), 0.5);
+        CHECK_NEAR("reference signal EVM (%)", 100.0 * res->rs_evm, 100.0 * sig->evm, 30.0 * sig->evm);
+        CHECK_NEAR("PBCH EVM (%)", 100.0 * res->pbch_evm, 100.0 * sig->evm, 40.0 * sig->evm);
+        CHECK("data analysed", res->data);
+        CHECK_NEAR("data EVM (%)", 100.0 * res->data_evm, 100.0 * sig->evm, 40.0 * sig->evm);
+        /* The lower half of the blocks carries QPSK, 16QAM, 64QAM by slot; the rest is empty. */
+        for (ns = 0; ns < 20; ns++) {
+            static const enum m2sdr_modulation expect[3] = { M2SDR_MOD_QPSK, M2SDR_MOD_16QAM, M2SDR_MOD_64QAM };
+            for (rb = 0; rb < sig->n_rb; rb++) {
+                /* The block around the centre holds only synchronisation in some slots. */
+                if (rb < sig->n_rb / 2) {
+                    if (res->rb_modulation[ns][rb] != M2SDR_MOD_AUTO) {
+                        used++;
+                        if (res->rb_modulation[ns][rb] != expect[ns % 3])
+                            wrong++;
+                    }
+                } else if (res->rb_modulation[ns][rb] != M2SDR_MOD_AUTO) {
+                    empty_used++;
+                }
+            }
+        }
+        CHECK("blocks in use found", used >= 20 * (sig->n_rb / 2) - 12 && res->data_blocks == used + empty_used);
+        CHECK("their modulation", wrong == 0);
+        CHECK("empty blocks left out", empty_used == 0);
+    }
+
+    printf("LTE, no cell:\n");
+    memset(x, 0, max * sizeof(*x));
+    add_noise(x, 200000, 0.01);
+    CHECK("noise", m2sdr_lte_analyse(x, 200000, 1920000.0, res) == 0 && !res->found);
+    CHECK("bad sample rate", m2sdr_lte_analyse(x, 200000, 2000000.0, res) != 0);
+    CHECK("too short", m2sdr_lte_analyse(x, 20000, 1920000.0, res) != 0);
+    free(res);
+    free(x);
+}
+
+/* Frames of a cell as a capture file, to be analysed or sent: SC16, the same on two channels,
+ * five frames that can be played in a loop. */
+static int write_lte(const char *path)
+{
+    static const struct lte_signal sig = { 301, 25, 400, 2, 0.0, 0.0, 0, 0.012 };
+    const size_t max = 5 * 76800;
+    float complex *x = malloc(max * sizeof(*x));
+    FILE *f = fopen(path, "wb");
+    size_t count, i;
+
+    if (!x || !f)
+        return 1;
+    count = make_lte(x, max, &sig);
+    for (i = 0; i < count; i++) {
+        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
+                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
+        if (fwrite(v, sizeof(v), 1, f) != 1)
+            return 1;
+    }
+    free(x);
+    return fclose(f) == 0 && count == max ? 0 : 1;
+}
+
 /* Report mode of m2sdr_analyzer */
 /*-------------------------------*/
 
@@ -577,6 +797,35 @@ static int check_report(const char *path)
     return 0;
 }
 
+static int check_lte_report(const char *path)
+{
+    static char json[32768];
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f) {
+        printf("test_m2sdr_analysis: cannot open %s\n", path);
+        return 1;
+    }
+    n = fread(json, 1, sizeof(json) - 1, f);
+    fclose(f);
+    json[n] = '\0';
+    printf("LTE report of m2sdr_analyzer:\n");
+    CHECK_NEAR("cell identity", json_number(json, "lte", "cell_id"), 301, 0);
+    CHECK_NEAR("resource blocks", json_number(json, "lte", "n_rb"), 25, 0);
+    CHECK_NEAR("antenna ports", json_number(json, "lte", "ports"), 1, 0);
+    CHECK_NEAR("carrier offset (Hz)", json_number(json, "lte", "carrier_offset_hz"), 0.0, 2.0);
+    CHECK("reference signal EVM under 1 %", json_number(json, "lte", "rs_evm_percent") < 1.0);
+    CHECK("data EVM under 1 %", json_number(json, "lte", "data_evm_percent") < 1.0);
+    CHECK("data blocks", json_number(json, "lte", "data_blocks") >= 20 * 12 - 12);
+    if (failures) {
+        printf("test_m2sdr_analysis: %d FAILED\n", failures);
+        return 1;
+    }
+    printf("test_m2sdr_analysis: LTE report checked\n");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     float complex *x;
@@ -585,6 +834,10 @@ int main(int argc, char **argv)
         return write_capture(argv[2]);
     if (argc == 3 && strcmp(argv[1], "--check") == 0)
         return check_report(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--write-lte") == 0)
+        return write_lte(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-lte") == 0)
+        return check_lte_report(argv[2]);
 
     x = malloc(COUNT * sizeof(*x));
     if (!x)
@@ -596,6 +849,7 @@ int main(int argc, char **argv)
     free(x);
     test_phase_noise();
     test_demod();
+    test_lte();
     if (failures) {
         printf("test_m2sdr_analysis: %d FAILED\n", failures);
         return 1;

@@ -717,6 +717,7 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | Statistics | CCDF of the power next to the one of Gaussian noise, and Q against I |
 | Phase noise | L(f) of the strongest carrier, its amplitude noise, the floor of the board |
 | Modulation | Constellation, eye diagrams and error of each symbol of a PSK or QAM signal |
+| LTE | Cell, resource grid, data blocks and constellations of an LTE downlink carrier |
 
 The figures are next to the views, and `--report` prints the same ones for one capture:
 
@@ -800,6 +801,53 @@ m2sdr_analyzer --no-rf-init --freq 2490e6 --sample-rate 1.92e6 --view modulation
 > 1.6 % beside it, on one board through a cable. Beside the centre, the EVM of the board, TX
 > into RX, is 1.6 to 1.9 % (MER 35 dB) from 30000 to 1000000 symbols/s.
 
+#### LTE downlink {#sw-analyzer-lte}
+
+The LTE view, and `--lte` with `--report`, analyse one frame of an LTE downlink carrier, FDD
+with a normal cyclic prefix, tuned on its centre.
+
+```sh
+m2sdr_analyzer --freq 1852.5e6 --sample-rate 7.68e6 --view lte
+m2sdr_analyzer --freq 1852.5e6 --sample-rate 7.68e6 --report --lte
+```
+
+The sample rate is one of LTE, and sets how much of the carrier is analysed:
+
+| Sample rate | Resource blocks analysed around the centre |
+|-------------|-----------------------------------------------|
+| 1.92 MSPS | 6 |
+| 3.84 MSPS | 15 |
+| 7.68 MSPS | 25 |
+| 15.36 MSPS | 50 |
+| 30.72 MSPS | 100 |
+
+A carrier wider than the capture is still found and its MIB decoded, since the PSS, the SSS
+and the PBCH are in its six central blocks; a narrower one is analysed whole.
+
+| Figure | From |
+|---------------------------|---------------------------------------------------------------------|
+| Cell identity | PSS and SSS |
+| Carrier offset | Cyclic prefixes, then the reference signals from one slot to the next |
+| Resource blocks, antenna ports, frame number, PHICH | MIB, decoded from the PBCH with its CRC, for one or two antenna ports |
+| RSRP, RSSI, PSS and SSS power | Resource grid, in dBFS |
+| EVM of the reference signals | Each one against the channel given by its neighbours |
+| EVM of the PBCH | Its symbols against QPSK |
+| Blocks of data, their modulation and EVM | See below; one antenna port only |
+
+The view draws the resource grid of the frame, the blocks of data with their modulation, and
+the equalised symbols of the data, of the PBCH and of the reference signals.
+
+> [!IMPORTANT]
+> The control channels are not decoded, so the allocation and the modulation of the data are
+> not known. A block of data, a resource block in a slot, is counted as in use when it holds
+> power, and is taken as the constellation that it fits best among QPSK, 16QAM, 64QAM and
+> 256QAM; its EVM is against the nearest points. This is a diagnostic, not the EVM of a
+> conformance test. With two antenna ports or more, the data are sent on several ports or
+> layers that one receiver does not separate: their blocks are then not analysed, and the
+> figures of the cell, of the reference signals and of the PBCH remain.
+
+Not supported: TDD, the extended cyclic prefix, a PBCH on four antenna ports, the uplink.
+
 #### Phase noise {#sw-analyzer-pn}
 
 The Phase noise view, and `--phase-noise` with `--report`, measure the strongest carrier of the
@@ -862,8 +910,8 @@ the next, and its own noise sets a floor near -92 dBc/Hz.
 The measurements are functions of libm2sdr, declared in `libm2sdr/m2sdr_analysis.h`:
 `m2sdr_psd_compute()` gives an averaged spectrum, and `m2sdr_psd_peaks()`, `m2sdr_psd_tone()`,
 `m2sdr_psd_acpr()`, `m2sdr_psd_obw()` and `m2sdr_iq_stats()` the figures. `m2sdr_phase_noise()`
-gives the phase noise of a carrier and `m2sdr_demod()` the symbols and the EVM of a PSK or QAM
-signal.
+gives the phase noise of a carrier, `m2sdr_demod()` the symbols and the EVM of a PSK or QAM
+signal, and `m2sdr_lte_analyse()` the cell and the resource grid of an LTE downlink carrier.
 
 ### m2sdr_sata: SATA storage {#sw-sata}
 

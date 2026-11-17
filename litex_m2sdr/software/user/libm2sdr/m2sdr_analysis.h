@@ -278,6 +278,67 @@ int m2sdr_constellation(enum m2sdr_modulation modulation, float complex *points)
 int m2sdr_demod(const float complex *x, size_t count, double sample_rate,
                 const struct m2sdr_demod_config *cfg, struct m2sdr_demod_result *res);
 
+/* LTE downlink */
+/*--------------*/
+
+#define M2SDR_LTE_FRAME_SYMBOLS 140     /* Of a frame, normal cyclic prefix. */
+#define M2SDR_LTE_FRAME_SLOTS   20
+#define M2SDR_LTE_MAX_ANALYSED_RB 100
+#define M2SDR_LTE_MAX_SUBCARRIERS (12 * M2SDR_LTE_MAX_ANALYSED_RB)
+#define M2SDR_LTE_MAX_POINTS    4096
+
+/* One frame of an LTE downlink carrier, FDD with a normal cyclic prefix, tuned on its centre.
+ *
+ * The sample rate is 1.92 MSPS times 1, 2, 4, 8 or 16, and sets how much of the carrier is
+ * analysed: 6, 15, 25, 50 or 100 resource blocks around its centre, the whole carrier when it
+ * is not wider.
+ *
+ * The control channels are not decoded, so the allocation and the modulation of the data are
+ * not known: a block of data is taken as the constellation it fits best, and its EVM is
+ * against the nearest points. This is a diagnostic, not the EVM of a conformance test. With
+ * more than one antenna port, the data are sent on several ports or layers that one receiver
+ * does not separate: their blocks are then not analysed. */
+struct m2sdr_lte_result {
+    bool   found;               /* PSS and SSS found: the fields up to frame_offset are valid. */
+    int    cell_id;             /* Physical cell identity, 0 to 503. */
+    int    n_id_1, n_id_2;
+    double freq_error_hz;       /* Carrier, from the centre of the capture. */
+    double sync_quality;        /* PSS peak over the mean of its correlation. */
+    size_t frame_offset;        /* Sample of the start of the frame analysed. */
+    bool   mib;                 /* PBCH decoded, its CRC right: the four fields below are valid. */
+    int    ports;               /* Antenna ports of the cell: 1, 2 or 4. */
+    int    n_rb;                /* Resource blocks of the carrier. */
+    int    sfn;                 /* System frame number of the frame analysed. */
+    int    phich_duration;      /* 0: normal, 1: extended. */
+    int    phich_resource;      /* 0 to 3: one sixth, a half, one, two. */
+    int    analysed_rb;
+    int    subcarriers;         /* 12 * analysed_rb. */
+    double rsrp_db;             /* Mean power of a reference signal element of port 0, dBFS. */
+    double pss_db, sss_db;      /* Mean power of their elements, dBFS. */
+    double rssi_db;             /* Power of the band analysed, dBFS. */
+    double rs_evm;              /* Reference signals of port 0 against the channel around them. */
+    double pbch_evm;            /* PBCH symbols against QPSK. */
+    bool   data;                /* Data blocks analysed (one antenna port). */
+    double data_evm;            /* Over the blocks in use. */
+    int    data_blocks;         /* Resource blocks in use in the frame, of 20 slots each. */
+    enum m2sdr_modulation data_modulation;   /* The most used. */
+    /* Per slot and resource block: modulation (M2SDR_MOD_AUTO: empty or not analysed) and EVM. */
+    uint8_t rb_modulation[M2SDR_LTE_FRAME_SLOTS][M2SDR_LTE_MAX_ANALYSED_RB];
+    float   rb_evm[M2SDR_LTE_FRAME_SLOTS][M2SDR_LTE_MAX_ANALYSED_RB];
+    /* Power of each resource element, dBFS, the lowest subcarrier first. */
+    float   grid_db[M2SDR_LTE_FRAME_SYMBOLS][M2SDR_LTE_MAX_SUBCARRIERS];
+    /* Equalised symbols: data in use, reference signals and PBCH, the constellations scaled to
+     * a mean power of 1. */
+    int    ndata, nrs, npbch;
+    float complex data_points[M2SDR_LTE_MAX_POINTS];
+    float complex rs_points[M2SDR_LTE_MAX_POINTS];
+    float complex pbch_points[240];
+};
+
+/* Returns 0, or -1 on a bad argument (sample rate, less than 25 ms of samples) or an
+ * allocation failure. Without a cell, found = false. */
+int m2sdr_lte_analyse(const float complex *x, size_t count, double sample_rate, struct m2sdr_lte_result *res);
+
 #ifdef __cplusplus
 }
 #endif
