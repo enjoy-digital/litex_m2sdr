@@ -539,6 +539,7 @@ RX port and takes a few seconds.
 ./m2sdr_cal measure --apply --store earfcn:1300        # Trim the reference, store the result
 ./m2sdr_cal show                                       # Print the stored record
 ./m2sdr_rf --refclk-ppm stored                         # Use it at the RF initialisation
+./m2sdr_cal measure --refclk-ppm stored earfcn:1300    # Check it: what remains with the trim
 ```
 
 | Signal | Meaning | Method |
@@ -575,6 +576,11 @@ the carriers used, in a file of the host: `~/.config/litex_m2sdr/cal_<FPGA DNA>.
 `--store-flash` writes it in the SPI flash of the board, so that it follows the board from one
 host to another. `m2sdr_rf --refclk-ppm stored` reads the flash first, then the file, and refuses
 the record of another board.
+
+`measure --refclk-ppm PPM` trims the reference by a value first, or by the one of the record
+with `stored`, and reports what remains: this checks a stored calibration, close to zero while
+it holds. The error of the reference is then the trim plus what remains, and it is this sum that
+`--apply` and `--store` use, so that the same command refreshes a record.
 
 > [!WARNING]
 > `--store-flash` erases and writes one block of 64 KiB of the configuration flash, at offset

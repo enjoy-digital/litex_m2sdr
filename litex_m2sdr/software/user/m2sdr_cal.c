@@ -76,6 +76,8 @@ struct cal_options {
     uint32_t flash_offset;
     const char *sync;
     int64_t refclk_freq;
+    bool   trim_stored;            /* --refclk-ppm stored. */
+    double trim_ppm;               /* Trim of the reference during the measure. */
 };
 
 /* Helpers */
@@ -166,8 +168,8 @@ static bool confirm(const char *question, bool yes)
 /* Capture and measure */
 /*---------------------*/
 
-/* RFIC and RX stream for the captures. The reference is used without a trim: what is measured
- * is its error. */
+/* RFIC and RX stream for the captures. The reference is used without a trim, so that what is
+ * measured is its error, or with the trim of --refclk-ppm, and what is measured is what remains. */
 static int rf_setup(struct m2sdr_dev *dev, const struct cal_options *opt, double sample_rate,
                     int64_t bandwidth, double freq_hz)
 {
@@ -180,7 +182,7 @@ static int rf_setup(struct m2sdr_dev *dev, const struct cal_options *opt, double
     cfg.bandwidth      = bandwidth;
     cfg.rx_freq        = (int64_t)llround(freq_hz);
     cfg.tx_att         = 89;
-    cfg.refclk_ppm     = 0.0;
+    cfg.refclk_ppm     = opt->trim_ppm;
     cfg.channel_layout = M2SDR_CHANNEL_LAYOUT_2T2R;
     if (opt->refclk_freq)
         cfg.refclk_freq = opt->refclk_freq;
@@ -354,8 +356,16 @@ static int cmd_measure(struct m2sdr_dev *dev, const struct cal_options *opt,
     }
     spread = stddev_of(ppm, used);
     result = median_of(ppm, used);
-    printf("\nReference clock error: %+.3f ppm (%d signal%s, spread %.3f ppm). Positive: the clock runs fast.\n",
-           result, used, used == 1 ? "" : "s", spread);
+    if (opt->trim_ppm != 0.0) {
+        /* The errors are small: the one of the reference is the trim plus what remains. */
+        printf("\nResidual error with a trim of %+.3f ppm: %+.3f ppm (%d signal%s, spread %.3f ppm).\n",
+               opt->trim_ppm, result, used, used == 1 ? "" : "s", spread);
+        result += opt->trim_ppm;
+        printf("Reference clock error: %+.3f ppm. Positive: the clock runs fast.\n", result);
+    } else {
+        printf("\nReference clock error: %+.3f ppm (%d signal%s, spread %.3f ppm). Positive: the clock runs fast.\n",
+               result, used, used == 1 ? "" : "s", spread);
+    }
     if (used == 1)
         printf("One signal only: a second one, of another operator or band, confirms the result.\n");
     else if (spread > 0.5)
@@ -922,6 +932,8 @@ static void help(void)
            "      --channel N        RX channel, 1 or 2 (default: 1).\n"
            "      --sync MODE        Clock source: internal, external or fpga (default: internal).\n"
            "      --refclk-freq HZ   Reference frequency in Hz (default: 38400000).\n"
+           "      --refclk-ppm PPM   measure: trim the reference by PPM first, to check a value;\n"
+           "                         'stored': the value of the calibration record of the board.\n"
            "      --apply            Trim the reference by the result and measure again.\n"
            "\n"
            "Storage options:\n"
@@ -960,6 +972,7 @@ int main(int argc, char **argv)
         { "ppm",          no_argument,       NULL, 11 },
         { "sync",         required_argument, NULL, 12 },
         { "refclk-freq",  required_argument, NULL, 13 },
+        { "refclk-ppm",   required_argument, NULL, 14 },
         { NULL, 0, NULL, 0 }
     };
     struct m2sdr_cli_device cli_dev;
@@ -1046,6 +1059,15 @@ int main(int argc, char **argv)
             }
             opt.refclk_freq = v64;
             break;
+        case 14:
+            if (strcmp(optarg, "stored") == 0) {
+                opt.trim_stored = true;
+            } else if (m2sdr_cli_parse_double_range(optarg, -M2SDR_REFCLK_PPM_MAX, M2SDR_REFCLK_PPM_MAX, &opt.trim_ppm) != 0) {
+                m2sdr_cli_error("invalid refclk ppm '%s' (expected 'stored' or -%g to %g)", optarg,
+                                (double)M2SDR_REFCLK_PPM_MAX, (double)M2SDR_REFCLK_PPM_MAX);
+                return 1;
+            }
+            break;
         default:
             return 1;
         }
@@ -1095,9 +1117,34 @@ int main(int argc, char **argv)
 
     if (!m2sdr_cli_finalize_device(&cli_dev))
         return 1;
+    if ((opt.trim_stored || opt.trim_ppm != 0.0) && strcmp(cmd, "measure") != 0) {
+        m2sdr_cli_error("--refclk-ppm is for measure");
+        return 1;
+    }
+
     if (m2sdr_open(&dev, m2sdr_cli_device_id(&cli_dev)) != 0) {
         fprintf(stderr, "Could not open device: %s\n", m2sdr_cli_device_id(&cli_dev));
         return 1;
+    }
+
+    if (opt.trim_stored) {
+        struct m2sdr_cal_record rec;
+        enum m2sdr_cal_source source = M2SDR_CAL_SOURCE_NONE;
+
+        if (opt.file) {
+            if (m2sdr_cal_file_load(opt.file, &rec) == 0)
+                source = M2SDR_CAL_SOURCE_FILE;
+        } else {
+            source = m2sdr_cal_load(dev, opt.flash_offset, &rec);
+        }
+        if (source == M2SDR_CAL_SOURCE_NONE) {
+            fprintf(stderr, "No calibration record for this board: run m2sdr_cal measure --store.\n");
+            m2sdr_close(dev);
+            return 1;
+        }
+        opt.trim_ppm = rec.refclk_ppm;
+        printf("RefClk trim %+.3f ppm, from the calibration record in %s.\n", rec.refclk_ppm,
+               source == M2SDR_CAL_SOURCE_FLASH ? "the SPI flash" : "its file");
     }
 
     if (strcmp(cmd, "scan") == 0)

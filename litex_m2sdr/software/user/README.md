@@ -341,6 +341,7 @@ Relevant options:
 - `--max-ppm PPM` (largest error searched, default `15`)
 - `--rx-gain DB` (manual gain; default: slow AGC), `--channel N` (RX `1` or `2`)
 - `--sync MODE`, `--refclk-freq HZ` (as `m2sdr_rf`)
+- `--refclk-ppm PPM|stored` (`measure`: trim the reference first and report what remains, to check a value or the stored record)
 - `--apply` (trim the reference by the result and measure again)
 - `--store` (file `~/.config/litex_m2sdr/cal_<dna>.bin`, or `--file PATH`)
 - `--store-flash` (SPI flash of the board, `--flash-offset N`, default `0x00ff0000`; asks first, `-y` to skip)
@@ -353,6 +354,7 @@ Examples:
 ./m2sdr_cal measure lte:816e6 earfcn:1300 arfcn:85
 ./m2sdr_cal measure --apply --store earfcn:1300 arfcn:85
 ./m2sdr_rf --refclk-ppm stored
+./m2sdr_cal measure --refclk-ppm stored earfcn:1300
 ```
 
 ### m2sdr_gen
