@@ -552,7 +552,8 @@ RX port and takes a few seconds.
 the error and the `measure` command for them. A band is given by its name (`lte20`, `lte3`,
 `gsm900`, see `--help`) or as a range, `lte:791e6-821e6` or `gsm:925e6-960e6`; without a band,
 the scan covers the LTE and GSM bands in use in Europe. The scan captures 5 MHz at a time at
-7.68 MSPS and tests the channel raster in it, 100 kHz for LTE and 200 kHz for GSM.
+7.68 MSPS and tests the channel raster in it, 100 kHz for LTE and 200 kHz for GSM, on the cores
+of the host. A band takes a few seconds, and the default scan about half a minute.
 
 An LTE carrier is identified on its centre only. From a raster point next to the centre the PSS
 still correlates, weaker, and the error read is wrong by 5 or 10 kHz, several ppm. The scan

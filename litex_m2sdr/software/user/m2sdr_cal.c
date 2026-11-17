@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <getopt.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -46,6 +47,7 @@
 #define CAL_MAX_REPEAT     64
 #define CAL_SETTLE_US      50000   /* After a retune: PLL lock and AGC. */
 #define CAL_BANDWIDTH_HZ   1400000
+#define CAL_OUTLIER_PPM     1.0     /* A capture further than this from the median of its signal is left out. */
 
 struct cal_signal {
     enum m2sdr_cal_signal kind;
@@ -284,8 +286,18 @@ static int measure_signal(struct m2sdr_dev *dev, const struct cal_options *opt, 
     }
     sig->power_db = power / opt->repeat;
     if (sig->found) {
-        sig->spread_ppm = stddev_of(ppm, sig->found);
-        sig->ppm        = median_of(ppm, sig->found);
+        /* A capture can pick the offset one LTE subcarrier away, 15 kHz: the captures far from
+         * the median are left out, and the count shows it. */
+        const double centre = median_of(ppm, sig->found);
+        int used = 0;
+
+        for (r = 0; r < sig->found; r++) {
+            if (fabs(ppm[r] - centre) < CAL_OUTLIER_PPM)
+                ppm[used++] = ppm[r];
+        }
+        sig->found      = used;
+        sig->spread_ppm = stddev_of(ppm, used);
+        sig->ppm        = median_of(ppm, used);
     }
     return 0;
 }
@@ -326,7 +338,7 @@ static int cmd_measure(struct m2sdr_dev *dev, const struct cal_options *opt,
             ppm[used++] = signals[i].ppm;
     }
 
-    printf("\n%-18s %10s %10s %9s %s\n", "Signal", "Error", "Spread", "Power", "Found");
+    printf("\n%-18s %10s %10s %9s %s\n", "Signal", "Error", "Spread", "Power", "Used");
     for (i = 0; i < nsignals; i++) {
         if (signals[i].found)
             printf("%-18s %+9.3f ppm %6.3f ppm %6.1f dBFS %d/%d\n", signals[i].name, signals[i].ppm,
@@ -521,6 +533,55 @@ static int cmp_found(const void *a, const void *b)
     return (x->freq_hz > y->freq_hz) - (x->freq_hz < y->freq_hz);
 }
 
+/* Points of one capture, shared by the threads that test them. */
+#define SCAN_MAX_POINTS  64
+#define SCAN_MAX_THREADS 32
+
+struct scan_job {
+    const float complex *x;
+    size_t count;
+    bool   lte;
+    double max_ppm;
+    struct {
+        int    index;
+        double freq_hz, offset_hz;
+        struct m2sdr_cal_estimate est;
+    } point[SCAN_MAX_POINTS];
+    int npoints;
+    int next;
+    bool failed;
+    pthread_mutex_t lock;
+};
+
+static void *scan_worker(void *arg)
+{
+    struct scan_job *job = arg;
+    float complex *y = malloc((job->count / M2SDR_CAL_SCAN_DECIM + 1) * sizeof(*y));
+
+    for (;;) {
+        size_t ny = 0;
+        int k, rc;
+
+        pthread_mutex_lock(&job->lock);
+        k = job->next < job->npoints ? job->next++ : -1;
+        if (!y)
+            job->failed = true;
+        pthread_mutex_unlock(&job->lock);
+        if (k < 0 || !y)
+            break;
+        rc = m2sdr_cal_channelize(job->x, job->count, job->point[k].offset_hz, y, &ny);
+        if (rc == 0) {
+            const double max_cfo_hz = job->max_ppm * 1e-6 * job->point[k].freq_hz;
+            rc = job->lte ? m2sdr_cal_lte_estimate(y, ny, max_cfo_hz, &job->point[k].est)
+                          : m2sdr_cal_gsm_estimate(y, ny, max_cfo_hz, &job->point[k].est);
+        }
+        if (rc != 0)
+            job->point[k].est.found = false;
+    }
+    free(y);
+    return NULL;
+}
+
 /* The PSS of an LTE carrier is also seen, weaker, on the raster points next to its centre: of
  * the detections close to each other, the strongest PSS is the carrier. Detections of the same
  * frequency are one. Returns the number kept, sorted, at the start of the table. */
@@ -558,15 +619,16 @@ static int cmd_scan(struct m2sdr_dev *dev, const struct cal_options *opt,
     const size_t max_count = (size_t)(SCAN_GSM_S * SCAN_SAMPLE_RATE);
     struct scan_found *found;
     int16_t *raw;
-    float complex *x, *y;
+    float complex *x;
+    long cores = sysconf(_SC_NPROCESSORS_ONLN);
+    const int nthreads = cores < 1 ? 1 : cores > SCAN_MAX_THREADS ? SCAN_MAX_THREADS : (int)cores;
     int nfound = 0, kept = 0, status = 1;
     int r, i, j;
 
     raw   = malloc(((max_count * 2 + per_buf - 1) / per_buf + 1) * per_buf * 2 * sizeof(*raw));
     x     = malloc(max_count * sizeof(*x));
-    y     = malloc((max_count / M2SDR_CAL_SCAN_DECIM + 1) * sizeof(*y));
     found = calloc(SCAN_MAX_FOUND, sizeof(*found));
-    if (!raw || !x || !y || !found) {
+    if (!raw || !x || !found) {
         fprintf(stderr, "Out of memory\n");
         goto out;
     }
@@ -597,16 +659,23 @@ static int cmd_scan(struct m2sdr_dev *dev, const struct cal_options *opt,
             {
                 const int npoints = (int)llround(SCAN_STEP_HZ / raster);
                 const int margin  = lte ? 2 : 0;
-                bool tested[64 + 4] = { false };
-                bool hit[64 + 4]    = { false };
-                int pass, k;
+                bool tested[SCAN_MAX_POINTS] = { false };
+                bool hit[SCAN_MAX_POINTS]    = { false };
+                struct scan_job job;
+                int pass, k, t;
 
                 for (pass = 0; pass < (lte ? 2 : 1); pass++) {
+                    pthread_t threads[SCAN_MAX_THREADS];
+                    int started = 0;
+
+                    memset(&job, 0, sizeof(job));
+                    job.x = x;
+                    job.count = count;
+                    job.lte = lte;
+                    job.max_ppm = opt->max_ppm;
+                    pthread_mutex_init(&job.lock, NULL);
                     for (k = -margin; k < npoints + margin; k++) {
-                        struct m2sdr_cal_estimate est;
-                        size_t ny = 0;
                         bool want;
-                        int rc;
 
                         f = centre - SCAN_STEP_HZ / 2 + k * raster;
                         if (f < first - 1.0 || f > last + 1.0 || tested[k + margin])
@@ -626,21 +695,37 @@ static int cmd_scan(struct m2sdr_dev *dev, const struct cal_options *opt,
                         if (!want)
                             continue;
                         tested[k + margin] = true;
-                        if (m2sdr_cal_channelize(x, count, f - centre, y, &ny) != 0)
-                            goto out;
-                        rc = lte ? m2sdr_cal_lte_estimate(y, ny, opt->max_ppm * 1e-6 * f, &est)
-                                 : m2sdr_cal_gsm_estimate(y, ny, opt->max_ppm * 1e-6 * f, &est);
-                        if (rc != 0 || !est.found || nfound >= SCAN_MAX_FOUND)
+                        job.point[job.npoints].index     = k + margin;
+                        job.point[job.npoints].freq_hz   = f;
+                        job.point[job.npoints].offset_hz = f - centre;
+                        job.npoints++;
+                    }
+                    /* The points of a capture are independent: one thread each, up to the cores. */
+                    for (t = 0; t < nthreads && t < job.npoints; t++) {
+                        if (pthread_create(&threads[started], NULL, scan_worker, &job) == 0)
+                            started++;
+                    }
+                    if (!started)
+                        (void)scan_worker(&job);
+                    for (t = 0; t < started; t++)
+                        pthread_join(threads[t], NULL);
+                    pthread_mutex_destroy(&job.lock);
+                    if (job.failed)
+                        goto out;
+                    for (k = 0; k < job.npoints; k++) {
+                        const struct m2sdr_cal_estimate *est = &job.point[k].est;
+
+                        if (!est->found || nfound >= SCAN_MAX_FOUND)
                             continue;
                         if (pass == 0)
-                            hit[k + margin] = true;
+                            hit[job.point[k].index] = true;
                         found[nfound].kind     = range->kind;
-                        found[nfound].freq_hz  = f;
-                        found[nfound].ppm      = m2sdr_cal_refclk_ppm(est.cfo_hz, f);
-                        found[nfound].power_db = est.power_db;
-                        found[nfound].quality  = est.quality;
-                        found[nfound].count    = est.count;
-                        found[nfound].id       = est.id;
+                        found[nfound].freq_hz  = job.point[k].freq_hz;
+                        found[nfound].ppm      = m2sdr_cal_refclk_ppm(est->cfo_hz, job.point[k].freq_hz);
+                        found[nfound].power_db = est->power_db;
+                        found[nfound].quality  = est->quality;
+                        found[nfound].count    = est->count;
+                        found[nfound].id       = est->id;
                         nfound++;
                     }
                 }
@@ -729,7 +814,6 @@ out:
     (void)m2sdr_stream_deactivate(dev, M2SDR_RX);
     free(raw);
     free(x);
-    free(y);
     free(found);
     return status;
 }
