@@ -14,8 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../m2sdr_cal_dsp.h"
-#include "../m2sdr_cal_store.h"
+#include "../libm2sdr/m2sdr_cal.h"
 #include "../kissfft/kiss_fft.h"
 
 #define FS M2SDR_CAL_SAMPLE_RATE

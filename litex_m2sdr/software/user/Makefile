@@ -134,6 +134,8 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_utils.o \
 	libm2sdr/m2sdr_json.o \
 	libm2sdr/m2sdr_sigmf.o \
+	libm2sdr/m2sdr_cal.o \
+	libm2sdr/m2sdr_cal_dsp.o \
 	libm2sdr/m2sdr_hal_litepcie.o \
 	libm2sdr/m2sdr_hal_liteeth.o \
 	liblitepcie/litepcie_dma.o \
@@ -284,16 +286,14 @@ PTHREAD_LIBS := -pthread
 m2sdr_util: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_util.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_util.o $(M2SDR_LINK_LIBS)
 
-CAL_STORE_OBJS = m2sdr_cal_store.o m2sdr_cal_dev.o
+m2sdr_rf: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_rf.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_rf.o $(M2SDR_LINK_LIBS)
 
-m2sdr_rf: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(CAL_STORE_OBJS) m2sdr_rf.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(CAL_STORE_OBJS) m2sdr_rf.o $(M2SDR_LINK_LIBS)
+m2sdr_cal: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_cal.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_cal.o $(M2SDR_LINK_LIBS)
 
-m2sdr_cal: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(CAL_STORE_OBJS) m2sdr_cal_dsp.o m2sdr_cal.o kissfft/kiss_fft.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(CAL_STORE_OBJS) m2sdr_cal_dsp.o m2sdr_cal.o kissfft/kiss_fft.o $(M2SDR_LINK_LIBS)
-
-tests/test_m2sdr_cal: tests/test_m2sdr_cal.o m2sdr_cal_dsp.o m2sdr_cal_store.o kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_cal.o m2sdr_cal_dsp.o m2sdr_cal_store.o kissfft/kiss_fft.o -lm
+tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_cal.o kissfft/kiss_fft.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
 m2sdr_play: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_play.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_play.o $(M2SDR_LINK_LIBS) $(PTHREAD_LIBS)
@@ -429,6 +429,7 @@ install_dev: $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 	install -d $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_sigmf.h $(PREFIX)/include/litex_m2sdr/libm2sdr
+	install -m 644 libm2sdr/m2sdr_cal.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -d $(PREFIX)/share/litex_m2sdr/examples
 	@for ex in example_sync_rx example_sync_tx example_tone_tx example_rx_n; do \
 		if [ -f ../../doc/libm2sdr/$$ex.c ]; then \

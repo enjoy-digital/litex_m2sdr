@@ -37,8 +37,7 @@
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
-#include "m2sdr_cal_dsp.h"
-#include "m2sdr_cal_store.h"
+#include "m2sdr_cal.h"
 
 /* Constants */
 /*-----------*/

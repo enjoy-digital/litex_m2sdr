@@ -12,8 +12,83 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "m2sdr_cal_dsp.h"
-#include "kissfft/kiss_fft.h"
+#include "m2sdr_cal.h"
+
+/* FFT */
+/*-----*/
+
+/* Radix-2 FFT of the short blocks used here (64 to 256 points): the library has no FFT
+ * dependency. The inverse is not scaled. */
+typedef struct { float r, i; } cal_cpx;
+
+struct cal_fft {
+    int n;
+    float complex *w;              /* n / 2 twiddles. */
+    unsigned short *rev;           /* Bit-reversed indexes. */
+};
+
+static void cal_fft_free(struct cal_fft *fft)
+{
+    if (fft) {
+        free(fft->w);
+        free(fft->rev);
+        free(fft);
+    }
+}
+
+static struct cal_fft *cal_fft_alloc(int n, int inverse)
+{
+    struct cal_fft *fft = calloc(1, sizeof(*fft));
+    int i, j, bits = 0;
+
+    if (!fft || n < 2 || (n & (n - 1)))
+        goto fail;
+    while ((1 << bits) < n)
+        bits++;
+    fft->n   = n;
+    fft->w   = malloc((size_t)(n / 2) * sizeof(*fft->w));
+    fft->rev = malloc((size_t)n * sizeof(*fft->rev));
+    if (!fft->w || !fft->rev)
+        goto fail;
+    for (i = 0; i < n / 2; i++)
+        fft->w[i] = (float complex)cexp((inverse ? 2.0 : -2.0) * M_PI * I * i / n);
+    for (i = 0; i < n; i++) {
+        unsigned r = 0;
+        for (j = 0; j < bits; j++)
+            r |= (unsigned)((i >> j) & 1) << (bits - 1 - j);
+        fft->rev[i] = (unsigned short)r;
+    }
+    return fft;
+
+fail:
+    cal_fft_free(fft);
+    return NULL;
+}
+
+static void cal_fft(const struct cal_fft *fft, const cal_cpx *in, cal_cpx *out)
+{
+    const int n = fft->n;
+    float complex v[256];
+    int i, k, len;
+
+    for (i = 0; i < n; i++)
+        v[fft->rev[i]] = in[i].r + I * in[i].i;
+    for (len = 2; len <= n; len <<= 1) {
+        const int half = len / 2, step = n / len;
+        for (i = 0; i < n; i += len) {
+            for (k = 0; k < half; k++) {
+                const float complex a = v[i + k];
+                const float complex b = v[i + k + half] * fft->w[k * step];
+                v[i + k]        = a + b;
+                v[i + k + half] = a - b;
+            }
+        }
+    }
+    for (i = 0; i < n; i++) {
+        out[i].r = crealf(v[i]);
+        out[i].i = cimagf(v[i]);
+    }
+}
 
 #define FS M2SDR_CAL_SAMPLE_RATE
 
@@ -168,8 +243,8 @@ double m2sdr_cal_arfcn_to_hz(unsigned arfcn)
 /* PSS of root u in the time domain, LTE_N samples (TS 36.211 6.11.1). */
 static void lte_pss(unsigned u, float complex *p)
 {
-    kiss_fft_cfg cfg = kiss_fft_alloc(LTE_N, 1, NULL, NULL);
-    kiss_fft_cpx in[LTE_N], out[LTE_N];
+    struct cal_fft *cfg = cal_fft_alloc(LTE_N, 1);
+    cal_cpx in[LTE_N], out[LTE_N];
     int n;
 
     memset(in, 0, sizeof(in));
@@ -179,10 +254,10 @@ static void lte_pss(unsigned u, float complex *p)
         in[k].r = (float)cos(ph);
         in[k].i = (float)sin(ph);
     }
-    kiss_fft(cfg, in, out);
+    cal_fft(cfg, in, out);
     for (n = 0; n < LTE_N; n++)
         p[n] = (out[n].r + I * out[n].i) / (float)sqrt(62.0);
-    free(cfg);
+    cal_fft_free(cfg);
 }
 
 /* First PSS test, at half the sample rate. There the 62 subcarriers of the PSS fill the band,
@@ -197,8 +272,8 @@ static double lte_pss_first_test(const float complex *x, size_t count, size_t ha
 {
     static const unsigned roots[3] = { 25, 29, 34 };
     const size_t nd = half_frames * PRE_HALF + PRE_N;
-    kiss_fft_cfg cfg;
-    kiss_fft_cpx in[PRE_N], out[PRE_N];
+    struct cal_fft *cfg;
+    cal_cpx in[PRE_N], out[PRE_N];
     float complex ref[PRE_N];
     float complex *xd;
     float taps[PRE_TAPS];
@@ -210,9 +285,9 @@ static double lte_pss_first_test(const float complex *x, size_t count, size_t ha
     xd     = malloc(nd * sizeof(*xd));
     acc    = malloc(PRE_HALF * sizeof(*acc));
     energy = calloc(PRE_HALF, sizeof(*energy));
-    cfg    = kiss_fft_alloc(PRE_N, 1, NULL, NULL);
+    cfg    = cal_fft_alloc(PRE_N, 1);
     if (!xd || !acc || !energy || !cfg) {
-        free(xd); free(acc); free(energy); free(cfg);
+        free(xd); free(acc); free(energy); cal_fft_free(cfg);
         return -1.0;
     }
 
@@ -262,7 +337,7 @@ static double lte_pss_first_test(const float complex *x, size_t count, size_t ha
             in[bin].r = (float)cos(ph);
             in[bin].i = (float)sin(ph);
         }
-        kiss_fft(cfg, in, out);
+        cal_fft(cfg, in, out);
         for (n = 0; n < PRE_N; n++) {
             ref[n] = out[n].r - I * out[n].i;
             ref_energy += (double)out[n].r * out[n].r + (double)out[n].i * out[n].i;
@@ -292,7 +367,7 @@ static double lte_pss_first_test(const float complex *x, size_t count, size_t ha
             *best_time = tpeak * PRE_DECIM;
         }
     }
-    free(xd); free(acc); free(energy); free(cfg);
+    free(xd); free(acc); free(energy); cal_fft_free(cfg);
     return best_match >= PRE_MIN_MATCH ? best : 0.0;
 }
 
@@ -600,8 +675,8 @@ int m2sdr_cal_gsm_estimate(const float complex *x, size_t count, double max_cfo_
     float complex *y;
     float taps[GSM_TAPS];
     float win[GSM_WIN];
-    kiss_fft_cfg cfg;
-    kiss_fft_cpx in[GSM_WIN], out[GSM_WIN];
+    struct cal_fft *cfg;
+    cal_cpx in[GSM_WIN], out[GSM_WIN];
     double *freqs, *times;
     int nbursts = 0;
     size_t i, w, nwin;
@@ -623,9 +698,9 @@ int m2sdr_cal_gsm_estimate(const float complex *x, size_t count, double max_cfo_
     y     = malloc(ny * sizeof(*y));
     freqs = malloc(GSM_MAX_BURSTS * sizeof(*freqs));
     times = malloc(GSM_MAX_BURSTS * sizeof(*times));
-    cfg   = kiss_fft_alloc(GSM_WIN, 0, NULL, NULL);
+    cfg   = cal_fft_alloc(GSM_WIN, 0);
     if (!y || !freqs || !times || !cfg) {
-        free(y); free(freqs); free(times); free(cfg);
+        free(y); free(freqs); free(times); cal_fft_free(cfg);
         return -1;
     }
 
@@ -663,7 +738,7 @@ int m2sdr_cal_gsm_estimate(const float complex *x, size_t count, double max_cfo_
                 in[k].r = crealf(v);
                 in[k].i = cimagf(v);
             }
-            kiss_fft(cfg, in, out);
+            cal_fft(cfg, in, out);
             for (k = 0; k < GSM_WIN; k++) {
                 const double p = (double)out[k].r * out[k].r + (double)out[k].i * out[k].i;
                 total += p;
@@ -742,6 +817,6 @@ int m2sdr_cal_gsm_estimate(const float complex *x, size_t count, double max_cfo_
         est->count = nbursts;
     }
 
-    free(y); free(freqs); free(times); free(cfg);
+    free(y); free(freqs); free(times); cal_fft_free(cfg);
     return 0;
 }

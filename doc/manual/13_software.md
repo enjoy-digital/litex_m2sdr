@@ -582,6 +582,11 @@ with `stored`, and reports what remains: this checks a stored calibration, close
 it holds. The error of the reference is then the trim plus what remains, and it is this sum that
 `--apply` and `--store` use, so that the same command refreshes a record.
 
+The estimators and the record are functions of libm2sdr, declared in `libm2sdr/m2sdr_cal.h`:
+`m2sdr_cal_lte_estimate()` and `m2sdr_cal_gsm_estimate()` take a capture at 1.92 MSPS, and
+`m2sdr_cal_load()` reads the record of an open board. Another program can use them as the
+utility does.
+
 > [!WARNING]
 > `--store-flash` erases and writes one block of 64 KiB of the configuration flash, at offset
 > `0x00ff0000` by default: the end of the operational slot, above the bitstream. The utility asks

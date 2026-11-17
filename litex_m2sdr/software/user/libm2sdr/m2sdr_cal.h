@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * M2SDR reference clock calibration: carrier frequency offset of cellular downlink signals.
+ * M2SDR reference clock calibration: carrier frequency offset of cellular downlink signals,
+ * and the record of the result in a file or in the SPI flash of a board.
  *
  * This file is part of LiteX-M2SDR.
  *
@@ -8,8 +9,8 @@
  *
  */
 
-#ifndef M2SDR_CAL_DSP_H
-#define M2SDR_CAL_DSP_H
+#ifndef M2SDR_CAL_H
+#define M2SDR_CAL_H
 
 #include <complex.h>
 #include <stdbool.h>
@@ -19,6 +20,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* Estimators */
+/*------------*/
 
 /* Sample rate of the captures given to the estimators: the central 1.08 MHz of an LTE carrier
  * (PSS, SSS, PBCH) and a GSM carrier with its two neighbours fit in it. */
@@ -55,7 +59,7 @@ void m2sdr_cal_iq_to_complex(const int16_t *iq, size_t count, unsigned stride, u
  * The frequency must be the centre. From a raster point next to it, the PSS still correlates,
  * weaker, through the ambiguity of its Zadoff-Chu sequence between frequency and time, and the
  * offset read is wrong by a third or two thirds of the subcarrier spacing (5 or 10 kHz). The
- * scan of m2sdr_cal keeps the strongest of neighbouring detections for this reason. The PSS
+ * scan of the m2sdr_cal utility keeps the strongest of neighbouring detections for this reason. The PSS
  * cyclic prefix gives the offset modulo the subcarrier spacing, the PSS identifies the signal
  * and selects the offset within +-max_cfo_hz.
  * Returns 0, or -1 on a bad argument or allocation failure; a signal that is not found gives
@@ -88,8 +92,66 @@ double m2sdr_cal_arfcn_to_hz(unsigned arfcn);
 int m2sdr_cal_hz_to_earfcn(double freq_hz, unsigned *band);
 int m2sdr_cal_hz_to_arfcn(double freq_hz);
 
+/* Record */
+/*--------*/
+
+/* Size of the record, in a file or in the flash. */
+#define M2SDR_CAL_RECORD_BYTES 128
+#define M2SDR_CAL_NOTE_BYTES   64
+
+/* Default place of the record in the SPI flash: the last 64 KiB of the operational slot
+ * (8 MiB at 0x00800000). The bitstreams are compressed and end far below it, and a gateware
+ * update only erases the blocks that its image covers. */
+#define M2SDR_CAL_FLASH_OFFSET 0x00ff0000u
+
+struct m2sdr_cal_record {
+    double   refclk_ppm;                 /* Reference clock error (positive: fast). */
+    double   spread_ppm;                 /* Spread of the measurements behind it. */
+    double   temperature_c;              /* FPGA temperature at the measurement. */
+    uint64_t unix_time;                  /* Date of the measurement, seconds. */
+    uint64_t fpga_dna;                   /* Board the record belongs to. */
+    uint32_t signals;                    /* Number of signals measured. */
+    char     note[M2SDR_CAL_NOTE_BYTES]; /* Free text: the signals used. */
+};
+
+/* Record to and from its M2SDR_CAL_RECORD_BYTES bytes (little-endian, CRC-32 at the end).
+ * The decode returns 0, or -1 for anything else than a valid record: erased flash included. */
+void m2sdr_cal_record_encode(const struct m2sdr_cal_record *rec, uint8_t *buf);
+int  m2sdr_cal_record_decode(const uint8_t *buf, struct m2sdr_cal_record *rec);
+
+/* Record in a file. Return 0, or -1 with errno set (ENOENT: no record yet, EINVAL: not a
+ * valid record). */
+int m2sdr_cal_file_save(const char *path, const struct m2sdr_cal_record *rec);
+int m2sdr_cal_file_load(const char *path, struct m2sdr_cal_record *rec);
+
+/* Default file of a board: $XDG_CONFIG_HOME/litex_m2sdr/cal_<dna>.bin, or under ~/.config. */
+int m2sdr_cal_default_path(uint64_t fpga_dna, char *path, size_t len);
+
+/* Record of a board */
+/*-------------------*/
+
+struct m2sdr_dev;
+
+enum m2sdr_cal_source {
+    M2SDR_CAL_SOURCE_NONE  = 0,
+    M2SDR_CAL_SOURCE_FLASH = 1,
+    M2SDR_CAL_SOURCE_FILE  = 2,
+};
+
+/* Record in the SPI flash of the board, at flash_offset (M2SDR_CAL_FLASH_OFFSET by default).
+ * The save erases and writes the erase block of the offset, and reads it back. Return 0, or
+ * -1 (load: no valid record there). */
+int m2sdr_cal_flash_load(struct m2sdr_dev *dev, uint32_t flash_offset, struct m2sdr_cal_record *rec);
+int m2sdr_cal_flash_save(struct m2sdr_dev *dev, uint32_t flash_offset, const struct m2sdr_cal_record *rec);
+int m2sdr_cal_flash_erase(struct m2sdr_dev *dev, uint32_t flash_offset);
+
+/* Record of an open board: the flash first, then the default file of the board. A record of
+ * another board (FPGA DNA) is refused. Returns the source, M2SDR_CAL_SOURCE_NONE without one. */
+enum m2sdr_cal_source m2sdr_cal_load(struct m2sdr_dev *dev, uint32_t flash_offset,
+                                     struct m2sdr_cal_record *rec);
+
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* M2SDR_CAL_DSP_H */
+#endif /* M2SDR_CAL_H */
