@@ -75,6 +75,7 @@ BANKS = [
     ("eth_phy_5g",           "Ethernet PHY, 5GBASE-R (LiteEth)",  "A7_GTP_5G_BASER",       "liteeth/phy/serial/baser/wrappers/a7_gtp.py"),
     ("eth_rx_streamer",      "Ethernet RX streamer (LiteEth)",    "LiteEthStream2UDPTX",   "liteeth/frontend/stream.py"),
     ("eth_tx_streamer",      "Ethernet TX streamer (LiteEth)",    "LiteEthUDP2StreamRX",   "liteeth/frontend/stream.py"),
+    ("eth_tx_status",        "Ethernet TX status",                "UDPTXStatus",           "litex_m2sdr/gateware/udp.py"),
     ("eth_rx_mode",          "Ethernet RX mode",                  "BaseSoC",               "litex_m2sdr.py"),
     ("vrt_streamer",         "VRT streamer",                      "VRTSignalPacketStreamer", "litex_m2sdr/gateware/vrt.py"),
     ("eth_ptp",              "Ethernet PTP (LiteEth)",            "LiteEthPTP",            "liteeth/core/ptp.py"),
@@ -235,6 +236,10 @@ NOTES = {
     ],
     "eth_tx_streamer": [
         "This streamer receives the TX stream from the host in UDP datagrams.",
+    ],
+    "eth_tx_status": [
+        "Present with `--with-eth`, capability bit `eth_tx_status`. The host library reads the level",
+        "to send the TX stream at the rate at which the board transmits it.",
     ],
     "eth_rx_mode": [
         "Present with `--with-eth-vrt`. The shipped software does not write this register: the",
