@@ -9,8 +9,8 @@
  * Description:
  * This utility FM modulates a WAV audio file, or raw PCM from stdin, into interleaved I/Q
  * samples for the M2SDR. The audio is resampled to the rate of the modulator of libm2sdr
- * (m2sdr_fm.h), which does the pre-emphasis, the stereo multiplex and the modulation, and the
- * I/Q samples are written to a file or to stdout.
+ * (m2sdr_fm.h), which does the pre-emphasis, the stereo multiplex, the RDS subcarrier and the
+ * modulation, and the I/Q samples are written to a file or to stdout.
  *
  * Note: Only the formats of libsndfile are read. Convert the others with ffmpeg:
  *     ffmpeg -i input.mp3 input.wav
@@ -19,6 +19,7 @@
  *     ./m2sdr_rf --sample-rate 1e6 --tx-freq 100e6 --tx-att 10 --chan 1t1r
  *     ./m2sdr_fm_tx --sample-rate 1000000 --bits 12 music.wav - | ./m2sdr_play -
  *     ffmpeg -i music.mp3 -f s16le -ac 2 -ar 44100 - | ./m2sdr_fm_tx --sample-rate 1000000 --mode stereo --input-channels 2 --input-sample-rate 44100 - - | ./m2sdr_play -
+ *     ./m2sdr_fm_tx --mode stereo --rds-pi 0x1234 --rds-ps "M2SDR FM" --rds-rt "Hello from the LiteX-M2SDR" --rds-ct now music.wav - | ./m2sdr_play -
  *
  */
 
@@ -32,6 +33,7 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include <getopt.h>
+#include <time.h>
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
@@ -44,6 +46,9 @@
 #define MPX_FRAMES  4096   /* Resampled audio frames given to the modulator per pass. */
 
 #define DEFAULT_INPUT_RATE 44100.0  /* Raw PCM from stdin. */
+
+#define DEFAULT_RDS_PI 0x1000       /* Not an allocated code: set the one of the programme. */
+#define DEFAULT_RDS_PS "M2SDR"
 
 /* Sample conversion */
 /*-------------------*/
@@ -128,9 +133,9 @@ static int modulate_audio(const struct fm_tx_source *src, FILE *out, const struc
     int eof = 0;
 
     if (!tx) {
-        m2sdr_cli_error("unsupported FM settings (sample rate %.0f SPS: at least %.0f in %s, deviation at most 0.4 x sample rate)",
+        m2sdr_cli_error("unsupported FM settings (sample rate %.0f SPS: at least %.0f in %s, %.0f with RDS, deviation at most 0.4 x sample rate)",
             cfg->sample_rate, cfg->stereo ? M2SDR_FM_MIN_RATE_STEREO : M2SDR_FM_MIN_RATE_MONO,
-            cfg->stereo ? "stereo" : "mono");
+            cfg->stereo ? "stereo" : "mono", M2SDR_FM_MIN_RATE_RDS);
         return -1;
     }
 
@@ -239,6 +244,15 @@ static void help(int status) {
            "-i, --input-channels channels  Set input channels for stdin (1 or 2).\n"
            "-f, --input-sample-rate sps  Set input sample rate for stdin (default: 44100).\n"
            "\n"
+           "RDS (57 kHz subcarrier; any of these options enables it):\n"
+           "    --rds             Enable RDS with the default identification and name.\n"
+           "    --rds-pi PI       Programme Identification, four hexadecimal digits (default: 1000).\n"
+           "    --rds-ps NAME     Programme Service name, up to 8 characters (default: M2SDR).\n"
+           "    --rds-rt TEXT     RadioText, up to 64 characters.\n"
+           "    --rds-pty N       Programme Type, 0 to 31 (default: 0, none).\n"
+           "    --rds-ct TIME     Send the clock time each minute: 'now' for the system clock at the\n"
+           "                      first sample, or a UTC time in seconds since 1970.\n"
+           "\n"
            "Arguments:\n"
            "input                 Input WAV file or '-' for raw 16-bit PCM from stdin (MP3 not supported; convert using: ffmpeg -i input.mp3 input.wav).\n"
            "output                Output file for I/Q samples ('-' for stdout).\n"
@@ -267,6 +281,12 @@ static struct option options[] = {
     { "input-channels", required_argument, NULL, 'i' },
     { "input-sample-rate", required_argument, NULL, 'f' },
     { "input-samplerate", required_argument, NULL, 'f' },
+    { "rds",        no_argument,       NULL, 2 },
+    { "rds-pi",     required_argument, NULL, 3 },
+    { "rds-ps",     required_argument, NULL, 4 },
+    { "rds-rt",     required_argument, NULL, 5 },
+    { "rds-pty",    required_argument, NULL, 6 },
+    { "rds-ct",     required_argument, NULL, 7 },
     { NULL,         0,                 NULL, 0 }
 };
 
@@ -290,6 +310,9 @@ int main(int argc, char **argv) {
     int ret;
 
     m2sdr_fm_config_init(&cfg);
+    cfg.rds.pi    = DEFAULT_RDS_PI;
+    cfg.rds.music = true;
+    snprintf(cfg.rds.ps, sizeof(cfg.rds.ps), "%s", DEFAULT_RDS_PS);
 
     /* Parse command-line options */
     for (;;) {
@@ -348,6 +371,64 @@ int main(int argc, char **argv) {
                 return 1;
             }
             break;
+        case 2:
+            cfg.rds.enable = true;
+            break;
+        case 3: {
+            /* A PI is written in hexadecimal, with or without 0x. */
+            char *end;
+            unsigned long pi = strtoul(optarg, &end, 16);
+            if (end == optarg || *end != '\0' || pi > 0xffff) {
+                m2sdr_cli_error("invalid RDS PI '%s' (expected four hexadecimal digits, for instance F212)", optarg);
+                return 1;
+            }
+            cfg.rds.pi     = (uint16_t)pi;
+            cfg.rds.enable = true;
+            break;
+        }
+        case 4:
+            if (strlen(optarg) > M2SDR_FM_RDS_PS_LEN) {
+                m2sdr_cli_error("RDS PS '%s' is longer than %d characters", optarg, M2SDR_FM_RDS_PS_LEN);
+                return 1;
+            }
+            snprintf(cfg.rds.ps, sizeof(cfg.rds.ps), "%s", optarg);
+            cfg.rds.enable = true;
+            break;
+        case 5:
+            if (strlen(optarg) > M2SDR_FM_RDS_RT_LEN) {
+                m2sdr_cli_error("RDS RT is longer than %d characters", M2SDR_FM_RDS_RT_LEN);
+                return 1;
+            }
+            snprintf(cfg.rds.rt, sizeof(cfg.rds.rt), "%s", optarg);
+            cfg.rds.enable = true;
+            break;
+        case 6: {
+            int pty;
+            if (m2sdr_cli_parse_int_range(optarg, 0, 31, &pty) != 0) {
+                m2sdr_cli_error("invalid RDS PTY '%s' (expected 0 to 31)", optarg);
+                return 1;
+            }
+            cfg.rds.pty    = (uint8_t)pty;
+            cfg.rds.enable = true;
+            break;
+        }
+        case 7: {
+            time_t t;
+            struct tm local;
+            if (strcmp(optarg, "now") == 0) {
+                cfg.rds.ct_unix_time = (int64_t)time(NULL);
+            } else if (m2sdr_cli_parse_int64(optarg, &cfg.rds.ct_unix_time) != 0) {
+                m2sdr_cli_error("invalid RDS clock time '%s' (expected 'now' or seconds since 1970)", optarg);
+                return 1;
+            }
+            /* Local time offset of the host at this date, in half hours. */
+            t = (time_t)cfg.rds.ct_unix_time;
+            if (localtime_r(&t, &local))
+                cfg.rds.ct_offset = (int)lround((double)local.tm_gmtoff / 1800.0);
+            cfg.rds.ct     = true;
+            cfg.rds.enable = true;
+            break;
+        }
         default:
             exit(1);
         }

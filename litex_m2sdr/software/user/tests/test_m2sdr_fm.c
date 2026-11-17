@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
  * Tests of the FM modulator and demodulator: tones through the modulator, checked on the I/Q
- * samples with a discriminator of the test, then through the demodulator. With --tools, the
- * same round trip through m2sdr_fm_tx and m2sdr_fm_rx, with files and with pipes.
+ * samples with a discriminator of the test, then through the demodulator. RDS: blocks against
+ * the tables of EN 50067, the subcarrier on the multiplex, the decoder on a reference signal
+ * written from the standard, then encoder to decoder. With --tools, the same round trips
+ * through m2sdr_fm_tx and m2sdr_fm_rx, with files and with pipes.
  *
  * This file is part of LiteX-M2SDR.
  *
@@ -12,6 +14,7 @@
 
 #include <complex.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -160,6 +163,9 @@ static void impair(int16_t *iq, size_t count, double rate, const struct channel 
     }
 }
 
+/* RDS of the last demodulate(). */
+static struct m2sdr_fm_rds_info last_rds;
+
 /* Demodulates. Returns the audio; *frames is its length, *rate its rate. */
 static float *demodulate(const struct m2sdr_fm_config *cfg, const int16_t *iq, size_t count,
                          size_t rx_block, size_t *frames, double *rate, bool *locked)
@@ -184,6 +190,7 @@ static float *demodulate(const struct m2sdr_fm_config *cfg, const int16_t *iq, s
     }
     if (locked)
         *locked = m2sdr_fm_rx_pilot_locked(rx);
+    m2sdr_fm_rx_rds(rx, &last_rds);
     m2sdr_fm_rx_free(rx);
     return audio;
 }
@@ -695,6 +702,466 @@ static void test_config(void)
     m2sdr_fm_rx_free(NULL);
 }
 
+/* RDS */
+/*-----*/
+
+/* From EN 50067. Annex A, table A.1: offset words A, B, C, C', D. */
+static const char *const std_offsets[5] = {
+    "0011111100", "0110011000", "0101101000", "1101010000", "0110110100",
+};
+/* Annex B, table B.1: their syndromes with the parity-check matrix of figure B.3. */
+static const char *const std_syndromes[5] = {
+    "1111011000", "1111010100", "1001011100", "1111001100", "1001011000",
+};
+/* Annex B, figure B.1: check bits of the generator matrix, one row per information bit,
+ * m15 first. */
+static const char *const std_generator[16] = {
+    "0001110111", "1011100111", "1110101111", "1100001011", "1101011001", "1101110000",
+    "0110111000", "0011011100", "0001101110", "0000110111", "1011000111", "1110111111",
+    "1100000011", "1101011101", "1101110010", "0110111001",
+};
+/* Annex B, figure B.3: parity-check matrix, one row per received bit, first bit first. */
+static const char *const std_parity[26] = {
+    "1000000000", "0100000000", "0010000000", "0001000000", "0000100000", "0000010000",
+    "0000001000", "0000000100", "0000000010", "0000000001", "1011011100", "0101101110",
+    "0010110111", "1010000111", "1110011111", "1100010011", "1101010101", "1101110110",
+    "0110111011", "1000000001", "1111011100", "0111101110", "0011110111", "1010100111",
+    "1110001111", "1100011011",
+};
+
+static unsigned bin(const char *digits)
+{
+    unsigned v = 0;
+
+    while (*digits)
+        v = (v << 1) | (unsigned)(*digits++ - '0');
+    return v;
+}
+
+/* Block of the standard: check bits from the generator matrix, plus the offset word. */
+static uint32_t std_block(uint16_t data, int offset)
+{
+    unsigned check = 0;
+    int i;
+
+    for (i = 0; i < 16; i++)
+        if (data & (0x8000 >> i))
+            check ^= bin(std_generator[i]);
+    return ((uint32_t)data << 10) | (check ^ bin(std_offsets[offset]));
+}
+
+/* Syndrome of the standard: sum of the rows of the parity-check matrix of the bits set. */
+static unsigned std_syndrome(uint32_t block)
+{
+    unsigned syndrome = 0;
+    int i;
+
+    for (i = 0; i < 26; i++)
+        if (block & (1u << (25 - i)))
+            syndrome ^= bin(std_parity[i]);
+    return syndrome;
+}
+
+/* Blocks against the standard: its two worked examples, its generator matrix, its offset
+ * words and their syndromes. */
+static void test_rds_blocks(void)
+{
+    static const uint16_t words[] = { 0x0000, 0x0001, 0x8000, 0xffff, 0x1234, 0xe0cd, 0x4d32, 0xa5a5 };
+    uint16_t data;
+    unsigned w, bit;
+    int o;
+
+    /* Annex B.1.1: 0000000000000001 and 1111111111111111 with the offset word B. */
+    CHECK(m2sdr_fm_rds_encode_block(0x0001, M2SDR_FM_RDS_OFFSET_B) == bin("00000000000000010000100001"),
+          "block of 0x0001: 0x%07x", m2sdr_fm_rds_encode_block(0x0001, M2SDR_FM_RDS_OFFSET_B));
+    CHECK(m2sdr_fm_rds_encode_block(0xffff, M2SDR_FM_RDS_OFFSET_B) == bin("11111111111111110101010101"),
+          "block of 0xffff: 0x%07x", m2sdr_fm_rds_encode_block(0xffff, M2SDR_FM_RDS_OFFSET_B));
+
+    for (o = 0; o < 5; o++) {
+        /* An offset word alone is the block of the information word zero. */
+        CHECK(m2sdr_fm_rds_encode_block(0, (enum m2sdr_fm_rds_offset)o) == bin(std_offsets[o]),
+              "offset word %d", o);
+        CHECK(std_syndrome(bin(std_offsets[o])) == bin(std_syndromes[o]), "syndrome of offset %d", o);
+        for (w = 0; w < sizeof(words) / sizeof(words[0]); w++) {
+            const uint32_t block = m2sdr_fm_rds_encode_block(words[w], (enum m2sdr_fm_rds_offset)o);
+
+            CHECK(block == std_block(words[w], o), "block of 0x%04x, offset %d: 0x%07x, standard 0x%07x",
+                  words[w], o, block, std_block(words[w], o));
+            /* The decoder of the standard finds the syndrome of the offset word, whatever
+             * the information word. */
+            CHECK(std_syndrome(block) == bin(std_syndromes[o]), "syndrome of 0x%04x, offset %d", words[w], o);
+            data = 0;
+            CHECK(m2sdr_fm_rds_decode_block(block, &data) == o && data == words[w],
+                  "decode of 0x%04x, offset %d", words[w], o);
+            /* One wrong bit is never taken for the same block. */
+            for (bit = 0; bit < 26; bit++)
+                CHECK(m2sdr_fm_rds_decode_block(block ^ (1u << bit), &data) != o,
+                      "0x%04x, offset %d: error on bit %u not detected", words[w], o, bit);
+        }
+    }
+    CHECK(strcmp(m2sdr_fm_rds_pty_name(1), "News") == 0 && strcmp(m2sdr_fm_rds_pty_name(31), "Alarm") == 0 &&
+          m2sdr_fm_rds_pty_name(32)[0] == '\0', "PTY names");
+}
+
+/* Modified Julian Day of a date (EN 50067, annex G), year from 1900. */
+static long std_mjd(int year, int month, int day)
+{
+    const int l = (month == 1 || month == 2) ? 1 : 0;
+
+    return 14956 + day + (long)((year - l) * 365.25) + (long)((month + 1 + l * 12) * 30.6001);
+}
+
+/* 2026-11-17 12:35 UTC, the minute that the test signals announce. */
+#define CT_MJD   std_mjd(126, 11, 17)
+#define CT_UNIX  ((CT_MJD - 40587) * 86400LL + 12 * 3600 + 35 * 60)
+
+static void rds_test_config(struct m2sdr_fm_config *cfg)
+{
+    m2sdr_fm_config_init(cfg);
+    cfg->rds.enable = true;
+    cfg->rds.pi     = 0x1234;
+    cfg->rds.pty    = 10;
+    cfg->rds.music  = true;
+    cfg->rds.ct     = true;
+    cfg->rds.ct_unix_time = CT_UNIX - 2;   /* The minute comes two seconds into the signal. */
+    cfg->rds.ct_offset    = 2;
+    snprintf(cfg->rds.ps, sizeof(cfg->rds.ps), "M2SDR FM");
+    snprintf(cfg->rds.rt, sizeof(cfg->rds.rt), "LiteX-M2SDR RDS test, 0123456789");
+}
+
+/* What the decoder must have found in a signal of rds_test_config(). */
+static void rds_check(const struct m2sdr_fm_rds_info *info, const struct m2sdr_fm_config *cfg,
+                      double max_error_rate, const char *name)
+{
+    const double rate = info->blocks ? (double)info->block_errors / (double)info->blocks : 1.0;
+
+    CHECK(info->synced && info->groups > 20, "%s: sync %d, %llu groups", name, info->synced,
+          (unsigned long long)info->groups);
+    CHECK(rate <= max_error_rate, "%s: %llu wrong blocks of %llu", name,
+          (unsigned long long)info->block_errors, (unsigned long long)info->blocks);
+    CHECK(info->pi_valid && info->pi == cfg->rds.pi, "%s: PI 0x%04x", name, info->pi);
+    CHECK(info->pty == cfg->rds.pty && info->music == cfg->rds.music && info->ta == cfg->rds.ta &&
+          info->tp == cfg->rds.tp, "%s: PTY %u, flags %d %d %d", name, info->pty, info->music,
+          info->ta, info->tp);
+    CHECK(info->ps_valid && strcmp(info->ps, cfg->rds.ps) == 0, "%s: PS \"%s\"", name, info->ps);
+    CHECK(info->rt_valid && strcmp(info->rt, cfg->rds.rt) == 0, "%s: RT \"%s\"", name, info->rt);
+    CHECK(info->ct_valid && info->ct_unix_time == CT_UNIX && info->ct_offset == cfg->rds.ct_offset,
+          "%s: CT %lld (expected %lld), offset %d", name, (long long)info->ct_unix_time,
+          (long long)CT_UNIX, info->ct_offset);
+    NOTE("%s: %llu groups, %llu wrong blocks of %llu, PS \"%s\", RT \"%s\"", name,
+         (unsigned long long)info->groups, (unsigned long long)info->block_errors,
+         (unsigned long long)info->blocks, info->ps, info->rt);
+}
+
+/* RDS subcarrier of the modulator, measured on the multiplex with the pilot as reference:
+ * level, spectrum, phase against the third harmonic of the pilot, bit rate. */
+static void test_rds_signal(void)
+{
+    const struct audio silence = { 0 };
+    const double seconds = 1.0, block_rate = 1e6 / 128.0;
+    struct m2sdr_fm_config cfg;
+    size_t count, skip, n, blocks, i, k;
+    double pilot, pilot_phase, peak = 0.0, in_band, out_band = 0.0, angle, line, beside;
+    double complex axis = 0.0;
+    float *f, *power;
+    int16_t *iq;
+
+    rds_test_config(&cfg);
+    cfg.stereo = true;
+    cfg.tau    = 0.0;
+    iq = modulate(&cfg, &silence, seconds, 0, &count, NULL);
+    CHECK(iq != NULL, "modulator with RDS");
+    if (!iq)
+        return;
+    skip = (size_t)(0.1 * cfg.sample_rate);
+    n    = count - skip;
+    f    = discriminate(iq, count, cfg.sample_rate);
+    for (i = 0; i < count; i++)
+        f[i] /= 75000.0f;
+
+    /* The pilot keeps its level; with the subcarrier, the multiplex stays within the
+     * deviation. */
+    pilot = tone(f + skip, n, 1, cfg.sample_rate, 19000.0, &pilot_phase);
+    CHECK(fabs(pilot / M2SDR_FM_PILOT_LEVEL - 1.0) < 0.01, "pilot level with RDS %.4f", pilot);
+    for (i = skip; i < count; i++)
+        if (fabs(f[i]) > peak)
+            peak = fabs(f[i]);
+    peak -= M2SDR_FM_PILOT_LEVEL;
+    CHECK(peak > 0.9 * M2SDR_FM_RDS_LEVEL && peak < 1.8 * M2SDR_FM_RDS_LEVEL,
+          "RDS peak level %.4f for a nominal %.4f", peak, M2SDR_FM_RDS_LEVEL);
+    NOTE("RDS: peak %.4f of the deviation (nominal %.4f)", peak, M2SDR_FM_RDS_LEVEL);
+
+    /* Spectrum: data within 2.4 kHz of a suppressed 57 kHz carrier. */
+    in_band = tone(f + skip, n, 1, cfg.sample_rate, 57000.0 + 600.0, NULL) +
+              tone(f + skip, n, 1, cfg.sample_rate, 57000.0 - 900.0, NULL);
+    for (k = 0; k < 6; k++) {
+        static const double off[6] = { -8000.0, -4000.0, -2800.0, 2800.0, 4000.0, 8000.0 };
+        const double a = tone(f + skip, n, 1, cfg.sample_rate, 57000.0 + off[k], NULL);
+
+        if (a > out_band)
+            out_band = a;
+    }
+    CHECK(db(out_band / in_band) < -40.0, "RDS spectrum: %.1f dB out of band", db(out_band / in_band));
+    NOTE("RDS: %.1f dB beyond 2.8 kHz from the subcarrier", db(out_band / in_band));
+
+    /* The subcarrier removed with the third harmonic of the pilot, in blocks of 256 samples
+     * through a Hann window: complex data samples. Their square does not depend on the data
+     * and gives the axis they are on: sin(3 * phase) is the imaginary axis here. */
+    blocks = n / 128 - 2;
+    power  = malloc(blocks * sizeof(*power));
+    for (k = 0; k < blocks; k++) {
+        double complex z = 0.0;
+
+        for (i = 0; i < 256; i++) {
+            const size_t at = k * 128 + i;
+            const double p  = 3.0 * (2.0 * M_PI * 19000.0 * (double)at / cfg.sample_rate + pilot_phase);
+            const double w  = 0.5 - 0.5 * cos(2.0 * M_PI * (i + 0.5) / 256.0);
+
+            z += w * f[skip + at] * cexp(-I * p);
+        }
+        axis    += z * z;
+        power[k] = (float)(creal(z) * creal(z) + cimag(z) * cimag(z));
+    }
+    angle = remainder(carg(axis) - M_PI, 2.0 * M_PI) / 2.0;
+    CHECK(fabs(angle) < 2.0 * M_PI / 180.0, "RDS subcarrier %.1f degrees from the third harmonic of the pilot",
+          angle * 180.0 / M_PI);
+    NOTE("RDS: subcarrier %.2f degrees from the third harmonic of the pilot", angle * 180.0 / M_PI);
+
+    /* Bit rate: the power of a biphase signal has lines at the bit rate, 57000 / 48, and at
+     * twice the bit rate. */
+    line   = tone(power, blocks, 1, block_rate, 2.0 * 57000.0 / 48.0, NULL);
+    beside = tone(power, blocks, 1, block_rate, 2.0 * 57000.0 / 48.0 + 25.0, NULL) +
+             tone(power, blocks, 1, block_rate, 2.0 * 57000.0 / 48.0 - 25.0, NULL);
+    CHECK(line > 5.0 * beside, "RDS bit clock: line %.3g, beside %.3g", line, beside);
+    NOTE("RDS: line at twice the bit rate %.1f dB over its sides", db(line / beside));
+    free(power);
+    free(f);
+    free(iq);
+}
+
+/* Reference signal written from the standard, without the encoder of the library: groups as
+ * information words, check bits from the generator matrix, differential coding, square
+ * biphase symbols on a 57 kHz subcarrier, FM. */
+static int16_t *rds_reference(const uint16_t (*groups)[4], const unsigned char *version_b,
+                              size_t group_count, double seconds, double rate, size_t *count)
+{
+    const size_t n = (size_t)(seconds * rate);
+    const size_t bits = (size_t)(seconds * 1187.5) + 2;
+    unsigned char *coded = malloc(bits);
+    int16_t *iq = malloc(n * 2 * sizeof(*iq));
+    double phase = 0.0;
+    unsigned prev = 0;
+    size_t i;
+
+    for (i = 0; i < bits; i++) {
+        const size_t g = (i / 104) % group_count, block = (i % 104) / 26, bit = i % 26;
+        const int offset = (block == 3) ? 4 : (block == 2 && version_b[g]) ? 3 : (int)block;
+        const uint32_t word = std_block(groups[g][block], offset);
+
+        /* Table 1 of the standard: the output changes when the input is 1. */
+        prev    ^= (word >> (25 - bit)) & 1;
+        coded[i] = (unsigned char)prev;
+    }
+    for (i = 0; i < n; i++) {
+        const double t    = (double)i / rate;
+        const double pos  = t * 1187.5;
+        const size_t b    = (size_t)pos;
+        /* A 1 is a positive impulse then a negative one half a bit later. */
+        const double half = (pos - (double)b < 0.5) ? 1.0 : -1.0;
+        const double mpx  = 0.04 * (coded[b] ? half : -half) * cos(2.0 * M_PI * 57000.0 * t);
+
+        phase += 2.0 * M_PI * 75000.0 * mpx / rate;
+        iq[2 * i + 0] = (int16_t)lrint(2047.0 * cos(phase));
+        iq[2 * i + 1] = (int16_t)lrint(2047.0 * sin(phase));
+    }
+    free(coded);
+    *count = n;
+    return iq;
+}
+
+/* The decoder on the reference signal: groups 0A, 0B, 2A and 4A laid out as in the figures
+ * of the standard. */
+static void test_rds_reference(void)
+{
+    /* Block 2: group type (4 bits), version, TP, PTY (5 bits), then 5 bits of the group.
+     * PTY 5 = 00101, TP = 1. */
+    static const uint16_t groups[][4] = {
+        /* 0A, TA = 1, M/S = 0, DI, address 0 and 1: no AF (224, filler 205), "RE", "F ". */
+        { 0xc0de, 0x0000 | 0x0400 | (5 << 5) | 0x10 | 0, 0xe0cd, ('R' << 8) | 'E' },
+        { 0xc0de, 0x0000 | 0x0400 | (5 << 5) | 0x10 | 1, 0xe0cd, ('F' << 8) | ' ' },
+        /* 0B, address 2 and 3: the third block repeats the PI, offset word C'. */
+        { 0xc0de, 0x0800 | 0x0400 | (5 << 5) | 0x10 | 2, 0xc0de, ('T' << 8) | 'E' },
+        { 0xc0de, 0x0800 | 0x0400 | (5 << 5) | 0x10 | 3, 0xc0de, ('S' << 8) | 'T' },
+        /* 2A, text flag 1, segments 0 to 2: "Standard", then the carriage return. */
+        { 0xc0de, 0x2000 | 0x0400 | (5 << 5) | 0x10 | 0, ('S' << 8) | 't', ('a' << 8) | 'n' },
+        { 0xc0de, 0x2000 | 0x0400 | (5 << 5) | 0x10 | 1, ('d' << 8) | 'a', ('r' << 8) | 'd' },
+        { 0xc0de, 0x2000 | 0x0400 | (5 << 5) | 0x10 | 2, ('\r' << 8) | ' ', (' ' << 8) | ' ' },
+        /* 4A: filled below. */
+        { 0xc0de, 0x4000 | 0x0400 | (5 << 5), 0, 0 },
+    };
+    static const unsigned char version_b[] = { 0, 0, 1, 1, 0, 0, 0, 0 };
+    uint16_t g[8][4];
+    const unsigned long mjd = (unsigned long)CT_MJD;
+    struct m2sdr_fm_config cfg;
+    struct m2sdr_fm_rds_info info;
+    size_t count, frames;
+    double rate;
+    int16_t *iq;
+    float *audio;
+
+    /* 4A: the two upper bits of the 17-bit day in block 2, its 15 lower bits then the upper
+     * bit of the hour in block 3; hour (4 bits), minute (6 bits), sense and offset (5 bits)
+     * in block 4. 12:35, local time 1 h 30 behind. */
+    memcpy(g, groups, sizeof(g));
+    g[7][1] |= (uint16_t)(mjd >> 15);
+    g[7][2]  = (uint16_t)(((mjd & 0x7fff) << 1) | (12 >> 4));
+    g[7][3]  = (uint16_t)(((12 & 15) << 12) | (35 << 6) | 0x20 | 3);
+
+    m2sdr_fm_config_init(&cfg);
+    cfg.rds.enable = true;
+    iq    = rds_reference((const uint16_t (*)[4])g, version_b, 8, 2.5, cfg.sample_rate, &count);
+    audio = demodulate(&cfg, iq, count, 0, &frames, &rate, NULL);
+    info  = last_rds;
+    CHECK(audio != NULL, "demodulator with RDS");
+    CHECK(info.synced && info.block_errors == 0 && info.groups > 20,
+          "reference: sync %d, %llu groups, %llu wrong blocks", info.synced,
+          (unsigned long long)info.groups, (unsigned long long)info.block_errors);
+    CHECK(info.pi_valid && info.pi == 0xc0de && info.pty == 5 && info.tp && info.ta && !info.music,
+          "reference: PI 0x%04x, PTY %u, TP %d, TA %d, M/S %d", info.pi, info.pty, info.tp, info.ta, info.music);
+    CHECK(info.ps_valid && strcmp(info.ps, "REF TEST") == 0, "reference: PS \"%s\"", info.ps);
+    CHECK(info.rt_valid && strcmp(info.rt, "Standard") == 0, "reference: RT \"%s\"", info.rt);
+    CHECK(info.ct_valid && info.ct_unix_time == CT_UNIX && info.ct_offset == -3,
+          "reference: CT %lld (expected %lld), offset %d", (long long)info.ct_unix_time,
+          (long long)CT_UNIX, info.ct_offset);
+    NOTE("reference: %llu groups, PS \"%s\", RT \"%s\", CT %lld", (unsigned long long)info.groups,
+         info.ps, info.rt, (long long)info.ct_unix_time);
+    free(audio);
+    free(iq);
+}
+
+/* Encoder to decoder: clean, with audio, with noise, off tune, with a sample clock error. */
+static void test_rds_roundtrip(void)
+{
+    const struct audio silence = { 0 };
+    const struct audio music   = { .l_hz = 1000.0, .l_amp = 0.5, .r_hz = 3000.0, .r_amp = 0.3 };
+    /* Carrier 30 dB, 15 dB, then 9 dB over the noise of the whole 1 MHz: 16 dB in the
+     * 200 kHz of the channel for the last one, where blocks start to be wrong. */
+    const struct channel noise30 = { .noise = 2047.0 / sqrt(2.0) / 31.6 };
+    const struct channel noise15 = { .noise = 2047.0 / sqrt(2.0) / 5.62, .offset_hz = 15000.0 };
+    const struct channel noise9  = { .noise = 2047.0 / sqrt(2.0) / 2.82 };
+    const struct channel offset  = { .offset_hz = -25000.0 };
+    const double seconds = 3.0;
+    struct m2sdr_fm_config cfg, rx_cfg, plain;
+    size_t frames, skip, n;
+    double rate, l, r, leak;
+    bool locked;
+    float *audio;
+
+    /* Mono, no audio. */
+    rds_test_config(&cfg);
+    audio = roundtrip(&cfg, NULL, &silence, NULL, seconds, &frames, &rate, NULL);
+    CHECK(audio != NULL, "RDS round trip");
+    if (!audio)
+        return;
+    rds_check(&last_rds, &cfg, 0.0, "RDS, mono");
+    free(audio);
+
+    /* Stereo with audio: the data are right and the audio is unchanged. */
+    cfg.stereo = true;
+    audio = roundtrip(&cfg, NULL, &music, NULL, seconds, &frames, &rate, &locked);
+    rds_check(&last_rds, &cfg, 0.0, "RDS, stereo and audio");
+    skip = (size_t)(SETTLE_S * rate);
+    n    = (size_t)(MEASURE_S * rate);
+    l    = tone(audio + 2 * skip, n, 2, rate, 1000.0, NULL);
+    r    = tone(audio + 2 * skip + 1, n, 2, rate, 3000.0, NULL);
+    leak = tone(audio + 2 * skip + 1, n, 2, rate, 1000.0, NULL);
+    CHECK(locked && fabs(db(l / 0.5)) < 0.2 && fabs(db(r / 0.3)) < 0.2 && db(l / leak) > 40.0,
+          "audio with RDS: %+.2f and %+.2f dB, separation %.1f dB", db(l / 0.5), db(r / 0.3), db(l / leak));
+    CHECK(sinad(audio + 2 * skip, n, 2, l) > 40.0, "audio with RDS: SINAD %.1f dB",
+          sinad(audio + 2 * skip, n, 2, l));
+    NOTE("audio with RDS: %+.2f and %+.2f dB, separation %.1f dB, SINAD %.1f dB", db(l / 0.5),
+         db(r / 0.3), db(l / leak), sinad(audio + 2 * skip, n, 2, l));
+    free(audio);
+
+    /* Noise, tuning offset. */
+    audio = roundtrip(&cfg, NULL, &music, &noise30, seconds, &frames, &rate, NULL);
+    rds_check(&last_rds, &cfg, 0.0, "RDS, 30 dB over the noise");
+    free(audio);
+    audio = roundtrip(&cfg, NULL, &music, &noise15, seconds, &frames, &rate, NULL);
+    rds_check(&last_rds, &cfg, 0.02, "RDS, 15 dB over the noise, 15 kHz off tune");
+    free(audio);
+
+    /* At the limit: blocks are lost, the checkwords keep what is decoded right. */
+    audio = roundtrip(&cfg, NULL, &music, &noise9, 6.0, &frames, &rate, NULL);
+    CHECK(last_rds.groups > 10 && last_rds.block_errors > 0 &&
+          last_rds.block_errors < last_rds.blocks / 2, "RDS, 9 dB over the noise: %llu groups, %llu wrong blocks of %llu",
+          (unsigned long long)last_rds.groups, (unsigned long long)last_rds.block_errors,
+          (unsigned long long)last_rds.blocks);
+    CHECK(last_rds.pi_valid && last_rds.pi == cfg.rds.pi && last_rds.pty == cfg.rds.pty,
+          "RDS, 9 dB over the noise: PI 0x%04x, PTY %u", last_rds.pi, last_rds.pty);
+    CHECK(!last_rds.ps_valid || strcmp(last_rds.ps, cfg.rds.ps) == 0, "RDS, 9 dB over the noise: PS \"%s\"",
+          last_rds.ps);
+    CHECK(!last_rds.rt_valid || strcmp(last_rds.rt, cfg.rds.rt) == 0, "RDS, 9 dB over the noise: RT \"%s\"",
+          last_rds.rt);
+    CHECK(!last_rds.ct_valid || last_rds.ct_unix_time == CT_UNIX, "RDS, 9 dB over the noise: CT %lld",
+          (long long)last_rds.ct_unix_time);
+    NOTE("RDS, 9 dB over the noise: %llu groups, %llu wrong blocks of %llu, PS %d, RT %d, CT %d",
+         (unsigned long long)last_rds.groups, (unsigned long long)last_rds.block_errors,
+         (unsigned long long)last_rds.blocks, last_rds.ps_valid, last_rds.rt_valid, last_rds.ct_valid);
+    free(audio);
+    audio = roundtrip(&cfg, NULL, &music, &offset, seconds, &frames, &rate, NULL);
+    rds_check(&last_rds, &cfg, 0.0, "RDS, 25 kHz off tune");
+    free(audio);
+
+    /* Sample clocks 100 ppm apart: the receiver sees the subcarrier 5.7 Hz away. */
+    rx_cfg = cfg;
+    cfg.sample_rate *= 1.0 + 100e-6;
+    cfg.deviation   *= 1.0 + 100e-6;
+    audio = roundtrip(&cfg, &rx_cfg, &music, &noise30, seconds, &frames, &rate, NULL);
+    rds_check(&last_rds, &cfg, 0.0, "RDS, clocks 100 ppm apart");
+    free(audio);
+    cfg.sample_rate = rx_cfg.sample_rate * (1.0 - 100e-6);
+    cfg.deviation   = rx_cfg.deviation * (1.0 - 100e-6);
+    audio = roundtrip(&cfg, &rx_cfg, &music, NULL, seconds, &frames, &rate, NULL);
+    rds_check(&last_rds, &cfg, 0.0, "RDS, clocks -100 ppm apart");
+    free(audio);
+
+    /* Other I/Q rates. */
+    rds_test_config(&cfg);
+    cfg.stereo      = true;
+    cfg.sample_rate = 250000.0;
+    audio = roundtrip(&cfg, NULL, &music, NULL, seconds, &frames, &rate, NULL);
+    rds_check(&last_rds, &cfg, 0.0, "RDS, 250 kSPS");
+    free(audio);
+    cfg.sample_rate = 2000000.0;
+    audio = roundtrip(&cfg, NULL, &music, NULL, seconds, &frames, &rate, NULL);
+    rds_check(&last_rds, &cfg, 0.0, "RDS, 2 MSPS");
+    free(audio);
+
+    /* A signal without RDS: nothing is decoded. */
+    m2sdr_fm_config_init(&plain);
+    plain.stereo = true;
+    rds_test_config(&rx_cfg);
+    rx_cfg.stereo = true;
+    audio = roundtrip(&plain, &rx_cfg, &music, &noise30, 2.0, &frames, &rate, NULL);
+    CHECK(last_rds.groups == 0 && !last_rds.pi_valid && !last_rds.ps_valid, "RDS found in a signal without it");
+    free(audio);
+
+    /* Not asked: nothing is reported. */
+    rds_test_config(&cfg);
+    audio = roundtrip(&cfg, &plain, &music, NULL, 0.5, &frames, &rate, NULL);
+    CHECK(last_rds.groups == 0 && !last_rds.synced, "RDS reported without being enabled");
+    free(audio);
+
+    /* Rates and fields that RDS does not accept. */
+    rds_test_config(&cfg);
+    cfg.sample_rate = 100000.0;
+    CHECK(m2sdr_fm_tx_new(&cfg) == NULL && m2sdr_fm_rx_new(&cfg) == NULL, "RDS at 100 kSPS");
+    rds_test_config(&cfg);
+    cfg.rds.pty = 32;
+    CHECK(m2sdr_fm_tx_new(&cfg) == NULL, "PTY 32");
+}
+
 /* Tools */
 /*-------*/
 
@@ -793,6 +1260,7 @@ static int run(const char *dir, const char *fmt)
 
     /* The format takes the directory up to six times. */
     snprintf(cmd, sizeof(cmd), fmt, dir, dir, dir, dir, dir, dir);
+    fflush(stdout);
     return system(cmd);
 }
 
@@ -863,6 +1331,26 @@ static void test_tools(void)
     }
     free(x);
 
+    /* RDS: what m2sdr_fm_tx is given comes out of m2sdr_fm_rx, next to the audio. The clock
+     * time is 2026-11-17 12:35 UTC, sent for a host one hour ahead of UTC. */
+    snprintf(path, sizeof(path), "%s/long.wav", dir);
+    CHECK(write_wav(path, 3.5, &a) == 0, "write %s", path);
+    CHECK(run(dir, "TZ=UTC-1 ./m2sdr_fm_tx -m stereo --rds-pi F212 --rds-ps 'M2SDR FM' --rds-pty 10"
+                   " --rds-rt 'RDS through the utilities' --rds-ct 1794918898 %s/long.wav - 2>/dev/null"
+                   " | ./m2sdr_fm_rx -m stereo --rds - %s/r.wav 2>%s/rds.txt") == 0, "RDS through the tools");
+    CHECK(run(dir, "grep -q 'PI=F212 PTY=10 (Pop music) PS=\"M2SDR FM\" RT=\"RDS through the utilities\""
+                   " CT=2026-11-17 13:35 +01:00' %s/rds.txt") == 0, "RDS line of m2sdr_fm_rx");
+    CHECK(run(dir, "grep -q 'RDS: [0-9]* groups, 0 wrong blocks' %s/rds.txt") == 0, "RDS summary of m2sdr_fm_rx");
+    snprintf(path, sizeof(path), "%s/r.wav", dir);
+    x = read_pcm(path, 44, &frames, h);
+    check_tool_audio(x, frames, &a, 3.5, "RDS and audio");
+    free(x);
+    if (verbose)
+        run(dir, "grep RDS %s/rds.txt | tail -n 2");
+    CHECK(run(dir, "./m2sdr_fm_tx --rds-ps 'NINE CHAR' %s/in.wav %s/e.iq 2>/dev/null") != 0, "long PS accepted");
+    CHECK(run(dir, "./m2sdr_fm_tx --rds-pi 12345 %s/in.wav %s/e.iq 2>/dev/null") != 0, "long PI accepted");
+    CHECK(run(dir, "./m2sdr_fm_tx -s 100000 --rds %s/in.wav %s/e.iq 2>/dev/null") != 0, "RDS at 100 kSPS accepted");
+
     /* Bad arguments end with an error. */
     CHECK(run(dir, "./m2sdr_fm_tx -m quad %s/in.wav %s/e.iq 2>/dev/null") != 0, "bad mode accepted");
     CHECK(run(dir, "./m2sdr_fm_tx -s 100000 -m stereo %s/in.wav %s/e.iq 2>/dev/null") != 0,
@@ -894,6 +1382,10 @@ int main(int argc, char **argv)
     test_channel();
     test_rates();
     test_blocks();
+    test_rds_blocks();
+    test_rds_signal();
+    test_rds_reference();
+    test_rds_roundtrip();
     if (tools)
         test_tools();
 
