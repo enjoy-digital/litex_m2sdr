@@ -1214,6 +1214,7 @@ static const ImU32 lte_mod_colors[M2SDR_MOD_COUNT] = {
 #define LTE_GRID_TOP_DB    10.0
 #define LTE_GRID_BOTTOM_DB (-40.0)
 #define LTE_SCALE_W        52.0f     /* Room of the scale, right of the grid. */
+#define LTE_NARROW_W       700.0f    /* Under this width of the view, the constellation goes under the grid. */
 #define AN_LTE_HOLD        10        /* Captures a frame stays shown without a cell, or its symbols without data. */
 
 /* Shared between the worker, which captures and analyses, and the UI, which draws. */
@@ -1573,6 +1574,17 @@ static bool input_scaled(const char *label, double *value, double scale, const c
     if (!igIsItemActive() && editing == id)
         editing = 0;
     return done;
+}
+
+/* The next control on the same line when `width` pixels are left on it, on a new line if not. */
+static void same_line_or_wrap(float spacing, float width)
+{
+    ImVec2 avail;
+
+    igSameLine(0.0f, spacing);
+    igGetContentRegionAvail(&avail);
+    if (avail.x < width)
+        igNewLine();
 }
 
 static bool input_mhz(const char *label, double *hz)
@@ -1985,16 +1997,16 @@ static void draw_phase_noise(struct an_ui *ui, bool *changed)
         ui->set.pn_log2 = idx + AN_PN_MIN_LOG2;
         *changed = true;
     }
-    igSameLine(0.0f, 16.0f);
+    same_line_or_wrap(16.0f, 230.0f);
     if (input_scaled("From (Hz)", &ui->set.pn_lo_hz, 1.0, "%.0f"))
         *changed = true;
-    igSameLine(0.0f, 16.0f);
+    same_line_or_wrap(16.0f, 215.0f);
     if (input_scaled("To (Hz)", &ui->set.pn_hi_hz, 1.0, "%.0f"))
         *changed = true;
-    igSameLine(0.0f, 16.0f);
+    same_line_or_wrap(16.0f, 100.0f);
     igCheckbox("AM noise", &ui->pn_am);
     if (ui->floor_path) {
-        igSameLine(0.0f, 16.0f);
+        same_line_or_wrap(16.0f, 115.0f);
         if (igButton("Store as floor", (ImVec2){ 0.0f, 0.0f }) && ui->res.pn_valid) {
             if (floor_save(ui->fl, ui->floor_path, &ui->res) == 0)
                 snprintf(ui->message, sizeof(ui->message), "Floor written to %.200s", ui->floor_path);
@@ -2008,8 +2020,10 @@ static void draw_phase_noise(struct an_ui *ui, bool *changed)
         return;
     }
     if (!ui->res.pn_valid) {
+        igPushTextWrapPos(0.0f);
         igTextUnformatted("No carrier stands 10 dB above the rest of the capture: lower the sample rate around it, "
                           "or tune on it.", NULL);
+        igPopTextWrapPos();
         return;
     }
     for (i = 0; i < pn->points; i++) {
@@ -2089,16 +2103,16 @@ static void draw_modulation(struct an_ui *ui, bool *changed)
         ui->set.demod.modulation = (enum m2sdr_modulation)mod;
         *changed = true;
     }
-    igSameLine(0.0f, 12.0f);
+    same_line_or_wrap(12.0f, 215.0f);
     igSetNextItemWidth(170.0f);
     if (igCombo_Str_arr("Pulse", &pulse, pulses, 3, -1)) {
         ui->set.demod.pulse = (enum m2sdr_pulse)pulse;
         *changed = true;
     }
-    igSameLine(0.0f, 12.0f);
+    same_line_or_wrap(12.0f, 295.0f);
     if (input_scaled("Symbols/s (0: auto)", &ui->set.demod.symbol_rate, 1.0, "%.1f"))
         *changed = true;
-    igSameLine(0.0f, 12.0f);
+    same_line_or_wrap(12.0f, 285.0f);
     {
         double a = ui->set.demod.rolloff;
         if (input_scaled("Roll-off (0: auto)", &a, 1.0, "%.2f") && (a == 0 || (a >= 0.05 && a <= 1.0))) {
@@ -2117,11 +2131,13 @@ static void draw_modulation(struct an_ui *ui, bool *changed)
         return;
     }
     if (!ui->res.demod_valid || !d->signal) {
+        igPushTextWrapPos(0.0f);
         igTextUnformatted("No signal with a symbol rate was found: tune on it, with a sample rate of a few times its "
                           "bandwidth, or give the symbol rate.", NULL);
+        igPopTextWrapPos();
         return;
     }
-    igSameLine(0.0f, 16.0f);
+    same_line_or_wrap(16.0f, 150.0f);
     if (d->locked)
         igTextColored((ImVec4){ 0.4f, 1.0f, 0.4f, 1.0f }, "%s locked", m2sdr_modulation_name(d->modulation));
     else
@@ -2379,14 +2395,14 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
     float side, left_w, line, right;
     double half_mhz;
     char text[200];
-    bool held;
+    bool held, narrow;
     int i;
 
     if (live) {
         igTextUnformatted("Sample rate:", NULL);
         for (i = 0; i < 5; i++) {
             snprintf(text, sizeof(text), "%.2f MSPS", rates[i] / 1e6);
-            igSameLine(0.0f, 8.0f);
+            same_line_or_wrap(8.0f, 80.0f);
             if (igSmallButton(text)) {
                 ui->set.sample_rate = rates[i];
                 ui->set.bandwidth   = 0;
@@ -2401,8 +2417,10 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
         return;
     }
     if (!ui->res.lte_valid) {
+        igPushTextWrapPos(0.0f);
         igTextUnformatted("The sample rate must be 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS: it sets how many resource "
                           "blocks around the centre are analysed.", NULL);
+        igPopTextWrapPos();
         return;
     }
     l = lte_shown(ui, &held);
@@ -2418,9 +2436,17 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
 
     igGetContentRegionAvail(&avail);
     line   = igGetTextLineHeightWithSpacing();
-    side   = avail.y - 2.0f * line < 0.45f * avail.x ? avail.y - 2.0f * line : 0.45f * avail.x;
-    sq     = m2sdr_plot_square(side);
-    left_w = avail.x - sq.x - 8.0f;
+    /* The constellation next to the grid, or under it in a narrow window. */
+    narrow = avail.x < LTE_NARROW_W;
+    if (narrow) {
+        side   = 0.36f * avail.y < avail.x - 40.0f ? 0.36f * avail.y : avail.x - 40.0f;
+        sq     = m2sdr_plot_square(side);
+        left_w = avail.x;
+    } else {
+        side   = avail.y - 2.0f * line < 0.45f * avail.x ? avail.y - 2.0f * line : 0.45f * avail.x;
+        sq     = m2sdr_plot_square(side);
+        left_w = avail.x - sq.x - 8.0f;
+    }
 
     /* Resource grid, and the blocks of data under it on the same time axis. */
     igBeginGroup();
@@ -2435,8 +2461,8 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
     else
         igTextUnformatted("Resource grid of a frame, MHz from the centre against the time. Colours: dB over the reference signals.", NULL);
     igPopTextWrapPos();
-    if (m2sdr_plot_begin(&plot, "##ltegrid", (ImVec2){ left_w - LTE_SCALE_W, 0.62f * avail.y }, 0.0, 0.010, M2SDR_PLOT_TIME,
-                         -half_mhz, half_mhz, "")) {
+    if (m2sdr_plot_begin(&plot, "##ltegrid", (ImVec2){ left_w - LTE_SCALE_W, (narrow ? 0.32f : 0.62f) * avail.y }, 0.0, 0.010,
+                         M2SDR_PLOT_TIME, -half_mhz, half_mhz, "")) {
         static const double marks[] = { LTE_GRID_TOP_DB, 0.0, -20.0, LTE_GRID_BOTTOM_DB };
         const float x = plot.p1.x + 14.0f, h = plot.p1.y - plot.p0.y;
         unsigned n;
@@ -2476,7 +2502,9 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
     } else {
         const double y0 = (double)l->data_first_rb - (double)l->data_offset / 12.0;
 
+        igPushTextWrapPos(igGetCursorPosX() + left_w);
         igTextUnformatted("Blocks of data, by slot and resource block of the cell:", NULL);
+        igPopTextWrapPos();
         legend_item(lte_mod_colors[M2SDR_MOD_QPSK], "QPSK", right);
         legend_item(lte_mod_colors[M2SDR_MOD_16QAM], "16QAM", right);
         legend_item(lte_mod_colors[M2SDR_MOD_64QAM], "64QAM", right);
@@ -2485,8 +2513,8 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
             legend_item(LTE_COL_UNREAD, "in use, not read", right);
         legend_item(lte_mod_colors[M2SDR_MOD_AUTO], "empty", right);
         igNewLine();
-        if (m2sdr_plot_begin(&plot, "##lteblocks", (ImVec2){ left_w - LTE_SCALE_W, 0.0f }, 0.0, 0.010, M2SDR_PLOT_TIME,
-                             y0, y0 + (double)l->subcarriers / 12.0, "")) {
+        if (m2sdr_plot_begin(&plot, "##lteblocks", (ImVec2){ left_w - LTE_SCALE_W, narrow ? 0.18f * avail.y : 0.0f }, 0.0, 0.010,
+                             M2SDR_PLOT_TIME, y0, y0 + (double)l->subcarriers / 12.0, "")) {
             tex._TexID = (ImTextureID)(uintptr_t)ui->lte_block_tex;
             ImDrawList_AddImage(plot.dl, tex, (ImVec2){ plot.p0.x, m2sdr_plot_y(&plot, l->data_first_rb + l->data_rb) },
                                 (ImVec2){ plot.p1.x, m2sdr_plot_y(&plot, l->data_first_rb) },
@@ -2512,12 +2540,13 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
         }
     }
     igEndGroup();
-    igSameLine(0.0f, 8.0f);
+    if (!narrow)
+        igSameLine(0.0f, 8.0f);
 
     /* Equalised symbols: data, PBCH and reference signals. */
     igBeginGroup();
     igGetCursorScreenPos(&pos);
-    right = pos.x + sq.x;
+    right = pos.x + (narrow ? avail.x : sq.x);
     legend_item(lte_mod_colors[M2SDR_MOD_QPSK], "QPSK", right);
     legend_item(lte_mod_colors[M2SDR_MOD_16QAM], "16QAM", right);
     legend_item(lte_mod_colors[M2SDR_MOD_64QAM], "64QAM", right);
@@ -2839,8 +2868,11 @@ status:
             igTextColored((ImVec4){ 1.0f, 0.4f, 0.3f, 1.0f }, "%s", status);
             igPopTextWrapPos();
         }
-        if (ui->message[0])
+        if (ui->message[0]) {
+            igPushTextWrapPos(0.0f);
             igTextUnformatted(ui->message, NULL);
+            igPopTextWrapPos();
+        }
     }
     if (igButton("Export CSV", (ImVec2){ 0.0f, 0.0f }) && res->psd.bins) {
         char path[64];
