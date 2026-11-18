@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../m2sdr_host_queue.h"
+#include "m2sdr_host_queue.h"
 
 static int expect_pop(struct m2sdr_host_queue *queue,
                       const char *expected,

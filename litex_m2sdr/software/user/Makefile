@@ -40,10 +40,10 @@ else
   TRANSPORT_LIBS   :=
 endif
 
-CFLAGS  = -O3 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibliteusb -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -MMD -fPIC
+CFLAGS  = -O3 -Wall -g -I. -I../kernel -Ilibliteeth -Iliblitepcie -Ilibliteusb -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -MMD -fPIC
 CFLAGS += $(TRANSPORT_CFLAGS)
 CFLAGS += $(EXTRA_CFLAGS)
-CXXFLAGS = $(CFLAGS) -I. -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCAN_CIMGUI_DIR)/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
+CXXFLAGS = $(CFLAGS) -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCAN_CIMGUI_DIR)/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
 SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null)
 HAVE_SDL2   := $(shell pkg-config --exists sdl2 2>/dev/null && echo 1 || echo 0)
@@ -118,9 +118,6 @@ LIBM2SDR_SHARED = libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so
 PROGS    = $(BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx \
            ../../doc/libm2sdr/example_tone_tx ../../doc/libm2sdr/example_rx_n
-CLI_OBJS = m2sdr_cli.o
-TOOL_OBJS = m2sdr_tool.o
-HOST_QUEUE_OBJS = m2sdr_host_queue.o
 TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio tests/test_m2sdr_host_queue tests/test_m2sdr_flash tests/test_si5351_trim tests/test_liteeth_udp_frame_sync tests/test_m2sdr_cal tests/test_m2sdr_analysis tests/test_m2sdr_fm
 
 LIBM2SDR_OBJS = \
@@ -155,6 +152,17 @@ LIBM2SDR_OBJS = \
 	ad9361/ad9361_api.o \
 	ad9361/ad9361_conv.o \
 	ad9361/util.o
+
+# Support code of the utilities (command line, host queue, SATA capture volumes): private,
+# in the static library only. The shared library and the installed headers leave it out.
+LIBM2SDR_TOOL_OBJS = \
+	libm2sdr/m2sdr_cli.o \
+	libm2sdr/m2sdr_tool.o \
+	libm2sdr/m2sdr_host_queue.o \
+	libm2sdr/m2sdr_sata_lowlevel.o \
+	libm2sdr/m2sdr_sata_hostio.o \
+	libm2sdr/m2sdr_sata_capture_volume.o \
+	libm2sdr/m2sdr_sata_sigmf.o
 
 ifeq ($(LITEUSB),1)
 LITEUSB_OBJS = \
@@ -228,8 +236,8 @@ test-liteeth-udp: tests/test_liteeth_udp_frame_sync
 test-fm: tests/test_m2sdr_fm $(FM_BINARIES)
 	./tests/test_m2sdr_fm $(if $(FM_BINARIES),--tools)
 
-tests/test_libm2sdr: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) tests/test_libm2sdr.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) tests/test_libm2sdr.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+tests/test_libm2sdr: $(LIBM2SDR_STATIC) tests/test_libm2sdr.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_libm2sdr.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
 tests/test_m2sdr_sigmf: $(LIBM2SDR_STATIC) tests/test_m2sdr_sigmf.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_sigmf.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
@@ -243,8 +251,8 @@ tests/test_sigmf_cli: tests/test_sigmf_cli.o | $(BUILD_FLAGS_FILE)
 tests/test_m2sdr_sata_cli: tests/test_m2sdr_sata_cli.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_sata_cli.o -lm
 
-tests/test_m2sdr_sata_hostio: tests/test_m2sdr_sata_hostio.o m2sdr_sata_hostio.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_sata_hostio.o m2sdr_sata_hostio.o -lm
+tests/test_m2sdr_sata_hostio: tests/test_m2sdr_sata_hostio.o libm2sdr/m2sdr_sata_hostio.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_sata_hostio.o libm2sdr/m2sdr_sata_hostio.o -lm
 
 tests/test_m2sdr_eth_flow: tests/test_m2sdr_eth_flow.o libm2sdr/m2sdr_eth_flow.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_eth_flow.o libm2sdr/m2sdr_eth_flow.o -lm
@@ -260,8 +268,8 @@ tests/test_si5351_trim: tests/test_si5351_trim.o libm2sdr/m2sdr_si5351_i2c.o $(L
 tests/test_liteeth_udp_frame_sync: tests/test_liteeth_udp_frame_sync.o libliteeth/liteeth_udp.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_liteeth_udp_frame_sync.o libliteeth/liteeth_udp.o
 
-tests/test_m2sdr_host_queue: tests/test_m2sdr_host_queue.o $(HOST_QUEUE_OBJS) | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_host_queue.o $(HOST_QUEUE_OBJS) $(PTHREAD_LIBS)
+tests/test_m2sdr_host_queue: tests/test_m2sdr_host_queue.o libm2sdr/m2sdr_host_queue.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_host_queue.o libm2sdr/m2sdr_host_queue.o $(PTHREAD_LIBS)
 
 analyze-libm2sdr:
 	cppcheck --enable=warning,style,performance,portability --error-exitcode=1 \
@@ -297,8 +305,9 @@ libliteeth/libliteeth.a: $(BUILD_FLAGS_FILE) libliteeth/etherbone.o libliteeth/l
 	$(AR) rcs $@ libliteeth/etherbone.o libliteeth/liteeth_udp.o
 	ranlib $@
 
-libm2sdr/libm2sdr.a: $(BUILD_FLAGS_FILE) $(LIBM2SDR_OBJS)
-	$(AR) rcs $@ $(LIBM2SDR_OBJS)
+libm2sdr/libm2sdr.a: $(BUILD_FLAGS_FILE) $(LIBM2SDR_OBJS) $(LIBM2SDR_TOOL_OBJS)
+	rm -f $@
+	$(AR) rcs $@ $(LIBM2SDR_OBJS) $(LIBM2SDR_TOOL_OBJS)
 	ranlib $@
 
 libm2sdr/$(LIBM2SDR_SONAME): $(BUILD_FLAGS_FILE) $(LIBM2SDR_OBJS)
@@ -316,14 +325,14 @@ ad9361/libad9361_m2sdr.a: $(BUILD_FLAGS_FILE) ad9361/ad9361_api.o ad9361/ad9361_
 M2SDR_LINK_LIBS := $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 PTHREAD_LIBS := -pthread
 
-m2sdr_util: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_util.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_util.o $(M2SDR_LINK_LIBS)
+m2sdr_util: $(LIBM2SDR_STATIC) m2sdr_util.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_util.o $(M2SDR_LINK_LIBS)
 
-m2sdr_rf: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_rf.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_rf.o $(M2SDR_LINK_LIBS)
+m2sdr_rf: $(LIBM2SDR_STATIC) m2sdr_rf.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_rf.o $(M2SDR_LINK_LIBS)
 
-m2sdr_cal: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_cal.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_cal.o $(M2SDR_LINK_LIBS)
+m2sdr_cal: $(LIBM2SDR_STATIC) m2sdr_cal.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_cal.o $(M2SDR_LINK_LIBS)
 
 # m2sdr_analyzer always has its report mode; its window needs SDL2 and cimgui.
 ifeq ($(and $(filter 1,$(HAVE_SDL2)),$(filter 1,$(HAVE_CIMGUI))),1)
@@ -338,8 +347,8 @@ m2sdr_analyzer.o: m2sdr_analyzer.c $(BUILD_FLAGS_FILE)
 $(SCAN_UI_DIR)/m2sdr_plot.o: $(SCAN_UI_DIR)/m2sdr_plot.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) -I. -o $@ $<
 
-m2sdr_analyzer: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_analyzer.o $(M2SDR_ANALYZER_OBJS)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_analyzer.o $(M2SDR_ANALYZER_OBJS) $(M2SDR_LINK_LIBS) $(M2SDR_ANALYZER_LIBS) -pthread
+m2sdr_analyzer: $(LIBM2SDR_STATIC) m2sdr_analyzer.o $(M2SDR_ANALYZER_OBJS)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_analyzer.o $(M2SDR_ANALYZER_OBJS) $(M2SDR_LINK_LIBS) $(M2SDR_ANALYZER_LIBS) -pthread
 
 tests/test_m2sdr_analysis: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
@@ -350,31 +359,31 @@ tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o kissfft/kiss_fft
 tests/test_m2sdr_fm: $(LIBM2SDR_STATIC) tests/test_m2sdr_fm.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_fm.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
-m2sdr_play: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_play.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_play.o $(M2SDR_LINK_LIBS) $(PTHREAD_LIBS)
+m2sdr_play: $(LIBM2SDR_STATIC) m2sdr_play.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_play.o $(M2SDR_LINK_LIBS) $(PTHREAD_LIBS)
 
-m2sdr_record: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_record.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_record.o $(M2SDR_LINK_LIBS) $(PTHREAD_LIBS)
+m2sdr_record: $(LIBM2SDR_STATIC) m2sdr_record.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_record.o $(M2SDR_LINK_LIBS) $(PTHREAD_LIBS)
 
-m2sdr_sigmf: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_sigmf.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_sigmf.o $(M2SDR_LINK_LIBS)
+m2sdr_sigmf: $(LIBM2SDR_STATIC) m2sdr_sigmf.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_sigmf.o $(M2SDR_LINK_LIBS)
 
-m2sdr_gpio: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_gpio.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_gpio.o $(M2SDR_LINK_LIBS)
+m2sdr_gpio: $(LIBM2SDR_STATIC) m2sdr_gpio.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_gpio.o $(M2SDR_LINK_LIBS)
 
-m2sdr_sata: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_sata.o m2sdr_sata_capture_volume.o m2sdr_sata_sigmf.o m2sdr_sata_lowlevel.o m2sdr_sata_hostio.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_sata.o m2sdr_sata_capture_volume.o m2sdr_sata_sigmf.o m2sdr_sata_lowlevel.o m2sdr_sata_hostio.o $(M2SDR_LINK_LIBS)
+m2sdr_sata: $(LIBM2SDR_STATIC) m2sdr_sata.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_sata.o $(M2SDR_LINK_LIBS)
 
 ifeq ($(HAVE_SDL2),1)
-m2sdr_check: $(LIBM2SDR_STATIC) kissfft/kiss_fft.o $(CLI_OBJS) $(TOOL_OBJS) m2sdr_check.o $(M2SDR_IMGUI_OBJS)
-	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ kissfft/kiss_fft.o $(CLI_OBJS) $(TOOL_OBJS) m2sdr_check.o $(M2SDR_IMGUI_OBJS) $(M2SDR_LINK_LIBS) $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
+m2sdr_check: $(LIBM2SDR_STATIC) kissfft/kiss_fft.o m2sdr_check.o $(M2SDR_IMGUI_OBJS)
+	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ kissfft/kiss_fft.o m2sdr_check.o $(M2SDR_IMGUI_OBJS) $(M2SDR_LINK_LIBS) $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
 endif
 
-m2sdr_fm_tx: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_fm_tx.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_fm_tx.o $(M2SDR_LINK_LIBS) $(SNDFILE_LIBS) $(SAMPLERATE_LIBS)
+m2sdr_fm_tx: $(LIBM2SDR_STATIC) m2sdr_fm_tx.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_fm_tx.o $(M2SDR_LINK_LIBS) $(SNDFILE_LIBS) $(SAMPLERATE_LIBS)
 
-m2sdr_fm_rx: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_fm_rx.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_fm_rx.o $(M2SDR_LINK_LIBS) $(SAMPLERATE_LIBS)
+m2sdr_fm_rx: $(LIBM2SDR_STATIC) m2sdr_fm_rx.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_fm_rx.o $(M2SDR_LINK_LIBS) $(SAMPLERATE_LIBS)
 
 m2sdr_fm_tx.o: m2sdr_fm_tx.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(SNDFILE_CFLAGS) $(SAMPLERATE_CFLAGS) -o $@ $<
@@ -383,14 +392,14 @@ m2sdr_fm_rx.o: m2sdr_fm_rx.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(SNDFILE_CFLAGS) $(SAMPLERATE_CFLAGS) -o $@ $<
 
 # Streaming/test tools.
-m2sdr_gen: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) m2sdr_gen.o kissfft/kiss_fft.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) m2sdr_gen.o kissfft/kiss_fft.o $(M2SDR_LINK_LIBS)
+m2sdr_gen: $(LIBM2SDR_STATIC) m2sdr_gen.o kissfft/kiss_fft.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_gen.o kissfft/kiss_fft.o $(M2SDR_LINK_LIBS)
 
 M2SDR_SCAN_SRCS := m2sdr_scan.c kissfft/kiss_fft.c
 M2SDR_SCAN_OBJS := $(M2SDR_SCAN_SRCS:.c=.o)
 
-m2sdr_scan: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS)
-	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS) $(M2SDR_LINK_LIBS) $(SDL2_LIBS) $(PNG_LIBS) -lGL -ldl -pthread -lstdc++
+m2sdr_scan: $(LIBM2SDR_STATIC) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS)
+	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS) $(M2SDR_LINK_LIBS) $(SDL2_LIBS) $(PNG_LIBS) -lGL -ldl -pthread -lstdc++
 
 clean:
 	rm -f $(PROGS) $(ALL_BINARIES) *.o *.a *.d *~
@@ -436,7 +445,7 @@ m2sdr_revision.h: FORCE
 	@printf '#define M2SDR_VERSION "%s"\n#define M2SDR_GIT_REVISION "%s"\n' '$(M2SDR_VERSION)' '$(M2SDR_GIT_REVISION)' > $@.tmp
 	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; fi
 
-m2sdr_cli.o: m2sdr_revision.h
+libm2sdr/m2sdr_cli.o: m2sdr_revision.h
 
 %.o: %.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<

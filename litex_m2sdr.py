@@ -1001,7 +1001,7 @@ class BaseSoC(SoCMini):
         # Crossbar.
         # ---------
         # Port indices match the host-side TXSRC_*/RXDST_* enums in
-        # litex_m2sdr/software/user/m2sdr_sata_lowlevel.h: 0=PCIe, 1=Eth, 2=SATA, 3=USB3.
+        # litex_m2sdr/software/user/libm2sdr/m2sdr_sata_lowlevel.h: 0=PCIe, 1=Eth, 2=SATA, 3=USB3.
         crossbar_sata_port = 2
         crossbar_usb3_port = 3
         self.crossbar = stream.Crossbar(layout=dma_layout(128 if with_rfic_oversampling else 64), n=4, with_csr=True)
