@@ -32,6 +32,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added the phase noise of a carrier to `m2sdr_analyzer`: L(f) and amplitude noise against the offset, integrated phase error, jitter, residual FM and spurs, with a floor of the board stored per board and drawn under the trace.
 - Added the demodulation of single-carrier PSK and QAM signals to `m2sdr_analyzer` (BPSK to 256QAM, symbol rate, roll-off and modulation found from the signal): constellation, eye diagrams, EVM, MER, magnitude and phase errors, origin offset, I/Q gain imbalance and quadrature error.
 - Added the analysis of an LTE downlink carrier to `m2sdr_analyzer` (FDD, normal cyclic prefix): cell identity, MIB decoded from the PBCH, carrier offset, RSRP, EVM of the reference signals and of the PBCH, resource grid, and for a cell of one antenna port the modulation and EVM of each block of data.
+- Added the blocks of data of an LTE cell of two antenna ports to `m2sdr_analyzer`: a block in transmit diversity or with one precoded layer is read (modulation, EVM, constellation); a block of two layers is reported as in use and not read.
 - Added `m2sdr_gen --signal qam`: random PSK or QAM symbols under a root raised cosine, as a test source. `m2sdr_gen` now sends at the sample rate over Ethernet, where it used to send as fast as the host could and the board dropped most of the datagrams, and reports the TX underflows counted by the FPGA.
 
 **FM Utilities**

@@ -33,6 +33,8 @@
 #define SSS_MIN_MATCH    0.35        /* Of 1 for a clean SSS. */
 #define MIN_SECONDS      0.025
 #define DATA_MIN_RATIO   0.05        /* A block in use has this much of the power of a reference element. */
+#define DATA_MAX_RATIO   0.30        /* Two ports: a block is read below this EVM over the spacing of the points. */
+#define DATA_FAMILY      4           /* Constellations tried on a block. */
 #define SMOOTH_HALF      2           /* Pilots on each side in the smoothing of the channel. */
 
 static const int rb_of_rate[5] = { 6, 15, 25, 50, 100 };
@@ -687,8 +689,8 @@ static double block_evm(const float complex *z, int n, const struct lte_constell
     return sd > 0 ? sqrt(se / sd) : 1e9;
 }
 
-/* Is the element (slot ns, symbol l, subcarrier a) free for data, for a cell of one port? */
-static bool data_element(const struct lte_grid *g, int cell_id, int cell_rb, int ns, int l, int a)
+/* Is the element (slot ns, symbol l, subcarrier a) free for data, in a cell of one or two ports? */
+static bool data_element(const struct lte_grid *g, int cell_id, int cell_rb, int ports, int ns, int l, int a)
 {
     const int control = cell_rb <= 10 ? 4 : 3;
     const bool centre = a >= g->k / 2 - 36 && a < g->k / 2 + 36;
@@ -697,6 +699,8 @@ static bool data_element(const struct lte_grid *g, int cell_id, int cell_rb, int
         return false;                                   /* Control region, taken at its largest. */
     if ((l == 0 || l == 4) && (a % 6) == ((l ? 3 : 0) + cell_id) % 6)
         return false;                                   /* Reference signal of port 0. */
+    if (ports > 1 && (l == 0 || l == 4) && (a % 3) == cell_id % 3)
+        return false;                                   /* Reference signal of port 1. */
     if (centre && (ns == 0 || ns == 10) && (l == SSS_SYMBOL || l == PSS_SYMBOL))
         return false;                                   /* Synchronisation signals. */
     if (centre && ns == 1 && l < 4)
@@ -704,66 +708,151 @@ static bool data_element(const struct lte_grid *g, int cell_id, int cell_rb, int
     return true;
 }
 
-static void data_analyse(const struct lte_grid *g, int cell_id, int cell_rb, struct m2sdr_lte_result *res)
+/* The constellation a block fits: the smallest one that fits well, or else the best. Returns
+ * its EVM over the spacing of its points. */
+static double block_fit(const float complex *z, int n, const struct lte_constellation *cons, int *modulation, double *evm,
+                        float complex *gain)
 {
-    static const enum m2sdr_modulation family[] = { M2SDR_MOD_QPSK, M2SDR_MOD_16QAM, M2SDR_MOD_64QAM, M2SDR_MOD_256QAM };
-    struct lte_constellation cons[4];
-    float complex z[12 * SLOT_SYMBOLS];
-    int used[M2SDR_MOD_COUNT] = { 0 };
+    double best = 1e9;
+    int m;
+
+    *modulation = -1;
+    for (m = 0; m < DATA_FAMILY; m++) {
+        float complex g = 1;
+        const double e = block_evm(z, n, &cons[m], &g);
+        const double ratio = e / cons[m].dmin;
+
+        if (ratio < best) {
+            best        = ratio;
+            *modulation = m;
+            *evm        = e;
+            *gain       = g;
+        }
+        if (ratio < 0.2)
+            break;
+    }
+    return best;
+}
+
+/* The symbols of a block of n elements, sent in one of the ways a cell of two ports has for one
+ * layer; the elements of each symbol of the slot start at first[]. Returns their number.
+ *   way 0    : transmit diversity (TS 36.211 6.3.4.3), as the PBCH.
+ *   way 1..4 : the same symbol on both ports, the second one turned by 1, -1, j or -j
+ *              (TS 36.211 6.3.4.2.3, one layer). */
+static int data_layer(const float complex *y, const float complex *h0, const float complex *h1, const int *first, int way,
+                      float complex *z)
+{
+    static const float complex turn[4] = { 1, -1, I, -I };
+    int l, i, n = 0;
+
+    for (l = 0; l < SLOT_SYMBOLS; l++) {
+        if (way == 0) {
+            for (i = first[l]; i + 1 < first[l + 1]; i += 2) {
+                const float w = 0.5f * (crealf(h0[i]) * crealf(h0[i]) + cimagf(h0[i]) * cimagf(h0[i]) +
+                                        crealf(h1[i]) * crealf(h1[i]) + cimagf(h1[i]) * cimagf(h1[i]) +
+                                        crealf(h0[i + 1]) * crealf(h0[i + 1]) + cimagf(h0[i + 1]) * cimagf(h0[i + 1]) +
+                                        crealf(h1[i + 1]) * crealf(h1[i + 1]) + cimagf(h1[i + 1]) * cimagf(h1[i + 1]));
+                const float complex x0 = conjf(h0[i]) * y[i] + h1[i + 1] * conjf(y[i + 1]);
+                const float complex x1 = conjf(h0[i + 1]) * y[i + 1] - h1[i] * conjf(y[i]);
+
+                z[n++] = w > 0 ? x0 / w : 0;
+                z[n++] = w > 0 ? x1 / w : 0;
+            }
+        } else {
+            for (i = first[l]; i < first[l + 1]; i++) {
+                const float complex h = h0[i] + turn[way - 1] * h1[i];
+
+                z[n++] = cabsf(h) > 0 ? y[i] / h : 0;
+            }
+        }
+    }
+    return n;
+}
+
+static void data_analyse(const struct lte_grid *g, int cell_id, int cell_rb, int ports, struct m2sdr_lte_result *res)
+{
+    static const enum m2sdr_modulation family[DATA_FAMILY] = { M2SDR_MOD_QPSK, M2SDR_MOD_16QAM, M2SDR_MOD_64QAM,
+                                                               M2SDR_MOD_256QAM };
+    struct lte_constellation cons[DATA_FAMILY];
+    float complex y[12 * SLOT_SYMBOLS], h0[12 * SLOT_SYMBOLS], h1[12 * SLOT_SYMBOLS];
+    float complex z[12 * SLOT_SYMBOLS], zb[12 * SLOT_SYMBOLS];
+    int used[M2SDR_MOD_COUNT] = { 0 }, first[SLOT_SYMBOLS + 1];
     /* Blocks of the cell against the ones analysed: half a block apart when one has an odd
      * number of them and the other an even one. */
     const int offset = cell_rb > g->rb ? (6 * (cell_rb - g->rb)) % 12 : 0;
     const int blocks = (g->k - offset) / 12;
+    const int ways = ports == 1 ? 1 : 5;
     double se = 0;
     int ns, rb, l, a, i, m, total = 0, stride = 1, seen = 0;
 
-    for (m = 0; m < 4; m++)
+    for (m = 0; m < DATA_FAMILY; m++)
         lte_constellation_init(&cons[m], family[m]);
     for (ns = 0; ns < M2SDR_LTE_FRAME_SLOTS; ns++) {
         for (rb = 0; rb < blocks; rb++) {
             double power = 0, best_ratio = 1e9, best_evm = 0;
-            float complex gain = 1, best_gain = 1;
-            int n = 0, best = -1;
+            float complex best_gain = 1;
+            int n = 0, nb = 0, best = -1, best_way = 0, way;
 
             for (l = 0; l < SLOT_SYMBOLS; l++) {
                 const size_t row = (size_t)(ns * SLOT_SYMBOLS + l) * (size_t)g->k;
 
+                first[l] = n;
                 for (i = 0; i < 12; i++) {
-                    float complex h;
-
                     a = offset + 12 * rb + i;
-                    if (!data_element(g, cell_id, cell_rb, ns, l, a))
+                    if (!data_element(g, cell_id, cell_rb, ports, ns, l, a))
                         continue;
-                    h = g->h0[row + (size_t)a];
-                    power += crealf(g->re[row + (size_t)a]) * crealf(g->re[row + (size_t)a]) +
-                             cimagf(g->re[row + (size_t)a]) * cimagf(g->re[row + (size_t)a]);
-                    z[n++] = cabsf(h) > 0 ? g->re[row + (size_t)a] / h : 0;
+                    y[n]  = g->re[row + (size_t)a];
+                    h0[n] = g->h0[row + (size_t)a];
+                    h1[n] = g->h1[row + (size_t)a];
+                    power += crealf(y[n]) * crealf(y[n]) + cimagf(y[n]) * cimagf(y[n]);
+                    n++;
                 }
             }
+            first[SLOT_SYMBOLS] = n;
             if (n < 24 || power / n < DATA_MIN_RATIO * g->rs_power[0])
                 continue;
-            for (m = 0; m < 4; m++) {
-                const double evm = block_evm(z, n, &cons[m], &gain);
-                const double ratio = evm / cons[m].dmin;
+            for (way = 0; way < ways; way++) {
+                double evm = 0, ratio;
+                float complex gain = 1;
+                int nz = 0;
 
-                if (ratio < best_ratio) {
+                if (ports == 1) {
+                    for (i = 0; i < n; i++)
+                        z[nz++] = cabsf(h0[i]) > 0 ? y[i] / h0[i] : 0;
+                } else {
+                    nz = data_layer(y, h0, h1, first, way, z);
+                }
+                if (nz < 24)
+                    continue;
+                ratio = block_fit(z, nz, cons, &m, &evm, &gain);
+                if (m >= 0 && ratio < best_ratio) {
                     best_ratio = ratio;
                     best       = m;
                     best_evm   = evm;
                     best_gain  = gain;
+                    best_way   = way;
+                    nb         = nz;
+                    memcpy(zb, z, (size_t)nz * sizeof(z[0]));
                 }
-                if (ratio < 0.2)
-                    break;                              /* The smallest constellation that fits. */
             }
             if (best < 0)
                 continue;
+            if (ports > 1 && best_ratio >= DATA_MAX_RATIO) {
+                res->data_unknown++;                    /* Two layers, or a way that is not tried. */
+                res->rb_unknown[ns][rb] = 1;
+                continue;
+            }
+            if (ports > 1 && best_way == 0)
+                res->data_diversity++;
+            else if (ports > 1)
+                res->data_precoded++;
             res->rb_modulation[ns][rb] = (uint8_t)family[best];
             res->rb_evm[ns][rb]        = (float)best_evm;
             used[family[best]]++;
             se += best_evm * best_evm;
             total++;
             /* A sample of the symbols for the constellation: thinned as the blocks add up. */
-            for (i = 0; i < n; i++) {
+            for (i = 0; i < nb; i++) {
                 if ((seen++ % stride) != 0)
                     continue;
                 if (res->ndata == M2SDR_LTE_MAX_POINTS) {
@@ -773,7 +862,7 @@ static void data_analyse(const struct lte_grid *g, int cell_id, int cell_rb, str
                     res->ndata = M2SDR_LTE_MAX_POINTS / 2;
                     stride    *= 2;
                 }
-                res->data_points[res->ndata++] = z[i] / best_gain;
+                res->data_points[res->ndata++] = zb[i] / best_gain;
             }
         }
     }
@@ -925,8 +1014,8 @@ int m2sdr_lte_analyse(const float complex *x, size_t count, double sample_rate, 
         }
         res->rssi_db = m2sdr_power_db(total / M2SDR_LTE_FRAME_SYMBOLS);
     }
-    if (res->mib && res->ports == 1)
-        data_analyse(&grid, res->cell_id, res->n_rb, res);
+    if (res->mib && res->ports <= 2)
+        data_analyse(&grid, res->cell_id, res->n_rb, res->ports, res);
     rc = 0;
 
 out:

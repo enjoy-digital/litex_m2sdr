@@ -869,6 +869,11 @@ static void report_json(const struct an_source *src, const struct an_result *res
             printf("    \"data_analysed\": %s", l->data ? "true" : "false");
             if (l->data) {
                 printf(",\n    \"data_blocks\": %d,\n", l->data_blocks);
+                if (l->ports > 1) {
+                    printf("    \"data_blocks_diversity\": %d,\n", l->data_diversity);
+                    printf("    \"data_blocks_precoded\": %d,\n", l->data_precoded);
+                    printf("    \"data_blocks_not_read\": %d,\n", l->data_unknown);
+                }
                 printf("    \"data_modulation\": \"%s\",\n", m2sdr_modulation_name(l->data_modulation));
                 print_json_number("data_evm_percent", 100.0 * l->data_evm, true);
             } else {
@@ -1027,10 +1032,26 @@ static void report_text(const struct an_source *src, const struct an_result *res
             if (l->mib)
                 printf(", PBCH %.2f %%", 100.0 * l->pbch_evm);
             printf("\n");
-            if (l->data)
-                printf("  Data       : %d blocks in use, mostly %s, EVM %.2f %% against the nearest points\n", l->data_blocks,
+            if (l->data) {
+                int used[M2SDR_MOD_COUNT] = { 0 }, ns, rb, m;
+
+                printf("  Data       : %d blocks read, mostly %s, EVM %.2f %% against the nearest points\n", l->data_blocks,
                        l->data_blocks ? m2sdr_modulation_name(l->data_modulation) : "none", 100.0 * l->data_evm);
-            else if (l->mib)
+                for (ns = 0; ns < M2SDR_LTE_FRAME_SLOTS; ns++) {
+                    for (rb = 0; rb < M2SDR_LTE_MAX_ANALYSED_RB; rb++)
+                        used[l->rb_modulation[ns][rb] % M2SDR_MOD_COUNT]++;
+                }
+                printf("  Blocks     :");
+                for (m = 0; m < M2SDR_MOD_COUNT; m++) {
+                    if (m != M2SDR_MOD_AUTO && used[m])
+                        printf(" %s %d", m2sdr_modulation_name((enum m2sdr_modulation)m), used[m]);
+                }
+                printf("\n");
+                if (l->ports > 1)
+                    printf("  Two ports  : %d blocks in transmit diversity, %d as one precoded layer, %d in use and not read\n"
+                           "               (two layers, that one receiver does not separate)\n",
+                           l->data_diversity, l->data_precoded, l->data_unknown);
+            } else if (l->mib)
                 printf("  Data       : not analysed, the cell has %d antenna ports\n", l->ports);
         }
     }
@@ -2198,7 +2219,8 @@ static void lte_textures(struct an_ui *ui)
     lte_texture(&ui->lte_grid_tex, ui->lte_rgba, M2SDR_LTE_FRAME_SYMBOLS, k);
     for (b = 0; b < rb; b++) {
         for (ns = 0; ns < M2SDR_LTE_FRAME_SLOTS; ns++)
-            ui->lte_rgba[(size_t)(rb - 1 - b) * M2SDR_LTE_FRAME_SLOTS + (size_t)ns] = block_colors[l->rb_modulation[ns][b] % M2SDR_MOD_COUNT];
+            ui->lte_rgba[(size_t)(rb - 1 - b) * M2SDR_LTE_FRAME_SLOTS + (size_t)ns] =
+                l->rb_unknown[ns][b] ? 0xff808080u : block_colors[l->rb_modulation[ns][b] % M2SDR_MOD_COUNT];
     }
     lte_texture(&ui->lte_block_tex, ui->lte_rgba, M2SDR_LTE_FRAME_SLOTS, rb);
 }
@@ -2266,8 +2288,9 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
                          0.0, (double)l->analysed_rb, "")) {
         tex._TexID = (ImTextureID)(uintptr_t)ui->lte_block_tex;
         ImDrawList_AddImage(plot.dl, tex, plot.p0, plot.p1, (ImVec2){ 0.0f, 0.0f }, (ImVec2){ 1.0f, 1.0f }, 0xffffffffu);
-        m2sdr_plot_text(&plot, 8.0f, 4.0f, l->data ? "Blocks of data against ms: QPSK blue, 16QAM green, 64QAM yellow, 256QAM red"
-                                                   : "Blocks of data: not analysed with more than one antenna port",
+        m2sdr_plot_text(&plot, 8.0f, 4.0f, !l->data ? "Blocks of data: not analysed with four antenna ports" : l->ports > 1 ?
+                        "QPSK blue, 16QAM green, 64QAM yellow, 256QAM red, not read grey" :
+                        "Blocks of data against ms: QPSK blue, 16QAM green, 64QAM yellow, 256QAM red",
                         0xffffffffu);
         m2sdr_plot_end(&plot);
     }
@@ -2330,6 +2353,11 @@ static void draw_lte_results(struct an_ui *ui)
             label_value("Data blocks", "%d", l->data_blocks);
             label_value("Data, mostly", "%s", l->data_blocks ? m2sdr_modulation_name(l->data_modulation) : "none");
             label_value("Data EVM", "%.2f %%", 100.0 * l->data_evm);
+            if (l->ports > 1) {
+                label_value("Transmit diversity", "%d blocks", l->data_diversity);
+                label_value("One precoded layer", "%d blocks", l->data_precoded);
+                label_value("In use, not read", "%d blocks", l->data_unknown);
+            }
         }
         igEndTable();
     }
@@ -2337,8 +2365,11 @@ static void draw_lte_results(struct an_ui *ui)
     if (l->data)
         igTextUnformatted("The control channels are not decoded: a block is taken as the constellation it fits best, "
                           "and its EVM is against the nearest points.", NULL);
-    else if (l->mib)
-        igTextUnformatted("Data are not analysed: with several antenna ports, one receiver does not separate them.", NULL);
+    if (l->data && l->ports > 1)
+        igTextUnformatted("Two antenna ports: a block is read when it is in transmit diversity or holds one layer. "
+                          "One receiver does not separate two layers.", NULL);
+    else if (l->mib && !l->data)
+        igTextUnformatted("Data are not analysed with four antenna ports.", NULL);
     igPopTextWrapPos();
 }
 
