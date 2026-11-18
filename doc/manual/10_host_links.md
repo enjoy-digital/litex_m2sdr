@@ -447,7 +447,7 @@ packet whose fraction is 1.5 s or more. A strict VRT decoder can reject the pack
 After a write of the board time the pulses come in a burst, and the integer field is wrong
 until the burst ends, as described in [Internal PPS](#timing-pps-gen).
 
-A small receiver is provided for tests: `litex_m2sdr/software/user/m2sdr_vrt_rx.py`. It accepts
+A small receiver is provided for tests: `litex_m2sdr/software/user/python/m2sdr_vrt_rx.py`. It accepts
 signal data packets with a stream identifier and prints their timestamps.
 
 In the code:
