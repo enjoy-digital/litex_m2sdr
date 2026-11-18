@@ -45,3 +45,6 @@ def test_every_pcie_dma_synchronizer_gets_the_pps(tmp_path):
     for n in range(2):
         assert re.search(rf"assign \w*dma{n}_synchronizer_pps = pps_gen_pps_pulse;", rtl), \
             f"DMA channel {n} synchronizer has no PPS."
+        # An undriven channel leaves its buffering FIFO unwritten, which Vivado cannot synthesize.
+        assert re.search(rf"assign \w*dma{n}_buffering_next_sink_valid = ", rtl), \
+            f"DMA channel {n} writer is not driven."
