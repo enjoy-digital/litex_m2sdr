@@ -881,7 +881,7 @@ and the PBCH are in its six central blocks; a narrower one is analysed whole.
 | RSRP, RSSI, PSS and SSS power | Resource grid, in dBFS |
 | EVM of the reference signals | Each one against the channel given by its neighbours |
 | EVM of the PBCH | Its symbols against QPSK |
-| Blocks of data, their modulation and EVM | See below; one antenna port only |
+| Blocks of data, their modulation and EVM | See below; one or two antenna ports |
 
 The view draws the resource grid of the frame, the blocks of data with their modulation, and
 the equalised symbols of the data, of the PBCH and of the reference signals.
@@ -891,9 +891,18 @@ the equalised symbols of the data, of the PBCH and of the reference signals.
 > not known. A block of data, a resource block in a slot, is counted as in use when it holds
 > power, and is taken as the constellation that it fits best among QPSK, 16QAM, 64QAM and
 > 256QAM; its EVM is against the nearest points. This is a diagnostic, not the EVM of a
-> conformance test. With two antenna ports or more, the data are sent on several ports or
-> layers that one receiver does not separate: their blocks are then not analysed, and the
-> figures of the cell, of the reference signals and of the PBCH remain.
+> conformance test.
+
+With two antenna ports, the usual case of a live cell, a block of data is tried as transmit
+diversity and as one layer with each precoder, and is read when it fits one of them. The
+report gives the blocks read in each way.
+
+- **Two layers:** one receiver does not separate them. Such a block is counted as in use and
+  not read, and is grey in the view.
+- **Idle cell:** a frame can hold little more than the broadcast blocks, in QPSK. The larger
+  constellations show when the cell carries traffic.
+- **Four antenna ports:** the blocks of data are not analysed; the figures of the cell, of the
+  reference signals and of the PBCH remain.
 
 Not supported: TDD, the extended cyclic prefix, a PBCH on four antenna ports, the uplink.
 

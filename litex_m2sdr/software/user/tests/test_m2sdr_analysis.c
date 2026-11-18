@@ -512,11 +512,22 @@ struct lte_signal {
     double evm;                 /* Noise added, as the EVM it gives on a resource element. */
     size_t delay;               /* Samples ahead of the first frame. */
     double amp;                 /* Of a resource element; 0: 0.02. */
+    int    ports;               /* Antenna ports: 2, or else 1. */
 };
 
-/* Frames of a cell with one antenna port: synchronisation signals, reference signals, PBCH,
- * and data in the lower half of the blocks, QPSK, 16QAM and 64QAM in turn by slot. Returns the
- * number of samples written. */
+/* Port 1 of a cell of two ports, as one receiver gets it against port 0. */
+static float complex lte_port1(int a, int k)
+{
+    return 0.6f * (float complex)cexp(I * (0.7 + 0.002 * (double)(a - k / 2)));
+}
+
+/* Frames of a cell: synchronisation signals, reference signals, PBCH, and data in the lower
+ * half of the blocks, QPSK, 16QAM and 64QAM in turn by slot. Returns the number of samples
+ * written.
+ *
+ * With two antenna ports, the PBCH is in transmit diversity and the blocks of data are, in turn:
+ * transmit diversity, one precoded layer (twice, with two precoders), and two layers of 64QAM,
+ * that one receiver cannot read. */
 static size_t make_lte(float complex *x, size_t max, const struct lte_signal *sig)
 {
     static float complex qpsk[4], qam16[16], qam64[64], crs[2 * LTE_MAX_RB], pss[LTE_SYNC_LEN];
@@ -526,14 +537,16 @@ static size_t make_lte(float complex *x, size_t max, const struct lte_signal *si
     const double fs = 1920000.0 * d, amp = sig->amp > 0 ? sig->amp : 0.02;
     const float complex *cons[3] = { qpsk, qam16, qam64 };
     const int ncons[3] = { 4, 16, 64 };
-    float complex *grid = calloc((size_t)k, sizeof(*grid));
+    const bool two = sig->ports == 2;
+    const float r = two ? (float)M_SQRT1_2 : 1.0f;
+    float complex *grid = calloc((size_t)k, sizeof(*grid)), *g1 = calloc((size_t)k, sizeof(*g1));
     float complex *fd = malloc((size_t)n * sizeof(*fd)), *td = malloc((size_t)n * sizeof(*td));
     struct m2sdr_fft *fft = m2sdr_fft_alloc((size_t)n, true);
     uint8_t mib[LTE_MIB_BITS] = { 0 };
     size_t pos = sig->delay, i;
     int frame, ns, l, a, j, pbch_at;
 
-    if (!grid || !fd || !td || !fft) {
+    if (!grid || !g1 || !fd || !td || !fft) {
         failures++;
         return 0;
     }
@@ -555,7 +568,7 @@ static size_t make_lte(float complex *x, size_t max, const struct lte_signal *si
         mib[4] = 1;
         for (j = 0; j < 8; j++)
             mib[6 + j] = (uint8_t)(((sfn >> 2) >> (7 - j)) & 1);
-        m2sdr_lte_bch_encode(mib, 1, sig->cell_id, bch);
+        m2sdr_lte_bch_encode(mib, two ? 2 : 1, sig->cell_id, bch);
         pbch_at = (sfn & 3) * LTE_PBCH_FRAME;
 
         for (ns = 0; ns < 20; ns++) {
@@ -563,7 +576,12 @@ static size_t make_lte(float complex *x, size_t max, const struct lte_signal *si
                 const int cp = (l ? 9 : 10) * d;
                 const bool centre_sym = (ns == 0 || ns == 10) && (l == 5 || l == 6);
 
+                static const float complex turn[4] = { 1, -1, I, -I };
+                float complex x0 = 0, x1 = 0;
+                bool second = false;
+
                 memset(grid, 0, (size_t)k * sizeof(*grid));
+                memset(g1, 0, (size_t)k * sizeof(*g1));
                 if (centre_sym && l == 5)
                     m2sdr_lte_sss(sig->cell_id / 3, sig->cell_id % 3, ns == 10, sss);
                 if (l == 0 || l == 4)
@@ -571,8 +589,12 @@ static size_t make_lte(float complex *x, size_t max, const struct lte_signal *si
                 for (a = 0; a < k; a++) {
                     const bool centre = a >= k / 2 - 36 && a < k / 2 + 36;
 
+                    if ((a % 12) == 0)
+                        second = false;                     /* Pairs of transmit diversity: within a block. */
                     if ((l == 0 || l == 4) && (a % 6) == ((l ? 3 : 0) + sig->cell_id) % 6) {
                         grid[a] = crs[a / 6 - sig->n_rb + LTE_MAX_RB];
+                    } else if (two && (l == 0 || l == 4) && (a % 6) == ((l ? 0 : 3) + sig->cell_id) % 6) {
+                        g1[a] = crs[a / 6 - sig->n_rb + LTE_MAX_RB];
                     } else if (centre && centre_sym) {
                         const int at = a - (k / 2 - 31);
                         if (at >= 0 && at < LTE_SYNC_LEN)
@@ -580,14 +602,47 @@ static size_t make_lte(float complex *x, size_t max, const struct lte_signal *si
                     } else if (centre && ns == 1 && l < 4) {
                         if (l < 2 && (a % 3) == (sig->cell_id % 3))
                             continue;
-                        grid[a] = (float)M_SQRT1_2 * ((1 - 2 * bch[pbch_at]) + I * (1 - 2 * bch[pbch_at + 1]));
+                        if (!two) {
+                            grid[a] = (float)M_SQRT1_2 * ((1 - 2 * bch[pbch_at]) + I * (1 - 2 * bch[pbch_at + 1]));
+                        } else if ((pbch_at & 2) == 0) {
+                            x0 = (float)M_SQRT1_2 * ((1 - 2 * bch[pbch_at]) + I * (1 - 2 * bch[pbch_at + 1]));
+                            x1 = (float)M_SQRT1_2 * ((1 - 2 * bch[pbch_at + 2]) + I * (1 - 2 * bch[pbch_at + 3]));
+                            grid[a] = r * x0;
+                            g1[a]   = -r * conjf(x1);
+                        } else {
+                            grid[a] = r * x1;
+                            g1[a]   = r * conjf(x0);
+                        }
                         pbch_at += 2;
                     } else if ((ns & 1) == 0 && l < 3) {
                         continue;                           /* Control region: left empty. */
                     } else if (a / 12 < sig->n_rb / 2) {
-                        const int m = ns % 3;
-                        grid[a] = cons[m][(int)(rng_uniform() * ncons[m]) % ncons[m]];
+                        const int m = ns % 3, way = (a / 12) % 4;
+
+                        if (!two) {
+                            grid[a] = cons[m][(int)(rng_uniform() * ncons[m]) % ncons[m]];
+                        } else if (way == 0 && !second) {
+                            x0 = cons[m][(int)(rng_uniform() * ncons[m]) % ncons[m]];
+                            x1 = cons[m][(int)(rng_uniform() * ncons[m]) % ncons[m]];
+                            grid[a] = r * x0;
+                            g1[a]   = -r * conjf(x1);
+                            second  = true;
+                        } else if (way == 0) {
+                            grid[a] = r * x1;
+                            g1[a]   = r * conjf(x0);
+                            second  = false;
+                        } else if (way < 3) {
+                            grid[a] = r * cons[m][(int)(rng_uniform() * ncons[m]) % ncons[m]];
+                            g1[a]   = turn[(ns + way) % 4] * grid[a];
+                        } else {
+                            grid[a] = r * qam64[(int)(rng_uniform() * 64) % 64];
+                            g1[a]   = r * qam64[(int)(rng_uniform() * 64) % 64];
+                        }
                     }
+                }
+                if (two) {
+                    for (a = 0; a < k; a++)
+                        grid[a] += lte_port1(a, k) * g1[a];
                 }
                 memset(fd, 0, (size_t)n * sizeof(*fd));
                 for (a = 0; a < k; a++) {
@@ -618,6 +673,7 @@ done:
     }
     m2sdr_fft_free(fft);
     free(grid);
+    free(g1);
     free(fd);
     free(td);
     return pos;
@@ -631,6 +687,8 @@ static void test_lte(void)
         { 503, 25,   2, 2, -6400.0, 0.02, 30001 },
         { 141, 25, 1023, 2, 11300.0, 0.05,   500 },
         { 250, 50,  77, 3,  -150.0, 0.02, 99999 },
+        { 388, 25, 295, 2,  1078.0, 0.015, 4321, 0.0, 2 },
+        {  77, 15, 900, 1, -3000.0, 0.015,   100, 0.0, 2 },
     };
     const size_t max = (size_t)(0.052 * 1920000.0 * 8);
     float complex *x = malloc(max * sizeof(*x));
@@ -646,15 +704,17 @@ static void test_lte(void)
         const struct lte_signal *sig = &signals[i];
         const double fs = 1920000.0 * (1 << sig->rate_index);
         const size_t count = make_lte(x, (size_t)(0.052 * fs), sig);
-        int wrong = 0, empty_used = 0, used = 0;
+        const int ports = sig->ports == 2 ? 2 : 1;
+        int wrong = 0, empty_used = 0, used = 0, readable = 0, layers = 0, layers_read = 0, diversity = 0;
 
-        printf("LTE, cell %d, %d blocks, %.2f MSPS, offset %.0f Hz:\n", sig->cell_id, sig->n_rb, fs / 1e6, sig->cfo_hz);
+        printf("LTE, cell %d, %d blocks, %.2f MSPS, offset %.0f Hz, %d antenna port%s:\n", sig->cell_id, sig->n_rb, fs / 1e6,
+               sig->cfo_hz, ports, ports == 1 ? "" : "s");
         CHECK("analyse", m2sdr_lte_analyse(x, count, fs, res) == 0);
         CHECK("cell found", res->found);
         CHECK_NEAR("cell identity", res->cell_id, sig->cell_id, 0);
         CHECK_NEAR("carrier offset (Hz)", res->freq_error_hz, sig->cfo_hz, 5.0);
         CHECK("MIB", res->mib);
-        CHECK_NEAR("antenna ports", res->ports, 1, 0);
+        CHECK_NEAR("antenna ports", res->ports, ports, 0);
         CHECK_NEAR("resource blocks", res->n_rb, sig->n_rb, 0);
         /* The frame analysed is the first whole one: the first or the second sent. */
         CHECK("frame number", res->sfn == sig->sfn % 1024 || res->sfn == (sig->sfn + 1) % 1024);
@@ -662,15 +722,30 @@ static void test_lte(void)
         CHECK_NEAR("RSRP (dBFS)", res->rsrp_db, 20.0 * log10(0.02), 0.3);
         CHECK_NEAR("PSS power (dBFS)", res->pss_db, 20.0 * log10(0.02), 0.5);
         CHECK_NEAR("reference signal EVM (%)", 100.0 * res->rs_evm, 100.0 * sig->evm, 30.0 * sig->evm);
-        CHECK_NEAR("PBCH EVM (%)", 100.0 * res->pbch_evm, 100.0 * sig->evm, 40.0 * sig->evm);
-        CHECK("data analysed", res->data);
-        CHECK_NEAR("data EVM (%)", 100.0 * res->data_evm, 100.0 * sig->evm, 40.0 * sig->evm);
+        /* Two ports: the symbols are weaker than a reference element, by the channel of port 1,
+         * and by the precoder for a block of one layer. */
+        if (ports == 1) {
+            CHECK_NEAR("PBCH EVM (%)", 100.0 * res->pbch_evm, 100.0 * sig->evm, 40.0 * sig->evm);
+            CHECK("data analysed", res->data);
+            CHECK_NEAR("data EVM (%)", 100.0 * res->data_evm, 100.0 * sig->evm, 40.0 * sig->evm);
+        } else {
+            CHECK_NEAR("PBCH EVM (%)", 100.0 * res->pbch_evm, 121.0 * sig->evm, 40.0 * sig->evm);
+            CHECK("data analysed", res->data);
+            CHECK("data EVM", res->data_evm > sig->evm && res->data_evm < 3.0 * sig->evm);
+        }
         /* The lower half of the blocks carries QPSK, 16QAM, 64QAM by slot; the rest is empty. */
         for (ns = 0; ns < 20; ns++) {
             static const enum m2sdr_modulation expect[3] = { M2SDR_MOD_QPSK, M2SDR_MOD_16QAM, M2SDR_MOD_64QAM };
             for (rb = 0; rb < sig->n_rb; rb++) {
                 /* The block around the centre holds only synchronisation in some slots. */
-                if (rb < sig->n_rb / 2) {
+                if (rb < sig->n_rb / 2 && ports == 2 && (rb % 4) == 3) {
+                    layers++;
+                    if (res->rb_modulation[ns][rb] != M2SDR_MOD_AUTO)
+                        layers_read++;
+                } else if (rb < sig->n_rb / 2) {
+                    readable++;
+                    if (ports == 2 && (rb % 4) == 0)
+                        diversity++;
                     if (res->rb_modulation[ns][rb] != M2SDR_MOD_AUTO) {
                         used++;
                         if (res->rb_modulation[ns][rb] != expect[ns % 3])
@@ -681,9 +756,15 @@ static void test_lte(void)
                 }
             }
         }
-        CHECK("blocks in use found", used >= 20 * (sig->n_rb / 2) - 12 && res->data_blocks == used + empty_used);
+        CHECK("blocks in use found", used >= readable - 12 && res->data_blocks == used + empty_used);
         CHECK("their modulation", wrong == 0);
         CHECK("empty blocks left out", empty_used == 0);
+        if (ports == 2) {
+            CHECK("blocks of two layers not read", layers_read == 0 && res->data_unknown >= layers - 6 &&
+                  res->data_unknown <= layers);
+            CHECK("blocks in transmit diversity", res->data_diversity >= diversity - 6 && res->data_diversity <= diversity);
+            CHECK("blocks of one precoded layer", res->data_diversity + res->data_precoded == res->data_blocks);
+        }
     }
 
     printf("LTE, no cell:\n");

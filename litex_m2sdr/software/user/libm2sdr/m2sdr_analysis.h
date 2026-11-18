@@ -295,9 +295,12 @@ int m2sdr_demod(const float complex *x, size_t count, double sample_rate,
  *
  * The control channels are not decoded, so the allocation and the modulation of the data are
  * not known: a block of data is taken as the constellation it fits best, and its EVM is
- * against the nearest points. This is a diagnostic, not the EVM of a conformance test. With
- * more than one antenna port, the data are sent on several ports or layers that one receiver
- * does not separate: their blocks are then not analysed. */
+ * against the nearest points. This is a diagnostic, not the EVM of a conformance test.
+ *
+ * With two antenna ports, a block is tried as transmit diversity and as one layer with each of
+ * the precoders, and is read when it fits one of them. A block of two layers fits none: one
+ * receiver does not separate them, and it is counted as in use and not read. With four
+ * antenna ports, the blocks of data are not analysed. */
 struct m2sdr_lte_result {
     bool   found;               /* PSS and SSS found: the fields up to frame_offset are valid. */
     int    cell_id;             /* Physical cell identity, 0 to 503. */
@@ -318,13 +321,18 @@ struct m2sdr_lte_result {
     double rssi_db;             /* Power of the band analysed, dBFS. */
     double rs_evm;              /* Reference signals of port 0 against the channel around them. */
     double pbch_evm;            /* PBCH symbols against QPSK. */
-    bool   data;                /* Data blocks analysed (one antenna port). */
+    bool   data;                /* Data blocks analysed (one or two antenna ports). */
     double data_evm;            /* Over the blocks in use. */
-    int    data_blocks;         /* Resource blocks in use in the frame, of 20 slots each. */
+    int    data_blocks;         /* Resource blocks in use and read in the frame, of 20 slots each. */
+    /* Two antenna ports: blocks read as transmit diversity, as one precoded layer, and blocks in
+     * use that fit neither (two layers, mostly). */
+    int    data_diversity, data_precoded, data_unknown;
     enum m2sdr_modulation data_modulation;   /* The most used. */
     /* Per slot and resource block: modulation (M2SDR_MOD_AUTO: empty or not analysed) and EVM. */
     uint8_t rb_modulation[M2SDR_LTE_FRAME_SLOTS][M2SDR_LTE_MAX_ANALYSED_RB];
     float   rb_evm[M2SDR_LTE_FRAME_SLOTS][M2SDR_LTE_MAX_ANALYSED_RB];
+    /* Per slot and resource block: 1 when the block is in use and not read (two antenna ports). */
+    uint8_t rb_unknown[M2SDR_LTE_FRAME_SLOTS][M2SDR_LTE_MAX_ANALYSED_RB];
     /* Power of each resource element, dBFS, the lowest subcarrier first. */
     float   grid_db[M2SDR_LTE_FRAME_SYMBOLS][M2SDR_LTE_MAX_SUBCARRIERS];
     /* Equalised symbols: data in use, reference signals and PBCH, the constellations scaled to
