@@ -434,6 +434,23 @@ configure the RFIC themselves.
 TX power is set as an attenuation in dB, a positive number, in all utilities: a larger value
 means less power. The reference page of the utilities is `litex_m2sdr/software/user/README.md`.
 
+The top level of `litex_m2sdr/software/user/` holds the utilities; the rest is in
+subdirectories.
+
+| Path | Holds |
+|--------------------------|---------------------------------------------------------------------|
+| `m2sdr_*.c` | The utilities, one file each |
+| `libm2sdr/` | The host library, and the support code of the utilities: command line, host queue, SATA capture volumes |
+| `liblitepcie/`, `libliteeth/`, `libliteusb/` | Access to the board over PCIe, Ethernet and USB3 |
+| `ad9361/` | Driver of the RFIC |
+| `scan_ui/` | Plot and window helpers of the graphical utilities |
+| `third_party/` | `kissfft` and the `cimgui` submodule |
+| `python/` | Python programs |
+| `tests/` | Unit tests, run by `make core-tests` |
+
+The support code is private to the build: it is part of `libm2sdr.a`, that the utilities link,
+and is neither in the shared library nor in the installed headers.
+
 ### Optional utilities {#sw-optional}
 
 Some utilities need extra packages and are skipped by the `Makefile` when these are missing.
@@ -449,7 +466,7 @@ The other utilities, the library and the SoapySDR driver are built in every case
 ```sh
 sudo apt install pkg-config libsndfile1-dev libsamplerate0-dev \
     libsdl2-dev libgl1-mesa-dev libpng-dev
-git submodule update --init --recursive litex_m2sdr/software/user/cimgui
+git submodule update --init --recursive litex_m2sdr/software/user/third_party/cimgui
 ```
 
 ### m2sdr_util: board information and tests {#sw-util}
@@ -995,9 +1012,10 @@ m2sdr_gpio --device-num 0 --enable --source csr --output-data 0x2 --output-enabl
 
 ### Python helpers {#sw-python}
 
-Python programs complete the utilities in `litex_m2sdr/software/user/`.
+Python programs complete the utilities, in `litex_m2sdr/software/user/python/`.
 
-- `m2sdr_fm_radio.py` is a small FM broadcast receiver with a graphical interface.
+- `m2sdr_fm_radio.py` is a small FM broadcast receiver with a graphical interface. It runs the
+  utilities built in `litex_m2sdr/software/user/`, or else the installed ones.
 - `m2sdr_vrt_rx.py` receives and decodes the VRT packets of a bitstream built with the VRT
   streamer, without any other software of the project. The bitstream sends VRT packets only once
   its route is selected by hand; see [VRT streaming](#flow-eth-vrt).

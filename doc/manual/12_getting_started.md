@@ -107,7 +107,7 @@ only when the SDL2 and OpenGL development packages are installed and the pinned 
 submodule is present:
 
 ```sh
-git submodule update --init --recursive litex_m2sdr/software/user/cimgui
+git submodule update --init --recursive litex_m2sdr/software/user/third_party/cimgui
 ```
 
 Without these dependencies the build skips these tools and nothing else. The same rule applies

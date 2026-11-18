@@ -6,8 +6,8 @@
 
 #include "m2sdr.h"
 #include "m2sdr_internal.h"
-#include "../m2sdr_cli.h"
-#include "../m2sdr_tool.h"
+#include "m2sdr_cli.h"
+#include "m2sdr_tool.h"
 
 static int test_parse_identifier_invalid_ports(void)
 {

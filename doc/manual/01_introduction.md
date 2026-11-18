@@ -162,7 +162,7 @@ do together, and a complete example for anyone who builds a comparable design.
 | `litex_m2sdr_platform.py` | Pins, I/O standards and clock constraints of the board |
 | `litex_m2sdr/gateware/` | Gateware specific to the board: RFIC, time, PPS, clocks, streams |
 | `litex_m2sdr/software/kernel/` | Linux kernel driver |
-| `litex_m2sdr/software/user/` | `libm2sdr`, the utilities and their tests |
+| `litex_m2sdr/software/user/` | The utilities, `libm2sdr`, their tests and Python programs |
 | `litex_m2sdr/software/soapysdr/` | SoapySDR driver |
 | `litex_m2sdr/software/gnuradio/` | GNU Radio examples |
 | `litex_m2sdr/doc/libm2sdr/` | Documentation and examples of the C library |

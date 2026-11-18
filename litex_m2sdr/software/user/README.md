@@ -55,6 +55,23 @@ The user utilities now follow a mostly shared CLI vocabulary:
 - The public `libm2sdr` API exposes `m2sdr_get_ptp_status()`, `m2sdr_get_ptp_discipline_config()`, `m2sdr_set_ptp_discipline_config()`, `m2sdr_clear_ptp_counters()`, plus the matching `m2sdr_get_ptp_clock10_*()` helpers when the PTP clk10 block is present.
 - When Ethernet PTP actively owns the board clock, host-side absolute time writes are rejected to avoid conflicting masters.
 
+## Layout
+
+The top level of this directory holds the utilities; the rest is in subdirectories.
+
+| Path | Holds |
+|--------------------------|---------------------------------------------------------------------|
+| `m2sdr_*.c` | The utilities, one file each |
+| `libm2sdr/` | The host library, and the support code of the utilities: command line, host queue, SATA capture volumes |
+| `liblitepcie/`, `libliteeth/`, `libliteusb/` | Access to the board over PCIe, Ethernet and USB3 |
+| `ad9361/` | Driver of the RFIC |
+| `scan_ui/` | Plot and window helpers of the graphical utilities |
+| `third_party/` | `kissfft` and the `cimgui` submodule |
+| `python/` | Python programs |
+| `tests/` | Unit tests, run by `make core-tests` |
+
+The support code of the utilities is part of `libm2sdr.a` only: it is neither in `libm2sdr.so` nor in the installed headers.
+
 ## Build dependencies
 
 Core user tools build with the standard C/C++ toolchain and do not require the optional audio or GUI packages.
@@ -69,7 +86,7 @@ Core user tools build with the standard C/C++ toolchain and do not require the o
 - SDL2 development headers/libraries (`libsdl2-dev`)
 - OpenGL development headers/libraries (`libgl1-mesa-dev`)
 - libpng development headers/libraries for `m2sdr_scan` (`libpng-dev`)
-- a populated `software/user/cimgui/` directory containing the pinned `cimgui` and Dear ImGui sources
+- a populated `software/user/third_party/cimgui/` directory containing the pinned `cimgui` and Dear ImGui sources
 
 On Debian/Ubuntu:
 ~~~~
@@ -78,8 +95,10 @@ sudo apt install pkg-config libsndfile1-dev libsamplerate0-dev libsdl2-dev libgl
 
 Populate the pinned `cimgui` submodule from the repository root with:
 ~~~~
-git submodule update --init --recursive litex_m2sdr/software/user/cimgui
+git submodule update --init --recursive litex_m2sdr/software/user/third_party/cimgui
 ~~~~
+
+In a clone made before the submodule moved to `third_party/`, run `git submodule sync` first; the old `litex_m2sdr/software/user/cimgui` directory can then be deleted.
 
 Use `../build.py --clean` when you want a full kernel/user/Soapy rebuild.
 
@@ -102,7 +121,7 @@ Use explicit device arguments to choose the transport at runtime:
 you need to test legacy/default transport behavior, but they are no longer
 required just to build PCIe or Ethernet-capable binaries.
 
-These dependencies are only needed for optional tools. When libsndfile/libsamplerate are not available, `m2sdr_fm_tx` and `m2sdr_fm_rx` are skipped by the `Makefile`. When SDL2 is not available, or when `software/user/cimgui/` is missing, `m2sdr_scan` and `m2sdr_check` are skipped. When libpng is not available, `m2sdr_scan` is skipped. The core CLI tools, `libm2sdr`, and the SoapySDR module still build.
+These dependencies are only needed for optional tools. When libsndfile/libsamplerate are not available, `m2sdr_fm_tx` and `m2sdr_fm_rx` are skipped by the `Makefile`. When SDL2 is not available, or when `software/user/third_party/cimgui/` is missing, `m2sdr_scan` and `m2sdr_check` are skipped. When libpng is not available, `m2sdr_scan` is skipped. The core CLI tools, `libm2sdr`, and the SoapySDR module still build.
 
 ### m2sdr_util
 General-purpose utility that provides board information, basic tests, and SPI flash operations.
@@ -869,7 +888,7 @@ Notes:
 - `F11` toggles a borderless fullscreen span across all monitors.
 - `--preset-save` writes a simple text preset file containing the current scan settings.
 - In headless/non-GUI build environments without SDL2, this binary is not built.
-- A populated `software/user/cimgui/` submodule is also required for the build. From the repository root, use `git submodule update --init --recursive litex_m2sdr/software/user/cimgui`.
+- A populated `software/user/third_party/cimgui/` submodule is also required for the build. From the repository root, use `git submodule update --init --recursive litex_m2sdr/software/user/third_party/cimgui`.
 
 ---
 

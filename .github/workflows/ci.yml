@@ -42,7 +42,7 @@ jobs:
 
       - name: Fetch pinned cimgui submodule
         run: |
-          git submodule update --init --recursive litex_m2sdr/software/user/cimgui
+          git submodule update --init --recursive litex_m2sdr/software/user/third_party/cimgui
 
       - name: Build User Utilities
         run: |

@@ -12,3 +12,4 @@
 /.build-flags
 /.build-flags-*
 /m2sdr_revision.h
+/imgui.ini

@@ -310,7 +310,7 @@ Without such a build of the software, write the route by hand: the value 2 in th
 ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-eth-vrt --build --load
 litex_server --udp --udp-ip=192.168.1.50 --udp-port=1234
 litex_cli --csr-csv=scripts/csr.csv --write main_eth_rx_mode 2
-python3 litex_m2sdr/software/user/m2sdr_vrt_rx.py --group 239.168.1.100 \
+python3 litex_m2sdr/software/user/python/m2sdr_vrt_rx.py --group 239.168.1.100 \
     --port 4991 --count 20
 ```
 

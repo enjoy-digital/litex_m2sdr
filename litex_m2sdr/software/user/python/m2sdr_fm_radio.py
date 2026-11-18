@@ -14,6 +14,13 @@ import subprocess
 
 import numpy as np
 
+# Utilities -----------------------------------------------------------------------------------------
+
+def _tool(name):
+    """Path of a utility: the one built in the directory above this file, or else the one of the PATH."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", name)
+    return path if os.access(path, os.X_OK) else name
+
 # Constants ----------------------------------------------------------------------------------------
 
 IQ_SAMPLERATE   = 1_000_000
@@ -76,7 +83,7 @@ def run_gui(
     def _rf_update_now():
         rx_freq_hz = int(current_freq_mhz * 1e6)
         cmd = [
-            "./m2sdr_rf",
+            _tool("m2sdr_rf"),
             "--sample-rate",    str(samplerate),
             "--rx-freq",        str(rx_freq_hz),
             "--rx-gain",        str(current_gain_db),
@@ -89,8 +96,8 @@ def run_gui(
 
     def _spawn_pcm_proc():
         fm_cmd = (
-            f"./m2sdr_record -q - | "
-            f"./m2sdr_fm_rx -s {samplerate} -d {FM_DEVIATION} -b {FM_BITS} -e {fm_region} "
+            f"{_tool('m2sdr_record')} -q - | "
+            f"{_tool('m2sdr_fm_rx')} -s {samplerate} -d {FM_DEVIATION} -b {FM_BITS} -e {fm_region} "
             f"-m {current_mode} - -"
         )
         try:

@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../m2sdr_sata_hostio.h"
+#include "m2sdr_sata_hostio.h"
 
 #define SECTOR_BYTES 512u
 
