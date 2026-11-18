@@ -271,6 +271,37 @@ def test_ad9361_rx_bitmode_bfp8_uses_low_exponent_for_small_blocks():
     ]
 
 
+def test_ad9361_rx_bitmode_bfp8_recovers_after_mode_change_mid_block():
+    """Verify RX BFP8 still emits blocks after the mode leaves BFP8 in the middle of a block."""
+    dut = AD9361RXBitMode(bfp8_payload_words=4)
+    headers = []
+
+    def gen():
+        yield dut.source.ready.eq(1)
+        yield dut.sink.valid.eq(1)
+        yield dut.mode.eq(2)
+        for _ in range(3): # Part of a block (8 input words).
+            yield
+        yield dut.mode.eq(0)
+        for _ in range(4):
+            yield
+        yield dut.mode.eq(2)
+        for _ in range(200):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready) and (yield dut.source.first):
+                if (yield dut.mode) == 2 and ((yield dut.source.data) & 0xffffffff) == BFP8_HEADER_MAGIC:
+                    headers.append(1)
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    assert len(headers) >= 10
+
+
 def test_ad9361_tx_bitmode_bfp8_header_and_payload_expansion():
     """Verify TX BFP8 consumes a header and expands one payload word to two RFIC beats."""
     dut = AD9361TXBitMode(bfp8_payload_words=1)
