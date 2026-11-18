@@ -1627,7 +1627,7 @@ static void draw_controls(struct an_ui *ui, struct an_shared *sh, bool *changed)
     run = sh->run;
     pthread_mutex_unlock(&sh->lock);
 
-    igSeparatorText("Acquisition");
+    igSeparatorText(run ? "Acquisition: running" : "Acquisition: stopped");
     if (igButton(run ? "Stop" : "Run", (ImVec2){ 70.0f, 0.0f })) {
         pthread_mutex_lock(&sh->lock);
         sh->run = !run;
@@ -1645,7 +1645,18 @@ static void draw_controls(struct an_ui *ui, struct an_shared *sh, bool *changed)
         traces_reset(ui);
 
     igSeparatorText(src->live ? "Board" : "File");
-    if (src->live) {
+    if (src->live && src->no_rf_init) {
+        /* The RFIC is the one of another utility: nothing here would reach it. */
+        igText("%.6f MHz, %.3f MSPS", ui->set.freq_hz / 1e6, ui->set.sample_rate / 1e6);
+        igPushTextWrapPos(0.0f);
+        igTextUnformatted("RFIC left as it is (--no-rf-init): its frequency, rate and gain are set with m2sdr_rf.", NULL);
+        igPopTextWrapPos();
+        if (igRadioButton_IntPtr("RX1", &ui->set.channel, 0))
+            *changed = true;
+        igSameLine(0.0f, -1.0f);
+        if (igRadioButton_IntPtr("RX2", &ui->set.channel, 1))
+            *changed = true;
+    } else if (src->live) {
         if (input_mhz("Centre (MHz)", &ui->set.freq_hz)) {
             *changed = true;
             traces_reset(ui);
@@ -1717,7 +1728,10 @@ static void draw_controls(struct an_ui *ui, struct an_shared *sh, bool *changed)
     for (i = 0; i < UI_TRACES; i++) {
         if (i != 0 && i != 2)
             igSameLine(0.0f, -1.0f);
+        /* The name of a trace in its colour. */
+        igPushStyleColor_U32(ImGuiCol_Text, trace_colors[i]);
         igCheckbox(trace_names[i], &ui->trace_on[i]);
+        igPopStyleColor(1);
     }
     igSetNextItemWidth(150.0f);
     if (igInputInt("Trace average", &ui->avg_target, 1, 8, 0)) {
@@ -2726,7 +2740,7 @@ static void draw_results(struct an_ui *ui, struct an_shared *sh, bool *changed)
     igSameLine(0.0f, -1.0f);
     if (igButton("Off", (ImVec2){ 0.0f, 0.0f }))
         ui->markers[ui->marker_sel].on = false;
-    if (sh->src->live) {
+    if (sh->src->live && !sh->src->no_rf_init) {
         igSameLine(0.0f, -1.0f);
         if (igButton("To centre", (ImVec2){ 0.0f, 0.0f }) && ui->markers[ui->marker_sel].on) {
             ui->set.freq_hz += ui->markers[ui->marker_sel].offset_hz;

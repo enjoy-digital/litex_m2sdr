@@ -801,7 +801,9 @@ figures are always taken with a Blackman-Harris window.
 
 In the window, a left click places the selected marker, the wheel zooms around the mouse, a
 right drag moves the span and a double click shows it all. A marker gives the level and the
-noise density at its frequency, and its distance to the first marker. Q against I is drawn on a square, with the same scale on both axes.
+noise density at its frequency, and its distance to the first marker. The names of the traces
+are in the colour of their trace, and the top of the controls says whether the acquisition is
+running or stopped. Q against I is drawn on a square, with the same scale on both axes.
 
 > [!NOTE]
 > The levels are in dBFS: the board has no absolute level calibration, and the gain of the RFIC
@@ -852,7 +854,9 @@ sample rate is a few times the bandwidth of the signal, four samples per symbol 
 
 `m2sdr_gen --signal qam` sends random symbols of a chosen modulation, symbol rate and roll-off:
 with a cable and an attenuator from TX to RX, the board is its own test source. `--no-rf-init`
-then makes `m2sdr_analyzer` leave the RFIC as `m2sdr_rf` set it.
+then makes `m2sdr_analyzer` leave the RFIC as `m2sdr_rf` set it. The window then shows a
+note in place of the controls of the board: the frequency, the rate and the gain are the ones
+of `m2sdr_rf`.
 
 ```sh
 m2sdr_rf --sample-rate 1920000 --rx-freq 2490000000 --tx-freq 2490400000 --tx-att 10 --rx-gain 40
