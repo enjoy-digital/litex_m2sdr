@@ -765,7 +765,8 @@ m2sdr_scan --preset-load fm_band.scan --no-ui \
 ### m2sdr_analyzer: signal analyser {#sw-analyzer}
 
 `m2sdr_analyzer` measures a signal on the RX of a board or in a recording. It only receives,
-unless its test tone is asked for. It
+unless its test tone is asked for (`--tx-tone`); the tone is taken off the air, the TX
+attenuated by 89 dB, when the tool ends. It
 configures the RFIC itself and applies the calibration record of the board when it has one
 ([m2sdr_cal](#sw-cal)), so that the frequencies it reads are right.
 

@@ -525,6 +525,9 @@ static void source_close(struct an_source *src)
 {
     if (src->dev) {
         (void)m2sdr_stream_deactivate(src->dev, M2SDR_RX);
+        /* The test tone is not left on the air. */
+        if (src->tx_tone && src->configured)
+            (void)m2sdr_set_tx_att(src->dev, 89);
         m2sdr_close(src->dev);
     }
     if (src->file)
