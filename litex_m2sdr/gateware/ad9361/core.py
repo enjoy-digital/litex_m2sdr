@@ -324,7 +324,7 @@ class AD9361RFIC(LiteXModule):
 
         # BitMode ----------------------------------------------------------------------------------
         self.tx_bitmode = tx_bitmode = AD9361TXBitMode(data_width=dw)
-        self.rx_bitmode = rx_bitmode = AD9361RXBitMode(data_width=dw)
+        self.rx_bitmode = rx_bitmode = ResetInserter()(AD9361RXBitMode(data_width=dw))
         self.comb += tx_bitmode.mode.eq(self._bitmode.fields.mode)
         self.comb += rx_bitmode.mode.eq(self._bitmode.fields.mode)
 

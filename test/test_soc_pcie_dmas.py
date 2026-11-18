@@ -45,3 +45,7 @@ def test_every_pcie_dma_synchronizer_gets_the_pps(tmp_path):
     for n in range(2):
         assert re.search(rf"assign \w*dma{n}_synchronizer_pps = pps_gen_pps_pulse;", rtl), \
             f"DMA channel {n} synchronizer has no PPS."
+
+    # The RX BFP8 encoder restarts with the DMA0 Writer, so the first buffer starts with a block.
+    assert re.search(r"ad9361\w*_reset = \(\(~\w*dma0_synchronizer_synced\) \| \(~\w*dma0_writer\w*\[0\]\)\);", rtl), \
+        "RX BitMode is not reset with the DMA0 Writer."

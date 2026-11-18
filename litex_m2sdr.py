@@ -1092,7 +1092,9 @@ class BaseSoC(SoCMini):
                     # inserted headers with the first DMA buffer on every Writer start (frames are
                     # exactly one buffer long, so a phase slip at start would persist for the
                     # whole run).
-                    self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced | ~self.pcie_dma0.writer.enable)
+                    self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced | ~self.pcie_dma0.writer.enable),
+                    # Same for the BFP8 blocks: the first DMA buffer starts with a block header.
+                    self.ad9361.rx_bitmode.reset.eq(~self.pcie_dma0.synchronizer.synced | ~self.pcie_dma0.writer.enable),
                 )
             ]
         if with_eth:
