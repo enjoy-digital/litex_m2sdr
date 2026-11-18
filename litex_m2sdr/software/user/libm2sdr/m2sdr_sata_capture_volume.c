@@ -86,7 +86,7 @@ static char *capture_volume_next_field(char **save)
 static int capture_volume_parse_entry(struct sata_capture_volume *volume, char *line)
 {
     char *save = line;
-    char *field;
+    const char *field;
     struct sata_capture_entry e;
     int slot = -1;
 
