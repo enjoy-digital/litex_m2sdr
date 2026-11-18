@@ -230,7 +230,9 @@ class AD9361RXBitMode64b(LiteXModule):
         # BFP8 mode.
         # ----------
         bfp8_input_words = bfp8_payload_words * 2
-        self.bfp8_fifo = bfp8_fifo = stream.SyncFIFO(dma_layout(64), depth=bfp8_input_words, buffered=True)
+        self.bfp8_fifo = bfp8_fifo = ResetInserter()(stream.SyncFIFO(dma_layout(64), depth=bfp8_input_words, buffered=True))
+        # Flushed outside BFP8 mode: words of a block cut by a mode change would stall the next one.
+        self.comb += bfp8_fifo.reset.eq(mode != _BFP8_MODE)
 
         bfp8_collect_count = Signal(max=bfp8_input_words)
         bfp8_payload_count = Signal(max=bfp8_payload_words + 1)

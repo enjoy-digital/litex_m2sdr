@@ -1463,12 +1463,19 @@ class BaseSoC(SoCMini):
 
         The default implementation is a transparent passthrough, so the stock design is
         unchanged. The host digital loopback (``txrx_loopback``) sits on the host side of this
-        hook and keeps working on the unprocessed path.
+        hook and keeps working on the unprocessed path. It loops the extra DMA channels back to
+        the host: an unused channel would leave its buffering FIFO unwritten, which Vivado cannot
+        synthesize.
         """
         self.comb += [
             tx_source.connect(rfic_sink),
             rfic_source.connect(rx_sink),
         ]
+        n = 1
+        while hasattr(self, f"pcie_dma{n}"):
+            pcie_dma = getattr(self, f"pcie_dma{n}")
+            self.comb += pcie_dma.source.connect(pcie_dma.sink)
+            n += 1
 
     # SATA -----------------------------------------------------------------------------------------
 
