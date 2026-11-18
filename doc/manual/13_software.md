@@ -801,7 +801,7 @@ figures are always taken with a Blackman-Harris window.
 
 In the window, a left click places the selected marker, the wheel zooms around the mouse, a
 right drag moves the span and a double click shows it all. A marker gives the level and the
-noise density at its frequency, and its distance to the first marker.
+noise density at its frequency, and its distance to the first marker. Q against I is drawn on a square, with the same scale on both axes.
 
 > [!NOTE]
 > The levels are in dBFS: the board has no absolute level calibration, and the gain of the RFIC

@@ -1877,7 +1877,8 @@ static void draw_time(struct an_ui *ui)
     }
     if (m2sdr_plot_begin(&plot, "##mag", (ImVec2){ avail.x, 0.0f }, 0.0, dt * (double)(n - 1), M2SDR_PLOT_TIME,
                          ui->res.stats.mean_db + ui->res.set.ref_offset_db - 40.0,
-                         ui->res.stats.peak_db + ui->res.set.ref_offset_db + 3.0, "Power (dB)")) {
+                         ui->res.stats.peak_db + ui->res.set.ref_offset_db + 3.0,
+                         ui->res.set.ref_offset_db != 0.0 ? "Power, dBm; line: the mean" : "Power, dBFS; line: the mean")) {
         m2sdr_plot_trace(&plot, mag, n, 0.0, dt * (double)(n - 1), 0xff60ff60u);
         m2sdr_plot_hline(&plot, ui->res.stats.mean_db + ui->res.set.ref_offset_db, 0x80ffffffu);
         m2sdr_plot_end(&plot);
@@ -1889,7 +1890,7 @@ static void draw_statistics(struct an_ui *ui)
     static float x[M2SDR_CCDF_POINTS], y[M2SDR_CCDF_POINTS], g[M2SDR_CCDF_POINTS];
     static float cx[AN_TIME_POINTS], cy[AN_TIME_POINTS];
     struct m2sdr_plot plot;
-    ImVec2 avail;
+    ImVec2 avail, sq;
     float side, peak = 1e-6f;
     size_t i;
     int k;
@@ -1903,7 +1904,8 @@ static void draw_statistics(struct an_ui *ui)
     }
     igGetContentRegionAvail(&avail);
     side = avail.y < 0.5f * avail.x ? avail.y : 0.5f * avail.x;
-    if (m2sdr_plot_begin(&plot, "##ccdf", (ImVec2){ avail.x - side - 8.0f, side },
+    sq   = m2sdr_plot_square(side);
+    if (m2sdr_plot_begin(&plot, "##ccdf", (ImVec2){ avail.x - sq.x - 8.0f, side },
                          0.0, (M2SDR_CCDF_POINTS - 1) * M2SDR_CCDF_STEP_DB, M2SDR_PLOT_PLAIN,
                          -6.0, 0.0, "CCDF, log10, against dB above the mean power")) {
         m2sdr_plot_trace(&plot, g, M2SDR_CCDF_POINTS, x[0], x[M2SDR_CCDF_POINTS - 1], 0x80ffffffu);
@@ -1921,7 +1923,7 @@ static void draw_statistics(struct an_ui *ui)
             peak = fabsf(cy[i]);
     }
     peak *= 1.1f;
-    if (m2sdr_plot_begin(&plot, "##iqplane", (ImVec2){ side, side }, -peak, peak, M2SDR_PLOT_PLAIN, -peak, peak, "Q against I")) {
+    if (m2sdr_plot_begin(&plot, "##iqplane", sq, -peak, peak, M2SDR_PLOT_PLAIN, -peak, peak, "Q against I, full scale 1")) {
         m2sdr_plot_points(&plot, cx, cy, ui->res.time_count, 1.0f, 0xc040d0ffu);
         m2sdr_plot_end(&plot);
     }
@@ -2036,8 +2038,8 @@ static void draw_modulation(struct an_ui *ui, bool *changed)
     static float px[256], py[256];
     const struct m2sdr_demod_result *d = &ui->res.demod;
     struct m2sdr_plot plot;
-    ImVec2 avail;
-    float side, lim = 1.0f, eye_h;
+    ImVec2 avail, sq;
+    float side, lim = 1.0f, far = 0.0f, eye_h;
     int mod = (int)ui->set.demod.modulation, pulse = (int)ui->set.demod.pulse;
     int idx = ui->set.demod_log2 - AN_DEMOD_MIN_LOG2, npoints, i, m, rail;
     float evm_top = 1.0f;
@@ -2102,16 +2104,26 @@ static void draw_modulation(struct an_ui *ui, bool *changed)
         evm[k] = 100.0f * cabsf(d->sym[k] - d->ref[k]);
         if (evm[k] > evm_top)
             evm_top = evm[k];
+        if (fabsf(sx[k]) > far)
+            far = fabsf(sx[k]);
+        if (fabsf(sy[k]) > far)
+            far = fabsf(sy[k]);
     }
+    /* Symbols that are not on the points (another modulation, no lock) are shown too, up to
+     * twice the size of the constellation. */
+    if (1.05f * far > lim)
+        lim = 1.05f * far < 2.0f * lim ? 1.05f * far : 2.0f * lim;
 
     igGetContentRegionAvail(&avail);
     side = avail.y - 170.0f < 0.5f * avail.x ? avail.y - 170.0f : 0.5f * avail.x;
     if (side < 120.0f)
         side = 120.0f;
     eye_h = 0.5f * side;
+    sq    = m2sdr_plot_square(side);
 
     /* Constellation: the symbols, and the points they are compared with. */
-    if (m2sdr_plot_begin(&plot, "##const", (ImVec2){ side, side }, -lim, lim, M2SDR_PLOT_PLAIN, -lim, lim, "Q against I")) {
+    if (m2sdr_plot_begin(&plot, "##const", sq, -lim, lim, M2SDR_PLOT_PLAIN, -lim, lim,
+                         "Q against I; crosses: the points of the constellation")) {
         m2sdr_plot_points(&plot, sx, sy, d->symbols, 1.0f, 0xc040d0ffu);
         for (i = 0; i < npoints; i++) {
             const float x = m2sdr_plot_x(&plot, px[i]), y = m2sdr_plot_y(&plot, py[i]);
@@ -2125,8 +2137,10 @@ static void draw_modulation(struct an_ui *ui, bool *changed)
     /* Eye diagrams of I and of Q: two symbols, the decisions at the two vertical lines. */
     igBeginGroup();
     for (rail = 0; rail < 2; rail++) {
-        if (m2sdr_plot_begin(&plot, rail ? "##eyeq" : "##eyei", (ImVec2){ avail.x - side - 8.0f, eye_h },
-                             -0.5, 1.5, M2SDR_PLOT_PLAIN, -lim, lim, rail ? "Eye, Q, against symbols" : "Eye, I, against symbols")) {
+        if (m2sdr_plot_begin(&plot, rail ? "##eyeq" : "##eyei", (ImVec2){ avail.x - sq.x - 8.0f, eye_h },
+                             -0.5, 1.5, M2SDR_PLOT_PLAIN, -lim, lim,
+                             rail ? "Eye of Q, in symbols; lines: the decisions" :
+                                    "Eye of I, in symbols; lines: the decisions")) {
             static float ex[M2SDR_DEMOD_EYE_POINTS], ey[M2SDR_DEMOD_EYE_POINTS];
 
             m2sdr_plot_vline(&plot, 0.0, 0x60ffffffu);
@@ -2145,7 +2159,7 @@ static void draw_modulation(struct an_ui *ui, bool *changed)
 
     /* Error of each symbol. */
     if (m2sdr_plot_begin(&plot, "##evm", (ImVec2){ 0.0f, 0.0f }, 0.0, (double)(d->symbols - 1), M2SDR_PLOT_PLAIN,
-                         0.0, 1.1 * evm_top, "Error vector of each symbol, % of the RMS of the constellation")) {
+                         0.0, 1.1 * evm_top, "Error vector of each symbol, % of the RMS of the constellation, against its number; line: RMS")) {
         m2sdr_plot_trace(&plot, evm, d->symbols, 0.0, (double)(d->symbols - 1), 0xff60ff60u);
         m2sdr_plot_hline(&plot, 100.0 * d->evm_rms, 0xc0ffffffu);
         m2sdr_plot_end(&plot);

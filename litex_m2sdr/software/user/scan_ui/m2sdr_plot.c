@@ -23,6 +23,7 @@
 #define COL_GRID   0x40ffffffu
 #define COL_LABEL  0xffc8c8c8u
 #define COL_BACK   0xff141210u
+#define COL_PLATE  0xc0141210u   /* Under a text drawn over the traces. */
 
 /* Helpers */
 /*---------*/
@@ -92,6 +93,17 @@ void m2sdr_plot_format(char *buf, size_t len, double value, double step, enum m2
     snprintf(buf, len, "%.*f%s", decimals_for(fabs(step) / scale), value / scale, suffix);
 }
 
+/* Text over the plot, on a plate that keeps it readable over the traces. */
+static void plot_text(struct m2sdr_plot *plot, ImVec2 pos, const char *text, ImU32 color)
+{
+    ImVec2 ts;
+
+    igCalcTextSize(&ts, text, NULL, false, -1.0f);
+    ImDrawList_AddRectFilled(plot->dl, (ImVec2){ pos.x - 3.0f, pos.y - 1.0f }, (ImVec2){ pos.x + ts.x + 3.0f, pos.y + ts.y + 1.0f },
+                             COL_PLATE, 0.0f, 0);
+    ImDrawList_AddText_Vec2(plot->dl, pos, color, text, NULL);
+}
+
 float m2sdr_plot_x(const struct m2sdr_plot *plot, double x)
 {
     return plot->p0.x + (float)((x - plot->x0) / (plot->x1 - plot->x0)) * (plot->p1.x - plot->p0.x);
@@ -105,6 +117,11 @@ float m2sdr_plot_y(const struct m2sdr_plot *plot, double y)
 /* Plot */
 /*------*/
 
+ImVec2 m2sdr_plot_square(float height)
+{
+    return (ImVec2){ height - PLOT_MARGIN_TOP - PLOT_MARGIN_BOTTOM + PLOT_MARGIN_LEFT + PLOT_MARGIN_RIGHT, height };
+}
+
 bool m2sdr_plot_begin(struct m2sdr_plot *plot, const char *id, ImVec2 size,
                       double x0, double x1, enum m2sdr_plot_unit x_unit,
                       double y0, double y1, const char *y_label)
@@ -112,6 +129,8 @@ bool m2sdr_plot_begin(struct m2sdr_plot *plot, const char *id, ImVec2 size,
     ImVec2 pos, avail, mouse, ts;
     double step, v;
     char text[48];
+    float edge, tx;
+    bool same;
 
     memset(plot, 0, sizeof(*plot));
     igGetCursorScreenPos(&pos);
@@ -134,6 +153,7 @@ bool m2sdr_plot_begin(struct m2sdr_plot *plot, const char *id, ImVec2 size,
     plot->x1 = x1;
     plot->y0 = y0;
     plot->y1 = y1;
+    plot->label = y_label;
 
     igInvisibleButton(id, size, 0);
     igGetMousePos(&mouse);
@@ -146,8 +166,9 @@ bool m2sdr_plot_begin(struct m2sdr_plot *plot, const char *id, ImVec2 size,
 
     ImDrawList_AddRectFilled(plot->dl, plot->p0, plot->p1, COL_BACK, 0.0f, 0);
 
-    /* Vertical axis. */
-    step = nice_step(y1 - y0, (int)((plot->p1.y - plot->p0.y) / 45.0f));
+    /* Vertical axis. The two axes of a plane (the same range on both) share their step. */
+    same = x_unit == M2SDR_PLOT_PLAIN && x0 == y0 && x1 == y1;
+    step = nice_step(y1 - y0, (int)((plot->p1.y - plot->p0.y) / (same ? 70.0f : 45.0f)));
     for (v = ceil(y0 / step - 1e-9) * step; v <= y1 + 1e-9 * step; v += step) {
         const float y = m2sdr_plot_y(plot, v);
         ImDrawList_AddLine(plot->dl, (ImVec2){ plot->p0.x, y }, (ImVec2){ plot->p1.x, y }, COL_GRID, 1.0f);
@@ -155,8 +176,6 @@ bool m2sdr_plot_begin(struct m2sdr_plot *plot, const char *id, ImVec2 size,
         igCalcTextSize(&ts, text, NULL, false, -1.0f);
         ImDrawList_AddText_Vec2(plot->dl, (ImVec2){ plot->p0.x - ts.x - 5.0f, y - 0.5f * ts.y }, COL_LABEL, text, NULL);
     }
-    if (y_label && y_label[0])
-        ImDrawList_AddText_Vec2(plot->dl, (ImVec2){ plot->p0.x + 5.0f, plot->p0.y + 3.0f }, COL_LABEL, y_label, NULL);
 
     /* Horizontal axis. */
     if (x_unit == M2SDR_PLOT_LOG_FREQ) {
@@ -184,15 +203,23 @@ bool m2sdr_plot_begin(struct m2sdr_plot *plot, const char *id, ImVec2 size,
         ImDrawList_PushClipRect(plot->dl, plot->p0, plot->p1, true);
         return true;
     }
-    step = nice_step(x1 - x0, (int)((plot->p1.x - plot->p0.x) / 110.0f));
+    if (!same)
+        step = nice_step(x1 - x0, (int)((plot->p1.x - plot->p0.x) / 110.0f));
+    edge = plot->p0.x - 0.5f * PLOT_MARGIN_LEFT;
     for (v = ceil(x0 / step - 1e-9) * step; v <= x1 + 1e-9 * step; v += step) {
         const float x = m2sdr_plot_x(plot, v);
         ImDrawList_AddLine(plot->dl, (ImVec2){ x, plot->p0.y }, (ImVec2){ x, plot->p1.y }, COL_GRID, 1.0f);
         m2sdr_plot_format(text, sizeof(text), fabs(v) < 1e-12 * step ? 0.0 : v, step, x_unit);
         igCalcTextSize(&ts, text, NULL, false, -1.0f);
-        if (x + 0.5f * ts.x > plot->p1.x + PLOT_MARGIN_RIGHT)
+        /* A label is kept in the plot at the right, and left out when it would run over the
+         * one before it or over the ones of the vertical axis. */
+        tx = x - 0.5f * ts.x;
+        if (tx + ts.x > plot->p1.x + PLOT_MARGIN_RIGHT)
+            tx = plot->p1.x + PLOT_MARGIN_RIGHT - ts.x;
+        if (tx < edge)
             continue;
-        ImDrawList_AddText_Vec2(plot->dl, (ImVec2){ x - 0.5f * ts.x, plot->p1.y + 4.0f }, COL_LABEL, text, NULL);
+        ImDrawList_AddText_Vec2(plot->dl, (ImVec2){ tx, plot->p1.y + 4.0f }, COL_LABEL, text, NULL);
+        edge = tx + ts.x + 6.0f;
     }
 
     ImDrawList_AddRect(plot->dl, plot->p0, plot->p1, COL_FRAME, 0.0f, 0, 1.0f);
@@ -202,6 +229,9 @@ bool m2sdr_plot_begin(struct m2sdr_plot *plot, const char *id, ImVec2 size,
 
 void m2sdr_plot_end(struct m2sdr_plot *plot)
 {
+    /* The label last, over the traces. */
+    if (plot->label && plot->label[0])
+        plot_text(plot, (ImVec2){ plot->p0.x + 5.0f, plot->p0.y + 3.0f }, plot->label, COL_LABEL);
     ImDrawList_PopClipRect(plot->dl);
 }
 
@@ -323,7 +353,7 @@ void m2sdr_plot_text(struct m2sdr_plot *plot, float dx, float dy, const char *te
 {
     const float x = dx >= 0 ? plot->p0.x + dx : plot->p1.x + dx;
     const float y = dy >= 0 ? plot->p0.y + dy : plot->p1.y + dy;
-    ImDrawList_AddText_Vec2(plot->dl, (ImVec2){ x, y }, color, text, NULL);
+    plot_text(plot, (ImVec2){ x, y }, text, color);
 }
 
 void m2sdr_plot_xy(struct m2sdr_plot *plot, const float *x, const float *y, size_t n, ImU32 color)
