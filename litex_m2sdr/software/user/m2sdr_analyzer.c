@@ -1200,6 +1200,19 @@ static const char *const trace_names[UI_TRACES] = { "Live", "Average", "Max hold
 static const ImU32 trace_colors[UI_TRACES] = { 0xff40d0ffu, 0xff60ff60u, 0xff6060ffu, 0xffffa040u };
 static const ImU32 marker_colors[UI_MARKERS] = { 0xffffffffu, 0xff80ffffu, 0xffff80ffu, 0xffffff80u };
 
+/* LTE: colours of the blocks of data and of their symbols by modulation (the first: empty), and
+ * the scale of the resource grid, in dB over a reference element. */
+static const ImU32 lte_mod_colors[M2SDR_MOD_COUNT] = {
+    0xff282828u, 0xff808080u, 0xffff9040u, 0xff808080u, 0xff60ff60u, 0xff808080u, 0xff40d0ffu, 0xff808080u, 0xff4040ffu,
+};
+#define LTE_COL_UNREAD     0xff808080u
+#define LTE_COL_PBCH       0xffff60ffu
+#define LTE_COL_RS         0xffffffffu
+#define LTE_GRID_TOP_DB    10.0
+#define LTE_GRID_BOTTOM_DB (-40.0)
+#define LTE_SCALE_W        52.0f     /* Room of the scale, right of the grid. */
+#define AN_LTE_HOLD        10        /* Captures a frame stays shown without a cell, or its symbols without data. */
+
 /* Shared between the worker, which captures and analyses, and the UI, which draws. */
 struct an_shared {
     pthread_mutex_t lock;
@@ -1245,10 +1258,19 @@ struct an_ui {
     bool   pn_am;
     struct an_floor *fl;
     const char *floor_path;        /* Where "Store as floor" writes; NULL: nowhere. */
-    /* LTE: resource grid and blocks as textures, redrawn with each result. */
+    /* LTE: resource grid and blocks as textures, redrawn with each result that has a cell. */
     GLuint lte_grid_tex, lte_block_tex;
-    unsigned lte_seq;
     uint32_t *lte_rgba;
+    /* Last frame with a cell, and symbols of the last one with data read: held, see lte_keep(). */
+    struct m2sdr_lte_result *lte_last;
+    unsigned lte_last_seq;
+    bool   lte_last_ok;
+    double lte_freq_hz, lte_rate;  /* What they were read on: nothing is held for another signal. */
+    int    lte_channel;
+    float complex lte_points[M2SDR_LTE_MAX_POINTS];
+    uint8_t lte_points_mod[M2SDR_LTE_MAX_POINTS];
+    int    lte_npoints, lte_points_sfn;
+    unsigned lte_points_seq;
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
 };
@@ -2213,43 +2235,134 @@ static void lte_texture(GLuint *tex, const uint32_t *rgba, int width, int height
 /* Textures of the frame: a column per symbol or per slot, the highest subcarrier at the top. */
 static void lte_textures(struct an_ui *ui)
 {
-    static const uint32_t block_colors[M2SDR_MOD_COUNT] = {
-        0xff282828u, 0xff808080u, 0xffff9040u, 0xff808080u, 0xff60ff60u, 0xff808080u, 0xff40d0ffu, 0xff808080u, 0xff4040ffu,
-    };
     const struct m2sdr_lte_result *l = &ui->res.lte;
-    const int k = l->subcarriers, rb = l->analysed_rb;
+    const int k = l->subcarriers, rb = l->data_rb;
     int q, a, ns, b;
 
     if (!ui->lte_rgba)
         ui->lte_rgba = malloc((size_t)M2SDR_LTE_FRAME_SYMBOLS * M2SDR_LTE_MAX_SUBCARRIERS * sizeof(uint32_t));
-    if (!ui->lte_rgba || k <= 0 || rb <= 0)
+    if (!ui->lte_rgba || k <= 0)
         return;
-    /* From 40 dB under a reference element to 10 dB above. */
     for (a = 0; a < k; a++) {
         for (q = 0; q < M2SDR_LTE_FRAME_SYMBOLS; q++)
             ui->lte_rgba[(size_t)(k - 1 - a) * M2SDR_LTE_FRAME_SYMBOLS + (size_t)q] =
-                palette_color(ui->wf_palette, (float)((l->grid_db[q][a] - (l->rsrp_db - 40.0)) / 50.0));
+                palette_color(ui->wf_palette, (float)((l->grid_db[q][a] - (l->rsrp_db + LTE_GRID_BOTTOM_DB)) /
+                                                      (LTE_GRID_TOP_DB - LTE_GRID_BOTTOM_DB)));
     }
     lte_texture(&ui->lte_grid_tex, ui->lte_rgba, M2SDR_LTE_FRAME_SYMBOLS, k);
+    if (rb <= 0)
+        return;
     for (b = 0; b < rb; b++) {
         for (ns = 0; ns < M2SDR_LTE_FRAME_SLOTS; ns++)
             ui->lte_rgba[(size_t)(rb - 1 - b) * M2SDR_LTE_FRAME_SLOTS + (size_t)ns] =
-                l->rb_unknown[ns][b] ? 0xff808080u : block_colors[l->rb_modulation[ns][b] % M2SDR_MOD_COUNT];
+                l->rb_unknown[ns][b] ? LTE_COL_UNREAD : lte_mod_colors[l->rb_modulation[ns][b] % M2SDR_MOD_COUNT];
     }
     lte_texture(&ui->lte_block_tex, ui->lte_rgba, M2SDR_LTE_FRAME_SLOTS, rb);
+}
+
+/* A new result: its frame and its symbols are kept, to be shown while the next captures have no
+ * cell, or no block of data that is read. */
+static void lte_keep(struct an_ui *ui)
+{
+    const struct m2sdr_lte_result *l = &ui->res.lte;
+
+    if (!ui->res.set.lte_on || !ui->res.lte_valid)
+        return;
+    if (ui->res.set.freq_hz != ui->lte_freq_hz || ui->res.set.sample_rate != ui->lte_rate || ui->res.set.channel != ui->lte_channel) {
+        ui->lte_freq_hz = ui->res.set.freq_hz;
+        ui->lte_rate    = ui->res.set.sample_rate;
+        ui->lte_channel = ui->res.set.channel;
+        ui->lte_last_ok = false;
+        ui->lte_npoints = 0;
+    }
+    if (!l->found)
+        return;
+    lte_textures(ui);
+    if (!ui->lte_last)
+        ui->lte_last = malloc(sizeof(*ui->lte_last));
+    if (ui->lte_last) {
+        *ui->lte_last    = *l;
+        ui->lte_last_seq = ui->seq;
+        ui->lte_last_ok  = true;
+    }
+    if (l->ndata > 0) {
+        memcpy(ui->lte_points, l->data_points, (size_t)l->ndata * sizeof(l->data_points[0]));
+        memcpy(ui->lte_points_mod, l->data_points_modulation, (size_t)l->ndata);
+        ui->lte_npoints    = l->ndata;
+        ui->lte_points_sfn = l->sfn;
+        ui->lte_points_seq = ui->seq;
+    }
+}
+
+/* The frame shown: the one of the last capture, or the last one with a cell for a few captures. */
+static const struct m2sdr_lte_result *lte_shown(const struct an_ui *ui, bool *held)
+{
+    *held = false;
+    if (!ui->res.set.lte_on || !ui->res.lte_valid)
+        return NULL;
+    if (ui->res.lte.found)
+        return &ui->res.lte;
+    if (ui->lte_last_ok && ui->seq - ui->lte_last_seq <= AN_LTE_HOLD) {
+        *held = true;
+        return ui->lte_last;
+    }
+    return NULL;
+}
+
+/* Entry of a legend: a square of the colour and its name, on the line while it fits before `right`. */
+static void legend_item(ImU32 color, const char *name, float right)
+{
+    const float h = igGetTextLineHeight();
+    ImVec2 pos, ts;
+
+    igCalcTextSize(&ts, name, NULL, false, -1.0f);
+    igGetCursorScreenPos(&pos);
+    if (pos.x + h + ts.x > right) {
+        igNewLine();
+        igGetCursorScreenPos(&pos);
+    }
+    ImDrawList_AddRectFilled(igGetWindowDrawList(), (ImVec2){ pos.x, pos.y + 2.0f }, (ImVec2){ pos.x + h - 4.0f, pos.y + h - 2.0f },
+                             color, 0.0f, 0);
+    igDummy((ImVec2){ h - 2.0f, h });
+    igSameLine(0.0f, 2.0f);
+    igTextUnformatted(name, NULL);
+    igSameLine(0.0f, 12.0f);
+}
+
+/* Symbols of the blocks of data, in the colour of the modulation of their block. */
+static void lte_data_points(struct m2sdr_plot *plot, const float complex *points, const uint8_t *mod, int n, ImU32 alpha)
+{
+    static const enum m2sdr_modulation order[] = { M2SDR_MOD_256QAM, M2SDR_MOD_64QAM, M2SDR_MOD_16QAM, M2SDR_MOD_QPSK };
+    static float px[M2SDR_LTE_MAX_POINTS], py[M2SDR_LTE_MAX_POINTS];
+    unsigned m;
+    int i;
+
+    for (m = 0; m < sizeof(order) / sizeof(order[0]); m++) {
+        size_t count = 0;
+
+        for (i = 0; i < n; i++) {
+            if (mod[i] != order[m])
+                continue;
+            px[count]   = crealf(points[i]);
+            py[count++] = cimagf(points[i]);
+        }
+        m2sdr_plot_points(plot, px, py, count, 1.0f, (lte_mod_colors[order[m]] & 0x00ffffffu) | alpha);
+    }
 }
 
 static void draw_lte(struct an_ui *ui, bool live, bool *changed)
 {
     static const double rates[5] = { 1.92e6, 3.84e6, 7.68e6, 15.36e6, 30.72e6 };
     static float px[M2SDR_LTE_MAX_POINTS], py[M2SDR_LTE_MAX_POINTS];
-    const struct m2sdr_lte_result *l = &ui->res.lte;
+    static float complex ref[256];
+    const struct m2sdr_lte_result *l;
     struct m2sdr_plot plot;
     ImTextureRef tex;
-    ImVec2 avail;
-    float side, left_w;
+    ImVec2 avail, pos, sq;
+    float side, left_w, line, right;
     double half_mhz;
-    char text[160];
+    char text[200];
+    bool held;
     int i;
 
     if (live) {
@@ -2275,74 +2388,184 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
                           "blocks around the centre are analysed.", NULL);
         return;
     }
-    if (!l->found) {
-        igText("No cell found (PSS quality %.1f): the capture is tuned on the centre of an FDD carrier with a "
-               "normal cyclic prefix.", l->sync_quality);
+    l = lte_shown(ui, &held);
+    if (!l) {
+        igPushTextWrapPos(0.0f);
+        igText("No cell found (PSS quality %.1f): the capture must be tuned on the centre of an FDD carrier with a "
+               "normal cyclic prefix.", ui->res.lte.sync_quality);
+        igPopTextWrapPos();
         return;
-    }
-    if (ui->lte_seq != ui->seq) {
-        lte_textures(ui);
-        ui->lte_seq = ui->seq;
     }
     tex._TexData = NULL;
     half_mhz     = 0.5 * 0.015 * (double)l->subcarriers;
 
     igGetContentRegionAvail(&avail);
-    side   = avail.y < 0.42f * avail.x ? avail.y : 0.42f * avail.x;
-    left_w = avail.x - side - 8.0f;
+    line   = igGetTextLineHeightWithSpacing();
+    side   = avail.y - 2.0f * line < 0.45f * avail.x ? avail.y - 2.0f * line : 0.45f * avail.x;
+    sq     = m2sdr_plot_square(side);
+    left_w = avail.x - sq.x - 8.0f;
+
+    /* Resource grid, and the blocks of data under it on the same time axis. */
     igBeginGroup();
-    if (m2sdr_plot_begin(&plot, "##ltegrid", (ImVec2){ left_w, 0.68f * avail.y }, 0.0, 10.0, M2SDR_PLOT_PLAIN,
-                         -half_mhz, half_mhz, "Resource grid of a frame: MHz from the centre against ms")) {
+    igGetCursorScreenPos(&pos);
+    right = pos.x + left_w;
+    igPushTextWrapPos(igGetCursorPosX() + left_w);
+    if (held)
+        igTextColored((ImVec4){ 1.0f, 0.4f, 0.3f, 1.0f }, "No cell in the last capture (PSS quality %.1f): the last frame read "
+                      "is held, with its figures.", ui->res.lte.sync_quality);
+    else if (l->mib)
+        igText("Resource grid of frame %d, MHz from the centre against the time. Colours: dB over the reference signals.", l->sfn);
+    else
+        igTextUnformatted("Resource grid of a frame, MHz from the centre against the time. Colours: dB over the reference signals.", NULL);
+    igPopTextWrapPos();
+    if (m2sdr_plot_begin(&plot, "##ltegrid", (ImVec2){ left_w - LTE_SCALE_W, 0.62f * avail.y }, 0.0, 0.010, M2SDR_PLOT_TIME,
+                         -half_mhz, half_mhz, "")) {
+        static const double marks[] = { LTE_GRID_TOP_DB, 0.0, -20.0, LTE_GRID_BOTTOM_DB };
+        const float x = plot.p1.x + 14.0f, h = plot.p1.y - plot.p0.y;
+        unsigned n;
+
         tex._TexID = (ImTextureID)(uintptr_t)ui->lte_grid_tex;
         ImDrawList_AddImage(plot.dl, tex, plot.p0, plot.p1, (ImVec2){ 0.0f, 0.0f }, (ImVec2){ 1.0f, 1.0f }, 0xffffffffu);
-        m2sdr_plot_text(&plot, 8.0f, 22.0f, "Resource grid of a frame: MHz from the centre against ms", 0xffffffffu);
+        if (plot.hovered) {
+            int q = (int)(plot.mouse_x / 0.010 * M2SDR_LTE_FRAME_SYMBOLS);
+            int a = (int)((plot.mouse_y + half_mhz) / 0.015);
+
+            q = q < 0 ? 0 : q >= M2SDR_LTE_FRAME_SYMBOLS ? M2SDR_LTE_FRAME_SYMBOLS - 1 : q;
+            a = a < 0 ? 0 : a >= l->subcarriers ? l->subcarriers - 1 : a;
+            snprintf(text, sizeof(text), "%.2f ms (slot %d, symbol %d), %+.3f MHz: %.1f dBFS, %+.1f dB", 1e3 * plot.mouse_x,
+                     q / 7, q % 7, plot.mouse_y, l->grid_db[q][a], l->grid_db[q][a] - l->rsrp_db);
+            m2sdr_plot_text(&plot, 8.0f, 4.0f, text, 0xffffffffu);
+        }
         m2sdr_plot_end(&plot);
+        /* Scale of the colours, in dB over a reference element. */
+        for (i = 0; i < (int)h; i++)
+            ImDrawList_AddRectFilled(plot.dl, (ImVec2){ x, plot.p0.y + (float)i }, (ImVec2){ x + 12.0f, plot.p0.y + (float)i + 1.0f },
+                                     palette_color(ui->wf_palette, 1.0f - (float)i / h), 0.0f, 0);
+        for (n = 0; n < sizeof(marks) / sizeof(marks[0]); n++) {
+            const float y = plot.p0.y + h * (float)((LTE_GRID_TOP_DB - marks[n]) / (LTE_GRID_TOP_DB - LTE_GRID_BOTTOM_DB));
+            ImVec2 ts;
+
+            snprintf(text, sizeof(text), marks[n] != 0.0 ? "%+.0f" : "%.0f", marks[n]);
+            igCalcTextSize(&ts, text, NULL, false, -1.0f);
+            ImDrawList_AddText_Vec2(plot.dl, (ImVec2){ x + 16.0f, y - (n == 0 ? 0.0f : marks[n] == LTE_GRID_BOTTOM_DB ? ts.y : 0.5f * ts.y) },
+                                    0xffc8c8c8u, text, NULL);
+        }
     }
-    if (m2sdr_plot_begin(&plot, "##lteblocks", (ImVec2){ left_w, 0.0f }, 0.0, 10.0, M2SDR_PLOT_PLAIN,
-                         0.0, (double)l->analysed_rb, "")) {
-        tex._TexID = (ImTextureID)(uintptr_t)ui->lte_block_tex;
-        ImDrawList_AddImage(plot.dl, tex, plot.p0, plot.p1, (ImVec2){ 0.0f, 0.0f }, (ImVec2){ 1.0f, 1.0f }, 0xffffffffu);
-        m2sdr_plot_text(&plot, 8.0f, 4.0f, !l->data ? "Blocks of data: not analysed with four antenna ports" : l->ports > 1 ?
-                        "QPSK blue, 16QAM green, 64QAM yellow, 256QAM red, not read grey" :
-                        "Blocks of data against ms: QPSK blue, 16QAM green, 64QAM yellow, 256QAM red",
-                        0xffffffffu);
-        m2sdr_plot_end(&plot);
+    if (!l->data) {
+        igPushTextWrapPos(igGetCursorPosX() + left_w);
+        igTextUnformatted(l->mib ? "Blocks of data: not analysed with four antenna ports." :
+                          "Blocks of data: not analysed, the MIB of the cell is not decoded.", NULL);
+        igPopTextWrapPos();
+    } else {
+        const double y0 = (double)l->data_first_rb - (double)l->data_offset / 12.0;
+
+        igTextUnformatted("Blocks of data, by slot and resource block of the cell:", NULL);
+        legend_item(lte_mod_colors[M2SDR_MOD_QPSK], "QPSK", right);
+        legend_item(lte_mod_colors[M2SDR_MOD_16QAM], "16QAM", right);
+        legend_item(lte_mod_colors[M2SDR_MOD_64QAM], "64QAM", right);
+        legend_item(lte_mod_colors[M2SDR_MOD_256QAM], "256QAM", right);
+        if (l->ports > 1)
+            legend_item(LTE_COL_UNREAD, "in use, not read", right);
+        legend_item(lte_mod_colors[M2SDR_MOD_AUTO], "empty", right);
+        igNewLine();
+        if (m2sdr_plot_begin(&plot, "##lteblocks", (ImVec2){ left_w - LTE_SCALE_W, 0.0f }, 0.0, 0.010, M2SDR_PLOT_TIME,
+                             y0, y0 + (double)l->subcarriers / 12.0, "")) {
+            tex._TexID = (ImTextureID)(uintptr_t)ui->lte_block_tex;
+            ImDrawList_AddImage(plot.dl, tex, (ImVec2){ plot.p0.x, m2sdr_plot_y(&plot, l->data_first_rb + l->data_rb) },
+                                (ImVec2){ plot.p1.x, m2sdr_plot_y(&plot, l->data_first_rb) },
+                                (ImVec2){ 0.0f, 0.0f }, (ImVec2){ 1.0f, 1.0f }, 0xffffffffu);
+            /* Subframes. */
+            for (i = 1; i < 10; i++)
+                m2sdr_plot_vline(&plot, 0.001 * i, 0x38ffffffu);
+            if (plot.hovered) {
+                const int ns = (int)(plot.mouse_x / 0.0005), b = (int)floor(plot.mouse_y) - l->data_first_rb;
+
+                if (ns >= 0 && ns < M2SDR_LTE_FRAME_SLOTS && b >= 0 && b < l->data_rb) {
+                    if (l->rb_unknown[ns][b])
+                        snprintf(text, sizeof(text), "Slot %d, block %d: in use, not read", ns, b + l->data_first_rb);
+                    else if (l->rb_modulation[ns][b] == M2SDR_MOD_AUTO)
+                        snprintf(text, sizeof(text), "Slot %d, block %d: empty", ns, b + l->data_first_rb);
+                    else
+                        snprintf(text, sizeof(text), "Slot %d, block %d: %s, EVM %.2f %%", ns, b + l->data_first_rb,
+                                 m2sdr_modulation_name((enum m2sdr_modulation)l->rb_modulation[ns][b]), 100.0 * l->rb_evm[ns][b]);
+                    m2sdr_plot_text(&plot, 8.0f, 4.0f, text, 0xffffffffu);
+                }
+            }
+            m2sdr_plot_end(&plot);
+        }
     }
     igEndGroup();
     igSameLine(0.0f, 8.0f);
 
     /* Equalised symbols: data, PBCH and reference signals. */
-    if (m2sdr_plot_begin(&plot, "##lteconst", (ImVec2){ side, side }, -1.6, 1.6, M2SDR_PLOT_PLAIN, -1.6, 1.6,
-                         "Data yellow, PBCH blue, reference signals white")) {
-        for (i = 0; i < l->ndata; i++) {
-            px[i] = crealf(l->data_points[i]);
-            py[i] = cimagf(l->data_points[i]);
+    igBeginGroup();
+    igGetCursorScreenPos(&pos);
+    right = pos.x + sq.x;
+    legend_item(lte_mod_colors[M2SDR_MOD_QPSK], "QPSK", right);
+    legend_item(lte_mod_colors[M2SDR_MOD_16QAM], "16QAM", right);
+    legend_item(lte_mod_colors[M2SDR_MOD_64QAM], "64QAM", right);
+    legend_item(lte_mod_colors[M2SDR_MOD_256QAM], "256QAM", right);
+    legend_item(LTE_COL_PBCH, "PBCH", right);
+    legend_item(LTE_COL_RS, "reference signals", right);
+    igNewLine();
+    {
+        /* The frames without a block that is read keep the symbols of the last one that had some. */
+        const bool own = l->ndata > 0;
+        const bool kept = !own && l->data && ui->lte_npoints > 0 && ui->seq - ui->lte_points_seq <= AN_LTE_HOLD;
+        const enum m2sdr_modulation most = own && l->data_blocks ? l->data_modulation : M2SDR_MOD_QPSK;
+        const int nref = m2sdr_constellation(most, ref);
+        char label[96];
+
+        snprintf(label, sizeof(label), "Q against I, equalised; crosses: the points of %s", m2sdr_modulation_name(most));
+        if (m2sdr_plot_begin(&plot, "##lteconst", sq, -1.6, 1.6, M2SDR_PLOT_PLAIN, -1.6, 1.6, label)) {
+            if (own)
+                lte_data_points(&plot, l->data_points, l->data_points_modulation, l->ndata, 0xc0000000u);
+            else if (kept)
+                lte_data_points(&plot, ui->lte_points, ui->lte_points_mod, ui->lte_npoints, 0x50000000u);
+            for (i = 0; i < l->npbch; i++) {
+                px[i] = crealf(l->pbch_points[i]);
+                py[i] = cimagf(l->pbch_points[i]);
+            }
+            m2sdr_plot_points(&plot, px, py, (size_t)l->npbch, 1.5f, LTE_COL_PBCH);
+            for (i = 0; i < l->nrs; i++) {
+                px[i] = crealf(l->rs_points[i]);
+                py[i] = cimagf(l->rs_points[i]);
+            }
+            m2sdr_plot_points(&plot, px, py, (size_t)l->nrs, 1.0f, (LTE_COL_RS & 0x00ffffffu) | 0xc0000000u);
+            for (i = 0; i < nref; i++) {
+                const float x = m2sdr_plot_x(&plot, crealf(ref[i])), y = m2sdr_plot_y(&plot, cimagf(ref[i]));
+                ImDrawList_AddLine(plot.dl, (ImVec2){ x - 4.0f, y }, (ImVec2){ x + 5.0f, y }, 0xa0ffffffu, 1.0f);
+                ImDrawList_AddLine(plot.dl, (ImVec2){ x, y - 4.0f }, (ImVec2){ x, y + 5.0f }, 0xa0ffffffu, 1.0f);
+            }
+            if (kept) {
+                snprintf(text, sizeof(text), "No data read in this frame: dimmed symbols of frame %d", ui->lte_points_sfn);
+                m2sdr_plot_text(&plot, 5.0f, -20.0f, text, 0xff60a0ffu);
+            } else if (!own && l->data) {
+                m2sdr_plot_text(&plot, 5.0f, -20.0f, "No data read in this frame", 0xff60a0ffu);
+            }
+            m2sdr_plot_end(&plot);
         }
-        m2sdr_plot_points(&plot, px, py, (size_t)l->ndata, 1.0f, 0xc040d0ffu);
-        for (i = 0; i < l->npbch; i++) {
-            px[i] = crealf(l->pbch_points[i]);
-            py[i] = cimagf(l->pbch_points[i]);
-        }
-        m2sdr_plot_points(&plot, px, py, (size_t)l->npbch, 1.5f, 0xffffa040u);
-        for (i = 0; i < l->nrs; i++) {
-            px[i] = crealf(l->rs_points[i]);
-            py[i] = cimagf(l->rs_points[i]);
-        }
-        m2sdr_plot_points(&plot, px, py, (size_t)l->nrs, 1.0f, 0xc0ffffffu);
-        m2sdr_plot_end(&plot);
     }
+    igEndGroup();
 }
 
 static void draw_lte_results(struct an_ui *ui)
 {
     static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
     const struct an_result *res = &ui->res;
-    const struct m2sdr_lte_result *l = &res->lte;
+    const struct m2sdr_lte_result *l;
+    bool held;
 
     igSeparatorText("LTE downlink");
-    if (!res->lte_valid || !l->found) {
+    l = lte_shown(ui, &held);
+    if (!l) {
         igTextUnformatted("No cell.", NULL);
         return;
+    }
+    if (held) {
+        igPushTextWrapPos(0.0f);
+        igTextColored((ImVec4){ 1.0f, 0.4f, 0.3f, 1.0f }, "No cell in the last capture: these are the figures of the last frame read.");
+        igPopTextWrapPos();
     }
     if (igBeginTable("##lte", 2, ImGuiTableFlags_SizingStretchProp, (ImVec2){ 0.0f, 0.0f }, 0.0f)) {
         label_value("Cell identity", "%d (%d, %d)", l->cell_id, l->n_id_1, l->n_id_2);
@@ -2356,7 +2579,10 @@ static void draw_lte_results(struct an_ui *ui)
         } else {
             label_value("MIB", "not decoded");
         }
-        label_value("Analysed", "%d blocks", l->analysed_rb);
+        if (l->data && l->data_rb < l->n_rb)
+            label_value("Analysed", "%d blocks, %d to %d", l->analysed_rb, l->data_first_rb, l->data_first_rb + l->data_rb - 1);
+        else
+            label_value("Analysed", "%d blocks", l->analysed_rb);
         label_value("RSRP", "%.1f dBFS", l->rsrp_db);
         label_value("RSSI", "%.1f dBFS", l->rssi_db);
         label_value("PSS, SSS", "%.1f, %.1f dBFS", l->pss_db, l->sss_db);
@@ -2364,9 +2590,24 @@ static void draw_lte_results(struct an_ui *ui)
         if (l->mib)
             label_value("PBCH EVM", "%.2f %%", 100.0 * l->pbch_evm);
         if (l->data) {
+            int used[M2SDR_MOD_COUNT] = { 0 }, ns, rb, m;
+            char text[96] = "";
+
+            for (ns = 0; ns < M2SDR_LTE_FRAME_SLOTS; ns++) {
+                for (rb = 0; rb < M2SDR_LTE_MAX_ANALYSED_RB; rb++)
+                    used[l->rb_modulation[ns][rb] % M2SDR_MOD_COUNT]++;
+            }
+            for (m = 0; m < M2SDR_MOD_COUNT; m++) {
+                if (m != M2SDR_MOD_AUTO && used[m])
+                    snprintf(text + strlen(text), sizeof(text) - strlen(text), "%s%s %d", text[0] ? ", " : "",
+                             m2sdr_modulation_name((enum m2sdr_modulation)m), used[m]);
+            }
             label_value("Data blocks", "%d", l->data_blocks);
+            if (l->data_blocks)
+                label_value("", "%s", text);
             label_value("Data, mostly", "%s", l->data_blocks ? m2sdr_modulation_name(l->data_modulation) : "none");
-            label_value("Data EVM", "%.2f %%", 100.0 * l->data_evm);
+            if (l->data_blocks)
+                label_value("Data EVM", "%.2f %%", 100.0 * l->data_evm);
             if (l->ports > 1) {
                 label_value("Transmit diversity", "%d blocks", l->data_diversity);
                 label_value("One precoded layer", "%d blocks", l->data_precoded);
@@ -2376,6 +2617,9 @@ static void draw_lte_results(struct an_ui *ui)
         igEndTable();
     }
     igPushTextWrapPos(0.0f);
+    if (l->rs_evm > 1.0)
+        igTextColored((ImVec4){ 1.0f, 0.4f, 0.3f, 1.0f }, "The reference signals are in the noise (EVM over 100 %%): the "
+                      "levels and the blocks of data are not to be trusted.");
     if (l->data)
         igTextUnformatted("The control channels are not decoded: a block is taken as the constellation it fits best, "
                           "and its EVM is against the nearest points.", NULL);
@@ -2384,6 +2628,9 @@ static void draw_lte_results(struct an_ui *ui)
                           "One receiver does not separate two layers.", NULL);
     else if (l->mib && !l->data)
         igTextUnformatted("Data are not analysed with four antenna ports.", NULL);
+    else if (!l->mib)
+        igTextUnformatted("The MIB is not decoded: the width of the carrier and its antenna ports are not known, and the "
+                          "data are not analysed.", NULL);
     igPopTextWrapPos();
 }
 
@@ -2699,6 +2946,7 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
             pthread_mutex_unlock(&sh.lock);
             if (traces_update(&ui) == 0)
                 waterfall_push(&ui);
+            lte_keep(&ui);
         } else {
             pthread_mutex_unlock(&sh.lock);
         }
@@ -2819,6 +3067,7 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
     free(ui.avg_lin);
     free(ui.wf_rgba);
     free(ui.lte_rgba);
+    free(ui.lte_last);
     free(ui.res.psd.power);
     free(sh.res.psd.power);
     pthread_mutex_destroy(&sh.lock);

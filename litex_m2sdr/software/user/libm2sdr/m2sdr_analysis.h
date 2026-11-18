@@ -328,6 +328,10 @@ struct m2sdr_lte_result {
      * use that fit neither (two layers, mostly). */
     int    data_diversity, data_precoded, data_unknown;
     enum m2sdr_modulation data_modulation;   /* The most used. */
+    /* The blocks below are the ones of the cell that are whole in the band analysed: data_rb of
+     * them, the first one block data_first_rb of the cell, data_offset subcarriers (0 or 6)
+     * above the lowest one of grid_db. */
+    int    data_rb, data_first_rb, data_offset;
     /* Per slot and resource block: modulation (M2SDR_MOD_AUTO: empty or not analysed) and EVM. */
     uint8_t rb_modulation[M2SDR_LTE_FRAME_SLOTS][M2SDR_LTE_MAX_ANALYSED_RB];
     float   rb_evm[M2SDR_LTE_FRAME_SLOTS][M2SDR_LTE_MAX_ANALYSED_RB];
@@ -339,6 +343,7 @@ struct m2sdr_lte_result {
      * a mean power of 1. */
     int    ndata, nrs, npbch;
     float complex data_points[M2SDR_LTE_MAX_POINTS];
+    uint8_t data_points_modulation[M2SDR_LTE_MAX_POINTS];   /* Of the block of each point. */
     float complex rs_points[M2SDR_LTE_MAX_POINTS];
     float complex pbch_points[240];
 };

@@ -892,7 +892,7 @@ and the PBCH are in its six central blocks; a narrower one is analysed whole.
 
 | Figure | From |
 |---------------------------|---------------------------------------------------------------------|
-| Cell identity | PSS and SSS |
+| Cell identity | PSS and SSS, kept as a cell when its MIB is read or its reference signals are found |
 | Carrier offset | Cyclic prefixes, then the reference signals from one slot to the next |
 | Resource blocks, antenna ports, frame number, PHICH | MIB, decoded from the PBCH with its CRC, for one or two antenna ports |
 | RSRP, RSSI, PSS and SSS power | Resource grid, in dBFS |
@@ -902,6 +902,26 @@ and the PBCH are in its six central blocks; a narrower one is analysed whole.
 
 The view draws the resource grid of the frame, the blocks of data with their modulation, and
 the equalised symbols of the data, of the PBCH and of the reference signals.
+
+- **Resource grid:** the power of each resource element, in dB over a reference signal element
+  (the scale is next to it), against the time in the frame and the frequency from the centre.
+- **Blocks of data:** under the grid on the same time axis, a column per slot, with the
+  resource blocks numbered as in the cell: at 7.68 MSPS on a carrier of 75 blocks, blocks 25
+  to 49. A carrier wider than the capture and with a different parity of blocks (75 against 6)
+  has its blocks half a block off the band analysed: the ones that are whole in it are drawn.
+- **Constellation:** each symbol of the data in the colour of the modulation of its block, the
+  same as in the blocks of data, with the points of the modulation most used as crosses.
+- **Mouse:** over the grid, the element under it and its power; over the blocks, the slot, the
+  block, its modulation and its EVM.
+
+A live cell changes from one frame to the next, and a capture can miss it. The view then
+holds what it had, and says so:
+
+- **No data read in a frame** (idle, or two layers only): the symbols of the last frame that
+  had some stay in the constellation, dimmed, with the number of their frame.
+- **No cell in a capture:** the last frame read stays, with its figures, under a notice in
+  red, for a few captures; then the view says that no cell is found. Nothing is held across a
+  change of frequency, of sample rate or of channel.
 
 > [!IMPORTANT]
 > The control channels are not decoded, so the allocation and the modulation of the data are

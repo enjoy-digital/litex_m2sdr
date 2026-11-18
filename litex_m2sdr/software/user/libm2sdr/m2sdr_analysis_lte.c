@@ -858,18 +858,24 @@ static void data_analyse(const struct lte_grid *g, int cell_id, int cell_rb, int
                     continue;
                 if (res->ndata == M2SDR_LTE_MAX_POINTS) {
                     int k;
-                    for (k = 0; k < M2SDR_LTE_MAX_POINTS / 2; k++)
-                        res->data_points[k] = res->data_points[2 * k];
+                    for (k = 0; k < M2SDR_LTE_MAX_POINTS / 2; k++) {
+                        res->data_points[k]            = res->data_points[2 * k];
+                        res->data_points_modulation[k] = res->data_points_modulation[2 * k];
+                    }
                     res->ndata = M2SDR_LTE_MAX_POINTS / 2;
                     stride    *= 2;
                 }
-                res->data_points[res->ndata++] = zb[i] / best_gain;
+                res->data_points_modulation[res->ndata] = (uint8_t)family[best];
+                res->data_points[res->ndata++]          = zb[i] / best_gain;
             }
         }
     }
-    res->data        = true;
-    res->data_blocks = total;
-    res->data_evm    = total ? sqrt(se / total) : 0.0;
+    res->data          = true;
+    res->data_rb       = blocks;
+    res->data_first_rb = cell_rb > g->rb ? (6 * (cell_rb - g->rb) + offset) / 12 : 0;
+    res->data_offset   = offset;
+    res->data_blocks   = total;
+    res->data_evm      = total ? sqrt(se / total) : 0.0;
     for (m = 0; m < M2SDR_MOD_COUNT; m++) {
         if (used[m] > used[res->data_modulation])
             res->data_modulation = (enum m2sdr_modulation)m;

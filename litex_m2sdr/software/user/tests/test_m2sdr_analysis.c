@@ -757,6 +757,18 @@ static void test_lte(void)
             }
         }
         CHECK("blocks in use found", used >= readable - 12 && res->data_blocks == used + empty_used);
+        /* The carrier is analysed whole: its blocks are the ones of the grid. */
+        CHECK("blocks of the cell", res->data_rb == sig->n_rb && res->data_first_rb == 0 && res->data_offset == 0);
+        {
+            int n, other = 0;
+
+            for (n = 0; n < res->ndata; n++) {
+                const uint8_t m = res->data_points_modulation[n];
+                if (m != M2SDR_MOD_QPSK && m != M2SDR_MOD_16QAM && m != M2SDR_MOD_64QAM)
+                    other++;
+            }
+            CHECK("modulation of the symbols", res->ndata > 0 && other == 0);
+        }
         CHECK("their modulation", wrong == 0);
         CHECK("empty blocks left out", empty_used == 0);
         if (ports == 2) {
