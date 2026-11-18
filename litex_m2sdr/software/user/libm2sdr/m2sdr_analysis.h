@@ -302,11 +302,11 @@ int m2sdr_demod(const float complex *x, size_t count, double sample_rate,
  * receiver does not separate them, and it is counted as in use and not read. With four
  * antenna ports, the blocks of data are not analysed. */
 struct m2sdr_lte_result {
-    bool   found;               /* PSS and SSS found: the fields up to frame_offset are valid. */
+    bool   found;               /* PSS and SSS found, and the MIB or the reference signals of the cell. */
     int    cell_id;             /* Physical cell identity, 0 to 503. */
     int    n_id_1, n_id_2;
     double freq_error_hz;       /* Carrier, from the centre of the capture. */
-    double sync_quality;        /* PSS peak over the mean of its correlation. */
+    double sync_quality;        /* PSS peak over the mean of its correlation; given without a cell too. */
     size_t frame_offset;        /* Sample of the start of the frame analysed. */
     bool   mib;                 /* PBCH decoded, its CRC right: the four fields below are valid. */
     int    ports;               /* Antenna ports of the cell: 1, 2 or 4. */

@@ -771,6 +771,19 @@ static void test_lte(void)
     memset(x, 0, max * sizeof(*x));
     add_noise(x, 200000, 0.01);
     CHECK("noise", m2sdr_lte_analyse(x, 200000, 1920000.0, res) == 0 && !res->found);
+    /* A wide signal that is not a cell: its PSS and SSS pass now and then, its reference signals
+     * do not. */
+    {
+        int phantoms = 0, n;
+
+        for (n = 0; n < 12; n++) {
+            memset(x, 0, max * sizeof(*x));
+            add_noise(x, 400000, 0.01);
+            if (m2sdr_lte_analyse(x, 400000, 7680000.0, res) != 0 || res->found)
+                phantoms++;
+        }
+        CHECK("wide noise, no cell", phantoms == 0);
+    }
     CHECK("bad sample rate", m2sdr_lte_analyse(x, 200000, 2000000.0, res) != 0);
     CHECK("too short", m2sdr_lte_analyse(x, 20000, 1920000.0, res) != 0);
     free(res);

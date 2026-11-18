@@ -31,6 +31,7 @@
 #define PSS_HYPS         7           /* -15 to +15 kHz. */
 #define PSS_MIN_QUALITY  6.0         /* Peak of the correlation over its mean. */
 #define SSS_MIN_MATCH    0.35        /* Of 1 for a clean SSS. */
+#define RS_MAX_EVM       1.0         /* A cell without its MIB is kept when its reference signals are there. */
 #define MIN_SECONDS      0.025
 #define DATA_MIN_RATIO   0.05        /* A block in use has this much of the power of a reference element. */
 #define DATA_MAX_RATIO   0.30        /* Two ports: a block is read below this EVM over the spacing of the points. */
@@ -993,6 +994,16 @@ int m2sdr_lte_analyse(const float complex *x, size_t count, double sample_rate, 
     if (grid_build(&grid, x, frame, &dim, cfo, rb) != 0 ||
         grid_channel(&grid, res->cell_id, 0, grid.h0) != 0 || grid_channel(&grid, res->cell_id, 1, grid.h1) != 0)
         goto out;
+    /* Any wide signal, noise too, gives a PSS and an SSS that pass: a cell is one whose MIB is
+     * read, or whose reference signals are where its identity puts them. */
+    if (!res->mib && grid.rs_evm > RS_MAX_EVM) {
+        const double quality = res->sync_quality;
+
+        memset(res, 0, sizeof(*res));
+        res->sync_quality = quality;
+        rc = 0;
+        goto out;
+    }
     res->analysed_rb = rb;
     res->subcarriers = grid.k;
     res->rsrp_db     = m2sdr_power_db(grid.rs_power[0]);
