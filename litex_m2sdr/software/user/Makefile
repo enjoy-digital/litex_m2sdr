@@ -1,6 +1,7 @@
 PREFIX ?= /usr/local
 SCAN_UI_DIR := scan_ui
-SCAN_CIMGUI_DIR := cimgui
+THIRD_PARTY_DIR := third_party
+SCAN_CIMGUI_DIR := $(THIRD_PARTY_DIR)/cimgui
 M2SDR_VERSION := 1.1.0
 # Commit the tools are built from, printed by `<tool> --version` (-dirty: tracked local edits).
 M2SDR_GIT_REVISION := $(shell r=$$(git rev-parse HEAD 2>/dev/null) && \
@@ -40,7 +41,7 @@ else
   TRANSPORT_LIBS   :=
 endif
 
-CFLAGS  = -O3 -Wall -g -I. -I../kernel -Ilibliteeth -Iliblitepcie -Ilibliteusb -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -MMD -fPIC
+CFLAGS  = -O3 -Wall -g -I. -I../kernel -Ilibliteeth -Iliblitepcie -Ilibliteusb -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -I$(THIRD_PARTY_DIR) -MMD -fPIC
 CFLAGS += $(TRANSPORT_CFLAGS)
 CFLAGS += $(EXTRA_CFLAGS)
 CXXFLAGS = $(CFLAGS) -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCAN_CIMGUI_DIR)/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
@@ -108,7 +109,7 @@ else
     $(warning SDL2 not found; skipping SDL2-based tools)
   endif
   ifneq ($(HAVE_CIMGUI),1)
-    $(warning cimgui sources not found in software/user/cimgui; skipping SDL2-based tools)
+    $(warning cimgui sources not found in software/user/third_party/cimgui (git submodule update --init --recursive); skipping SDL2-based tools)
   endif
 endif
 
@@ -353,8 +354,8 @@ m2sdr_analyzer: $(LIBM2SDR_STATIC) m2sdr_analyzer.o $(M2SDR_ANALYZER_OBJS)
 tests/test_m2sdr_analysis: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
-tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_cal.o kissfft/kiss_fft.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_cal.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
 tests/test_m2sdr_fm: $(LIBM2SDR_STATIC) tests/test_m2sdr_fm.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_fm.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
@@ -375,8 +376,8 @@ m2sdr_sata: $(LIBM2SDR_STATIC) m2sdr_sata.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_sata.o $(M2SDR_LINK_LIBS)
 
 ifeq ($(HAVE_SDL2),1)
-m2sdr_check: $(LIBM2SDR_STATIC) kissfft/kiss_fft.o m2sdr_check.o $(M2SDR_IMGUI_OBJS)
-	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ kissfft/kiss_fft.o m2sdr_check.o $(M2SDR_IMGUI_OBJS) $(M2SDR_LINK_LIBS) $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
+m2sdr_check: $(LIBM2SDR_STATIC) $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o m2sdr_check.o $(M2SDR_IMGUI_OBJS)
+	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o m2sdr_check.o $(M2SDR_IMGUI_OBJS) $(M2SDR_LINK_LIBS) $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
 endif
 
 m2sdr_fm_tx: $(LIBM2SDR_STATIC) m2sdr_fm_tx.o
@@ -392,10 +393,10 @@ m2sdr_fm_rx.o: m2sdr_fm_rx.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(SNDFILE_CFLAGS) $(SAMPLERATE_CFLAGS) -o $@ $<
 
 # Streaming/test tools.
-m2sdr_gen: $(LIBM2SDR_STATIC) m2sdr_gen.o kissfft/kiss_fft.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_gen.o kissfft/kiss_fft.o $(M2SDR_LINK_LIBS)
+m2sdr_gen: $(LIBM2SDR_STATIC) m2sdr_gen.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_gen.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o $(M2SDR_LINK_LIBS)
 
-M2SDR_SCAN_SRCS := m2sdr_scan.c kissfft/kiss_fft.c
+M2SDR_SCAN_SRCS := m2sdr_scan.c $(THIRD_PARTY_DIR)/kissfft/kiss_fft.c
 M2SDR_SCAN_OBJS := $(M2SDR_SCAN_SRCS:.c=.o)
 
 m2sdr_scan: $(LIBM2SDR_STATIC) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS)
@@ -411,7 +412,7 @@ clean:
 	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
 	rm -f libliteusb/*.o libliteusb/*.d
 	rm -f ad9361/*.o ad9361/*.d ad9361/*~
-	rm -f kissfft/*.o kissfft/*.d
+	rm -f $(THIRD_PARTY_DIR)/kissfft/*.o $(THIRD_PARTY_DIR)/kissfft/*.d
 	rm -f $(SCAN_UI_DIR)/*.o $(SCAN_UI_DIR)/*.d
 	rm -f $(SCAN_CIMGUI_DIR)/*.o $(SCAN_CIMGUI_DIR)/*.d
 	rm -f $(SCAN_CIMGUI_DIR)/imgui/*.o $(SCAN_CIMGUI_DIR)/imgui/*.d
@@ -430,7 +431,7 @@ $(BUILD_FLAGS_FILE): FORCE
 		rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d; \
 		rm -f libliteusb/*.o libliteusb/*.d; \
 		rm -f ad9361/*.o ad9361/*.d; \
-		rm -f kissfft/*.o kissfft/*.d; \
+		rm -f $(THIRD_PARTY_DIR)/kissfft/*.o $(THIRD_PARTY_DIR)/kissfft/*.d; \
 		rm -f $(SCAN_UI_DIR)/*.o $(SCAN_UI_DIR)/*.d; \
 		rm -f $(SCAN_CIMGUI_DIR)/*.o $(SCAN_CIMGUI_DIR)/*.d; \
 		rm -f $(SCAN_CIMGUI_DIR)/imgui/*.o $(SCAN_CIMGUI_DIR)/imgui/*.d; \
