@@ -18,6 +18,9 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 
 [> 2026 Q4 to date (Oct - Dec)
 ------------------------------
+**PCIe Resources**
+- Reduced the FPGA resources of the PCIe core: the completions of all the request tags share one block RAM and the DMA descriptor tables are in block RAM (LitePCIe `cmp_bufs_shared` and `dma_table_buffered`). In a standalone synthesis of the PCIe endpoint, this saves about 1300 LUTs and 9 block RAM tiles at x1 and x2, and about 1400 LUTs and 17 block RAM tiles at x4. It needs a LiteX and a LitePCIe that provide these options.
+
 **Host Software Layout**
 - Changed the layout of `litex_m2sdr/software/user/`: its top level now holds the utilities only. Their support code (`m2sdr_cli`, `m2sdr_tool`, `m2sdr_host_queue`, `m2sdr_sata_*`) is in `libm2sdr/`, private to the build (in `libm2sdr.a`, not in `libm2sdr.so` nor in the installed headers); `kissfft` and the `cimgui` submodule are in `third_party/`; the Python programs are in `python/`; `imgui.ini` is no longer tracked. In an existing clone, run `git submodule sync` then `git submodule update --init --recursive litex_m2sdr/software/user/third_party/cimgui`, and delete the old `litex_m2sdr/software/user/cimgui` directory.
 
