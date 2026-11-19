@@ -465,7 +465,6 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             const LiteEthUdpSettings udp_settings = make_liteeth_rx_udp_settings(
                 searchArgs, _deviceArgs, _eth_ip, is_vrt,
                 _bytesPerComplex, selected_channels.size());
-            _liteeth_rx_port = udp_settings.port;
             if (!_udp_inited) {
                 init_liteeth_udp(&_udp, _eth_ip, udp_settings);
                 _udp_inited = true;
@@ -474,6 +473,9 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                     throw std::runtime_error("LiteEth UDP buffers already initialized with a different channel count");
                 }
             }
+            /* The board sends to the port the socket got: the one asked for, or a free one
+             * when another board or another program already receives on it. */
+            _liteeth_rx_port = liteeth_udp_listen_port(&_udp);
             {
                 struct m2sdr_liteeth_rx_stream_config rx_config = makeLiteEthRxStreamConfig();
                 int rc = m2sdr_liteeth_rx_stream_prepare(_dev, &rx_config);

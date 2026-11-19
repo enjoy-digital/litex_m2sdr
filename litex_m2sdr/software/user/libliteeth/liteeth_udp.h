@@ -40,6 +40,7 @@ struct liteeth_udp_ctrl {
     struct pollfd pfd;
     struct sockaddr_in remote;   /* TX destination */
     int           have_remote;
+    uint16_t      listen_port;   /* Port bound on the host, see liteeth_udp_listen_port(). */
     struct sockaddr_in rx_source;
     int           rx_source_filter_enable;
     int           rx_source_port_filter_enable;
@@ -100,6 +101,10 @@ int  liteeth_udp_init(struct liteeth_udp_ctrl *u,
                       int rx_enable, int tx_enable,
                       size_t buffer_size, size_t buffer_count,
                       int nonblock);
+
+/* Port bound on the host: listen_port of liteeth_udp_init(), or a free port when that one
+ * was taken. The stream of the board must be sent to this port. */
+uint16_t liteeth_udp_listen_port(const struct liteeth_udp_ctrl *u);
 
 void liteeth_udp_cleanup(struct liteeth_udp_ctrl *u);
 void liteeth_udp_process(struct liteeth_udp_ctrl *u, int timeout_ms);

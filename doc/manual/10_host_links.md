@@ -332,6 +332,12 @@ SoapySDR application and a utility, for example.
 Two LiteEth streamers carry the samples as raw UDP payload, on port 2345 by default
 (`--eth-udp-port`). Both have registers to enable them and to set the IP address and the port.
 
+On the host, the software receives on port 2345 too. When that port is taken, by the stream of
+another Ethernet board or by another program on the same board, it takes a free port and
+writes it to the RX streamer of the board: several Ethernet boards stream to one host without
+any setting. A firewall on the host has to let these datagrams in; they come from port 2345
+of the board.
+
 | Direction | Class | FIFO | Path |
 |----------------|------------------------------------|---------------------|--------------------------|
 | RX | `LiteEthStream2UDPTX` | 128 words of 64 bits | Crossbar port 1 to the host |
