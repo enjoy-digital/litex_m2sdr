@@ -658,6 +658,10 @@ class BaseSoC(SoCMini):
                 with_dma_synchronizer = True,
                 with_msi              = True, msis = pcie_msis,
                 with_ptm              = with_pcie_ptm,
+                # Completions of all the tags in one Block RAM instead of one FIFO per tag, and
+                # DMA descriptor tables in Block RAM instead of distributed RAM.
+                cmp_bufs_shared       = True,
+                dma_table_buffered    = True,
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
             # The DMA synchronizer (when not bypassed by software) waits for
