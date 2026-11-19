@@ -31,6 +31,7 @@
 #define PSS_HYPS         7           /* -15 to +15 kHz. */
 #define PSS_MIN_QUALITY  6.0         /* Peak of the correlation over its mean. */
 #define SSS_MIN_MATCH    0.35        /* Of 1 for a clean SSS. */
+#define RS_MAX_EVM       1.0         /* A cell without its MIB is kept when its reference signals are there. */
 #define MIN_SECONDS      0.025
 #define DATA_MIN_RATIO   0.05        /* A block in use has this much of the power of a reference element. */
 #define DATA_MAX_RATIO   0.30        /* Two ports: a block is read below this EVM over the spacing of the points. */
@@ -857,18 +858,24 @@ static void data_analyse(const struct lte_grid *g, int cell_id, int cell_rb, int
                     continue;
                 if (res->ndata == M2SDR_LTE_MAX_POINTS) {
                     int k;
-                    for (k = 0; k < M2SDR_LTE_MAX_POINTS / 2; k++)
-                        res->data_points[k] = res->data_points[2 * k];
+                    for (k = 0; k < M2SDR_LTE_MAX_POINTS / 2; k++) {
+                        res->data_points[k]            = res->data_points[2 * k];
+                        res->data_points_modulation[k] = res->data_points_modulation[2 * k];
+                    }
                     res->ndata = M2SDR_LTE_MAX_POINTS / 2;
                     stride    *= 2;
                 }
-                res->data_points[res->ndata++] = zb[i] / best_gain;
+                res->data_points_modulation[res->ndata] = (uint8_t)family[best];
+                res->data_points[res->ndata++]          = zb[i] / best_gain;
             }
         }
     }
-    res->data        = true;
-    res->data_blocks = total;
-    res->data_evm    = total ? sqrt(se / total) : 0.0;
+    res->data          = true;
+    res->data_rb       = blocks;
+    res->data_first_rb = cell_rb > g->rb ? (6 * (cell_rb - g->rb) + offset) / 12 : 0;
+    res->data_offset   = offset;
+    res->data_blocks   = total;
+    res->data_evm      = total ? sqrt(se / total) : 0.0;
     for (m = 0; m < M2SDR_MOD_COUNT; m++) {
         if (used[m] > used[res->data_modulation])
             res->data_modulation = (enum m2sdr_modulation)m;
@@ -993,6 +1000,16 @@ int m2sdr_lte_analyse(const float complex *x, size_t count, double sample_rate, 
     if (grid_build(&grid, x, frame, &dim, cfo, rb) != 0 ||
         grid_channel(&grid, res->cell_id, 0, grid.h0) != 0 || grid_channel(&grid, res->cell_id, 1, grid.h1) != 0)
         goto out;
+    /* Any wide signal, noise too, gives a PSS and an SSS that pass: a cell is one whose MIB is
+     * read, or whose reference signals are where its identity puts them. */
+    if (!res->mib && grid.rs_evm > RS_MAX_EVM) {
+        const double quality = res->sync_quality;
+
+        memset(res, 0, sizeof(*res));
+        res->sync_quality = quality;
+        rc = 0;
+        goto out;
+    }
     res->analysed_rb = rb;
     res->subcarriers = grid.k;
     res->rsrp_db     = m2sdr_power_db(grid.rs_power[0]);

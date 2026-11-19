@@ -757,6 +757,18 @@ static void test_lte(void)
             }
         }
         CHECK("blocks in use found", used >= readable - 12 && res->data_blocks == used + empty_used);
+        /* The carrier is analysed whole: its blocks are the ones of the grid. */
+        CHECK("blocks of the cell", res->data_rb == sig->n_rb && res->data_first_rb == 0 && res->data_offset == 0);
+        {
+            int n, other = 0;
+
+            for (n = 0; n < res->ndata; n++) {
+                const uint8_t m = res->data_points_modulation[n];
+                if (m != M2SDR_MOD_QPSK && m != M2SDR_MOD_16QAM && m != M2SDR_MOD_64QAM)
+                    other++;
+            }
+            CHECK("modulation of the symbols", res->ndata > 0 && other == 0);
+        }
         CHECK("their modulation", wrong == 0);
         CHECK("empty blocks left out", empty_used == 0);
         if (ports == 2) {
@@ -771,6 +783,19 @@ static void test_lte(void)
     memset(x, 0, max * sizeof(*x));
     add_noise(x, 200000, 0.01);
     CHECK("noise", m2sdr_lte_analyse(x, 200000, 1920000.0, res) == 0 && !res->found);
+    /* A wide signal that is not a cell: its PSS and SSS pass now and then, its reference signals
+     * do not. */
+    {
+        int phantoms = 0, n;
+
+        for (n = 0; n < 12; n++) {
+            memset(x, 0, max * sizeof(*x));
+            add_noise(x, 400000, 0.01);
+            if (m2sdr_lte_analyse(x, 400000, 7680000.0, res) != 0 || res->found)
+                phantoms++;
+        }
+        CHECK("wide noise, no cell", phantoms == 0);
+    }
     CHECK("bad sample rate", m2sdr_lte_analyse(x, 200000, 2000000.0, res) != 0);
     CHECK("too short", m2sdr_lte_analyse(x, 20000, 1920000.0, res) != 0);
     free(res);

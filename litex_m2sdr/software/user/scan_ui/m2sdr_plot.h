@@ -36,15 +36,21 @@ struct m2sdr_plot {
     bool   clicked;         /* Left click on it in this frame. */
     double mouse_x;         /* Position of the mouse on the axes. */
     double mouse_y;
+    const char *label;      /* Drawn by m2sdr_plot_end(), over the traces. */
 };
 
 /* Value to its text, with the unit of an axis: "1.8525 GHz", "250 us". `step` is the smallest
  * difference that must show. */
 void m2sdr_plot_format(char *buf, size_t len, double value, double step, enum m2sdr_plot_unit unit);
 
+/* Size of a plot `height` pixels high whose area, inside the labels, is a square: for a plane
+ * where a circle must show as one (I against Q). */
+ImVec2 m2sdr_plot_square(float height);
+
 /* Start a plot of `size` pixels (0: what is left of the window) at the cursor. It draws the
  * frame, the grid and the labels, and takes the mouse. Returns false when it is not visible;
- * m2sdr_plot_end() is only called after a true. */
+ * m2sdr_plot_end() is only called after a true. `y_label` is kept until then: it is drawn last,
+ * at the top left, so that the traces do not hide it. */
 bool m2sdr_plot_begin(struct m2sdr_plot *plot, const char *id, ImVec2 size,
                       double x0, double x1, enum m2sdr_plot_unit x_unit,
                       double y0, double y1, const char *y_label);

@@ -302,11 +302,11 @@ int m2sdr_demod(const float complex *x, size_t count, double sample_rate,
  * receiver does not separate them, and it is counted as in use and not read. With four
  * antenna ports, the blocks of data are not analysed. */
 struct m2sdr_lte_result {
-    bool   found;               /* PSS and SSS found: the fields up to frame_offset are valid. */
+    bool   found;               /* PSS and SSS found, and the MIB or the reference signals of the cell. */
     int    cell_id;             /* Physical cell identity, 0 to 503. */
     int    n_id_1, n_id_2;
     double freq_error_hz;       /* Carrier, from the centre of the capture. */
-    double sync_quality;        /* PSS peak over the mean of its correlation. */
+    double sync_quality;        /* PSS peak over the mean of its correlation; given without a cell too. */
     size_t frame_offset;        /* Sample of the start of the frame analysed. */
     bool   mib;                 /* PBCH decoded, its CRC right: the four fields below are valid. */
     int    ports;               /* Antenna ports of the cell: 1, 2 or 4. */
@@ -328,6 +328,10 @@ struct m2sdr_lte_result {
      * use that fit neither (two layers, mostly). */
     int    data_diversity, data_precoded, data_unknown;
     enum m2sdr_modulation data_modulation;   /* The most used. */
+    /* The blocks below are the ones of the cell that are whole in the band analysed: data_rb of
+     * them, the first one block data_first_rb of the cell, data_offset subcarriers (0 or 6)
+     * above the lowest one of grid_db. */
+    int    data_rb, data_first_rb, data_offset;
     /* Per slot and resource block: modulation (M2SDR_MOD_AUTO: empty or not analysed) and EVM. */
     uint8_t rb_modulation[M2SDR_LTE_FRAME_SLOTS][M2SDR_LTE_MAX_ANALYSED_RB];
     float   rb_evm[M2SDR_LTE_FRAME_SLOTS][M2SDR_LTE_MAX_ANALYSED_RB];
@@ -339,6 +343,7 @@ struct m2sdr_lte_result {
      * a mean power of 1. */
     int    ndata, nrs, npbch;
     float complex data_points[M2SDR_LTE_MAX_POINTS];
+    uint8_t data_points_modulation[M2SDR_LTE_MAX_POINTS];   /* Of the block of each point. */
     float complex rs_points[M2SDR_LTE_MAX_POINTS];
     float complex pbch_points[240];
 };
