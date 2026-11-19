@@ -26,9 +26,19 @@ class ClkMeasurement(LiteXModule):
         self.cd_counter = ClockDomain(reset_less=True)
         self.comb += self.cd_counter.clk.eq(clk)
 
-        # Free-running Clock Counter.
-        counter = Signal(64)
-        self.sync.counter += counter.eq(counter + increment)
+        # Free-running Clock Counter. The 64-bit count is split in two 32-bit halves with a
+        # registered carry, so that the carry chain does not limit the frequency of the measured
+        # clock. The LSBs are delayed by one cycle to stay aligned with the MSBs.
+        counter_lsb   = Signal(32)
+        counter_lsb_d = Signal(32)
+        counter_carry = Signal()
+        counter_msb   = Signal(32)
+        self.sync.counter += [
+            Cat(counter_lsb, counter_carry).eq(counter_lsb + increment),
+            counter_lsb_d.eq(counter_lsb),
+            counter_msb.eq(counter_msb + counter_carry),
+        ]
+        counter = Cat(counter_lsb_d, counter_msb)
 
         # Latch Clock Counter. The 64-bit snapshot crosses back through one
         # handshaked crossing so software never reads a torn value while the

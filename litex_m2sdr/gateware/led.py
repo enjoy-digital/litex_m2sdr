@@ -313,6 +313,7 @@ class StatusLed(LiteXModule):
         pps_level         = Signal(8)
         activity_level    = Signal(8)
         level0            = Signal(8)
+        level_comb        = Signal(8)
 
         self.comb += [
             # All animation/effect helpers share the same low-rate timing base.
@@ -343,6 +344,10 @@ class StatusLed(LiteXModule):
         # 3) TX/RX activity accent
         #
         # Using max() composition keeps each concern independent and easy to retune.
+        #
+        # The level is registered before the PWM: the state decode and the PWM comparison are
+        # then in separate timing paths, and one more sys_clk cycle is not visible on a LED.
+        self.sync += level.eq(level_comb)
         self.comb += [
             base_level.eq(0),
             If(not_ready,
@@ -360,7 +365,7 @@ class StatusLed(LiteXModule):
             ),
 
             level0.eq(Mux(base_level > pps_level,      base_level,     pps_level)),
-            level.eq( Mux(level0     > activity_level, level0,         activity_level)),
+            level_comb.eq(Mux(level0 > activity_level, level0,         activity_level)),
 
             pwm.level.eq(level),
             output.eq(  pwm.output),

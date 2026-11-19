@@ -7,6 +7,8 @@
 
 from migen import *
 
+from litex.gen.sim import run_simulation
+
 from litex_m2sdr.gateware.measurement import ClkMeasurement, MultiClkMeasurement
 
 
@@ -61,3 +63,26 @@ def test_multi_clk_measurement_optionally_exposes_shared_latch():
     assert hasattr(dut, "latch_all")
     assert hasattr(dut.clk_modules["sys_clk"], "_latch")
     assert hasattr(dut.clk_modules["sys_clk"], "_value")
+
+
+def test_clk_measurement_value_stays_consistent_across_the_lsb_carry():
+    """Verify latched values stay exact multiples of the increment while the LSB half wraps."""
+    increment = 2**31 - 1 # The 32-bit LSB half wraps about every second cycle.
+    dut = ClkMeasurement(clk=Signal(), increment=increment, with_csr=False)
+    values = []
+
+    def gen():
+        for _ in range(40):
+            yield dut.latch.eq(1)
+            yield
+            yield dut.latch.eq(0)
+            for _ in range(24):
+                yield
+            values.append((yield dut.value))
+
+    run_simulation(dut, gen(), clocks={"sys": 10, "counter": 7})
+
+    assert values[0] != 0
+    assert max(values) >= 2**32
+    assert all(value % increment == 0 for value in values)
+    assert all(b > a for a, b in zip(values, values[1:]))

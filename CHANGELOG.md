@@ -18,6 +18,9 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 
 [> 2026 Q4 to date (Oct - Dec)
 ------------------------------
+**Gateware Timing**
+- Split the 64-bit counter of `ClkMeasurement` in two 32-bit halves with a registered carry, and registered the status LED level before its PWM. Both shorten timing paths without visible change: the measured count is one cycle of the measured clock older, the LED level one `sys_clk` cycle later.
+
 **Host Software Layout**
 - Changed the layout of `litex_m2sdr/software/user/`: its top level now holds the utilities only. Their support code (`m2sdr_cli`, `m2sdr_tool`, `m2sdr_host_queue`, `m2sdr_sata_*`) is in `libm2sdr/`, private to the build (in `libm2sdr.a`, not in `libm2sdr.so` nor in the installed headers); `kissfft` and the `cimgui` submodule are in `third_party/`; the Python programs are in `python/`; `imgui.ini` is no longer tracked. In an existing clone, run `git submodule sync` then `git submodule update --init --recursive litex_m2sdr/software/user/third_party/cimgui`, and delete the old `litex_m2sdr/software/user/cimgui` directory.
 
