@@ -63,6 +63,36 @@ static bool isDecimalIndex(const std::string &value)
     return true;
 }
 
+/* "device" is an identifier of libm2sdr in our own tools (an index, a device node, a
+ * pcie:/eth:/usb: identifier, an IP address), and the name of a kind of device for others:
+ * the results of the enumeration carry device=LiteX-M2SDR, and SigDigger (suscan) selects a
+ * board with device=<driver>,serial=<serial>. */
+bool litexM2SDRDeviceIsIdentifier(const std::string &device)
+{
+    bool address = !device.empty();
+
+    if (isDecimalIndex(device))
+        return true;
+    if (device.find('/') != std::string::npos || device.find(':') != std::string::npos)
+        return true;
+    for (char c : device) {
+        if (!std::isdigit(static_cast<unsigned char>(c)) && c != '.')
+            address = false;
+    }
+    return address;
+}
+
+static bool isOurDeviceName(const std::string &device)
+{
+    std::string name;
+
+    for (char c : device) {
+        if (c != '-' && c != '_' && c != ' ')
+            name += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return name == "litexm2sdr";
+}
+
 static std::string transportName(enum m2sdr_transport_kind transport)
 {
     if (transport == M2SDR_TRANSPORT_KIND_LITEPCIE)
@@ -81,6 +111,13 @@ static std::string displayPath(const struct m2sdr_device_addr &addr)
     if (addr.transport == M2SDR_TRANSPORT_KIND_LITEETH)
         return addr.ip;
     return addr.identifier;
+}
+
+static std::string trimSerial(const std::string &serial)
+{
+    const size_t first = serial.find_first_not_of('0');
+
+    return first == std::string::npos ? "" : serial.substr(first);
 }
 
 static bool resolveIdentifier(const std::string &candidate, struct m2sdr_device_addr &addr)
@@ -191,10 +228,15 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
     if (args.count("device") != 0) {
         std::string device = args.at("device");
 
-        if (isDecimalIndex(device))
-            device = "/dev/m2sdr" + device;
-        attemptToAddDevice(device);
-        return discovered;
+        if (litexM2SDRDeviceIsIdentifier(device)) {
+            if (isDecimalIndex(device))
+                device = "/dev/m2sdr" + device;
+            attemptToAddDevice(device);
+            return discovered;
+        }
+        /* The name of another kind of device: not for us. */
+        if (!isOurDeviceName(device))
+            return discovered;
     }
 
     if (args.count("eth_ip") != 0) {
@@ -233,6 +275,18 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
                 attemptToAddDevice(std::string("usb:path=") + usb_infos[i].path);
         }
 #endif
+    }
+
+    /* serial=<serial>: the board asked for among those found. */
+    if (args.count("serial") != 0) {
+        const std::string serial = trimSerial(args.at("serial"));
+        std::vector<SoapySDR::Kwargs> matching;
+
+        for (const auto &dev : discovered) {
+            if (dev.count("serial") != 0 && trimSerial(dev.at("serial")) == serial)
+                matching.push_back(dev);
+        }
+        return matching;
     }
     return discovered;
 }

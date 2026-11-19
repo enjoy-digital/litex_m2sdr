@@ -13,6 +13,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <stdexcept>
+#include <map>
 #include <unordered_map>
 #include <algorithm>
 #include <cctype>
@@ -48,7 +49,17 @@ extern "C" {
 
 /* AD9361 SPI */
 
+bool litexM2SDRDeviceIsIdentifier(const std::string &device);
+
 namespace {
+/* Several devices can be open on one board in a process: SigDigger (suscan) opens one to
+ * list what the board can do, and another one to receive, at the same time. They are
+ * opened and closed one after the other, the RFIC is initialised by the first and powered
+ * down by the last, and their SPI transfers do not interleave. */
+std::mutex board_mutex;
+std::map<std::string, unsigned> board_users;
+std::mutex spi_transfer_mutex;
+
 std::mutex spi_map_mutex;
 std::unordered_map<uint8_t, litex_m2sdr_device_desc_t> spi_fd_map;
 uint8_t spi_next_id = 0;
@@ -478,7 +489,7 @@ std::string makeDeviceIdentifier(const SoapySDR::Kwargs &args,
 
     if (args.count("dev_id") != 0) {
         candidate = args.at("dev_id");
-    } else if (args.count("device") != 0) {
+    } else if (args.count("device") != 0 && litexM2SDRDeviceIsIdentifier(args.at("device"))) {
         const std::string device = args.at("device");
 
         if (isDecimalIndex(device))
@@ -516,6 +527,7 @@ int spi_write_then_read(struct spi_device *spi,
                         const unsigned char *txbuf, unsigned n_tx,
                         unsigned char *rxbuf, unsigned n_rx)
 {
+    std::lock_guard<std::mutex> transfer_lock(spi_transfer_mutex);
     litex_m2sdr_device_desc_t fd = spi_get_fd(spi);
     if (!fd)
         throw std::runtime_error("spi_write_then_read(): invalid SPI device");
@@ -628,7 +640,9 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 #endif
 
+    std::lock_guard<std::mutex> board_lock(board_mutex);
     std::string dev_id = makeDeviceIdentifier(args, path, eth_ip);
+    const bool board_shared = board_users.count(dev_id) != 0;
     int rc = m2sdr_open(&_dev, dev_id.c_str());
     if (rc != 0) {
         throw std::runtime_error(
@@ -806,6 +820,11 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     bool do_init = true;
     if (args.count("bypass_init") > 0)
         do_init = args.at("bypass_init")[0] == '0';
+    if (board_shared && do_init) {
+        SoapySDR::log(SOAPY_SDR_INFO,
+            "Board already open in this process: its RFIC is used as it is");
+        do_init = false;
+    }
     bool rx_agc_pin_requested = false;
     bool rx_agc_pin = false;
     if (args.count("rx_agc_pin") > 0) {
@@ -907,7 +926,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
     if (!do_init && !(litex_m2sdr_readl(_dev, CSR_AD9361_CONFIG_ADDR) & 0b01))
         throw std::runtime_error("bypass_init=1: the AD9361 is held in reset (not initialized, e.g. by m2sdr_rf)");
-    _rfInitDone = do_init;
+    _rfInitDone = do_init || board_shared;
     if (do_init) {
 
         /* Initialize SI5351 Clocking */
@@ -1061,6 +1080,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("Invalid TX antenna selection");
     }
 
+    _boardId = dev_id;
+    board_users[_boardId]++;
     ctor_guard.armed = false;
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initialization complete");
 }
@@ -1070,10 +1091,21 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
  **************************************************************************************************/
 
 SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
-    SoapySDR::log(SOAPY_SDR_INFO, "Power down and cleanup");
-
     _rx_stream.stop_requested.store(true);
     _tx_stream.stop_requested.store(true);
+
+    /* The board is left as it is when another device of this process still uses it. */
+    std::lock_guard<std::mutex> board_lock(board_mutex);
+    bool board_last = true;
+    auto users = board_users.find(_boardId);
+    if (users != board_users.end()) {
+        if (--users->second == 0)
+            board_users.erase(users);
+        else
+            board_last = false;
+    }
+    SoapySDR::log(SOAPY_SDR_INFO, board_last ? "Power down and cleanup" :
+        "Cleanup (board still open in this process)");
 
     std::lock_guard<std::recursive_mutex> rx_stream_lock(_rx_stream_mutex);
     std::lock_guard<std::recursive_mutex> tx_stream_lock(_tx_stream_mutex);
@@ -1103,10 +1135,10 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     }
     cleanupLiteEthUdpIfIdleUnlocked();
 
-    if (isLiteEth() || isLiteUSB())
+    if (board_last && (isLiteEth() || isLiteUSB()))
         resetDatapathUnlocked();
 
-    if (_dev) {
+    if (_dev && board_last) {
         /* Crossbar Mux/Demux : Select PCIe streaming */
         litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
         litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
@@ -2273,22 +2305,33 @@ static void select_si5351_config(const std::string &source, int64_t refclk_hz,
 void SoapyLiteXM2SDR::applyClockSource(const std::string &source)
 {
 #ifdef CSR_SI5351_BASE
-    if (source == "internal") {
-        /* SI5351B, XO reference */
-        litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
-            SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
-    } else if (source == "external") {
-        /* SI5351C, external 10 MHz CLKIN from u.FL */
-        litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
-              SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
-              SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
-    } else if (source == "fpga") {
-        /* SI5351C, 10 MHz CLKIN regenerated from the FPGA clk10 path. */
-        litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
-              SI5351C_VERSION                * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
-              SI5351C_10MHZ_CLK_IN_FROM_PLL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
-    } else {
+    /* Reference input of the SI5351: its XO (SI5351B), or the CLKIN of the SI5351C, fed
+     * by the uFL connector or by the FPGA. */
+    auto select_input = [this](const std::string &input) {
+        uint32_t control = SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET);
+
+        if (input == "external")
+            control = SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
+                      SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET);
+        else if (input == "fpga")
+            control = SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
+                      SI5351C_10MHZ_CLK_IN_FROM_PLL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET);
+        litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR, control);
+    };
+
+    if (source != "internal" && source != "external" && source != "fpga")
         throw std::runtime_error("Unsupported clock_source '" + source + "' (supported: internal, external, fpga)");
+    select_input(source);
+
+    /* With no clock on its CLKIN, the SI5351C would leave the AD9361 without a reference,
+     * and every operation on it would time out: checked before the SI5351 is programmed,
+     * so that a refused source leaves the clocks as they were. */
+    if (source != "internal" &&
+        !m2sdr_si5351_i2c_clkin_present((void *)(intptr_t)_fd, SI5351_I2C_ADDR)) {
+        select_input(_clock_source);
+        throw std::runtime_error(source == "external" ?
+            "clock source 'external': no 10 MHz reference on the uFL input" :
+            "clock source 'fpga': no 10 MHz from the FPGA");
     }
 
     const uint8_t (*config)[2];
@@ -2330,6 +2373,9 @@ void SoapyLiteXM2SDR::setClockSource(const std::string &source)
     if (_rx_stream.opened || _tx_stream.opened)
         throw std::runtime_error(
             "setClockSource: close RX/TX streams before changing the clock source");
+    /* Throws, with the clocks left as they were, when the source has no reference: an
+     * application such as SigDigger asks for the external one on every device that lists
+     * it, and carries on when it is refused. */
     applyClockSource(canonical);
     _clock_source = canonical;
 }
