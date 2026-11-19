@@ -14,6 +14,7 @@ keyword arguments: `--with-eth` is `with_eth=True`, `--eth-phy=2500basex` is
 | Option | Default | Effect |
 |-----------------------------------|-------------|----------------------------------------------------|
 | `--variant` | `m2` | Carrier: `m2` or `baseboard` ([Variants](#soc-variants)) |
+| `--toolchain` | `vivado` | FPGA toolchain: `vivado` or `openxc7`, experimental ([openXC7](#build-openxc7)) |
 | `--sys-clk-freq` | see below | System clock frequency in Hz |
 | `--build` | off | Run Vivado and build the bitstream |
 | `--load` | off | Load the bitstream over JTAG |
@@ -51,6 +52,7 @@ refuses it with Ethernet, SATA or USB3. The BFP8 format does not exist on this b
 | `--pcie-gen` | `2` | PCIe generation: `1` or `2` |
 | `--pcie-lanes` | `1` | Lanes: `1`, `2` or `4`; one lane only on the baseboard |
 | `--pcie-dmas` | `1` | DMA channels; channel 0 carries the samples |
+| `--pcie-ip-sources` | none | Directory of the Vivado-generated PCIe core, required with `--toolchain=openxc7` |
 | `--with-pcie-ptm` | off | PCIe PTM requester; needs `--with-pcie`, PCIe Gen2 x1 only |
 | `--with-pcie-reset-workaround` | off | Toggle the PCIe reset until the link is up |
 

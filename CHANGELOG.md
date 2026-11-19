@@ -21,6 +21,9 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 **Host Software Layout**
 - Changed the layout of `litex_m2sdr/software/user/`: its top level now holds the utilities only. Their support code (`m2sdr_cli`, `m2sdr_tool`, `m2sdr_host_queue`, `m2sdr_sata_*`) is in `libm2sdr/`, private to the build (in `libm2sdr.a`, not in `libm2sdr.so` nor in the installed headers); `kissfft` and the `cimgui` submodule are in `third_party/`; the Python programs are in `python/`; `imgui.ini` is no longer tracked. In an existing clone, run `git submodule sync` then `git submodule update --init --recursive litex_m2sdr/software/user/third_party/cimgui`, and delete the old `litex_m2sdr/software/user/cimgui` directory.
 
+**Gateware Build**
+- Added `--toolchain=openxc7`: experimental build with the open-source openXC7 flow (Yosys, nextpnr, Project X-Ray). Bitstreams are produced for the M.2 SoC without host link, M.2 PCIe x1 (with `--pcie-ip-sources`) and baseboard SATA; none meets timing yet and none is validated on hardware. The Vivado builds are unchanged.
+
 **Low Sample Rates**
 - Fixed RX aliasing below `2.5 MSPS`: the AD9361 RX and TX FIRs now use their dedicated tables, x4 below `1.25 MSPS` and x2 from `1.25` to `2.5 MSPS`, in `libm2sdr` as in the SoapySDR driver. The RX level is about `6 dB` higher below `1.25 MSPS` than above, with the same signal to noise ratio; between `1.25` and `2.5 MSPS` it differs from earlier versions of `libm2sdr`.
 
