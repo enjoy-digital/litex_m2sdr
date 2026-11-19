@@ -36,6 +36,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 **SoapySDR Driver**
 - Fixed the board with SigDigger: its device selection (`device=LiteXM2SDR,serial=...`) was taken for a network host name, and its request for the external clock reference, made on every device, left the RFIC without a reference when none was connected. `device` is an identifier only when it looks like one, `serial` selects a board among those found, and the `external` and `fpga` clock sources are refused when no clock reaches the reference input (`m2sdr_rf --sync external` stops with the reason instead of timing out).
 - Fixed two devices open on one board in a process (SigDigger lists the board while it opens it): they are opened one after the other, the RFIC is initialised by the first and powered down by the last.
+- Fixed several boards open in one process with the SoapySDR driver: the AD9361 commands of every board went to the board opened first (the SPI identifier of a board was read at the wrong place, an empty C structure having a size in C++ only).
 
 **Signal Analysis**
 - Added `m2sdr_analyzer`: spectrum with traces, markers and a waterfall, channel power, ACPR, occupied bandwidth, tone figures (SNR, SINAD, SFDR, THD) and time-domain statistics, on the board RX or on a SigMF or raw capture, in a Dear ImGui window or as a text or JSON report without a display. The measurements are in libm2sdr (`m2sdr_analysis.h`).
