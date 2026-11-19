@@ -310,11 +310,18 @@ class SI5351(LiteXModule):
 
         # ClkIn Source Mux.
         si5351_clkin = Signal()
-        self.specials += Instance("BUFGMUX",
-            i_S  = self.clkin_src,
-            i_I0 = ClockSignal("clk10"),
-            i_I1 = self.clkin_ufl,
-            o_O  = si5351_clkin,
+        # BUFGCTRL in BUFGMUX configuration (what Vivado maps a BUFGMUX to); instantiated directly
+        # since the openXC7 flow has no BUFGMUX primitive.
+        self.specials += Instance("BUFGCTRL",
+            i_CE0     = 1,
+            i_CE1     = 1,
+            i_IGNORE0 = 0,
+            i_IGNORE1 = 0,
+            i_S0      = ~self.clkin_src,
+            i_S1      = self.clkin_src,
+            i_I0      = ClockSignal("clk10"),
+            i_I1      = self.clkin_ufl,
+            o_O       = si5351_clkin,
         )
 
         # ClkIn/Enable Output.

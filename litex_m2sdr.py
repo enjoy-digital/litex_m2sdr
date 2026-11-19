@@ -197,6 +197,9 @@ class CRG(LiteXModule):
         if not with_white_rabbit:
             # Keep clk10 on a dedicated MMCM so the SI5351C FPGA CLKIN path can be phase-steered later.
             self.clk10_mmcm = clk10_mmcm = S7MMCM(speedgrade=-3, fractional=False)
+            if platform.toolchain_name != "vivado":
+                # nextpnr (openXC7) only supports CLKFBOUT_MULT_F up to 63.
+                clk10_mmcm.clkfbout_mult_frange = (2, 63+1)
             self.comb += clk10_mmcm.reset.eq(self.rst)
             clk10_mmcm.register_clkin(clk100, 100e6)
             clk10_mmcm.expose_dps("clk200", with_csr=False)
@@ -586,7 +589,9 @@ class BaseSoC(SoCMini):
 
         # XADC -------------------------------------------------------------------------------------
 
-        self.xadc = S7SystemMonitor()
+        # The XADC primitive is not supported by the openXC7 flow (no XADC BEL in nextpnr).
+        if toolchain == "vivado":
+            self.xadc = S7SystemMonitor()
 
         # DNA --------------------------------------------------------------------------------------
 
