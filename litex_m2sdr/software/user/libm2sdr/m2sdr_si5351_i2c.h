@@ -62,6 +62,8 @@ bool m2sdr_si5351_i2c_poll(void *conn,  uint8_t slave_addr);
 bool m2sdr_si5351_i2c_check_litei2c(void *conn);
 /* Apply one of the predefined SI5351 register tables from m2sdr_config.h. */
 bool m2sdr_si5351_i2c_config_checked(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length);
+/* Tells whether a clock reaches the CLKIN input of the SI5351C (external or FPGA reference). */
+bool m2sdr_si5351_i2c_clkin_present(void *conn, uint8_t i2c_addr);
 void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length);
 /* Seed a PLLB state snapshot from the nominal register table, to be called
  * right after the table has been applied to the device. */
