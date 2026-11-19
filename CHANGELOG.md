@@ -61,6 +61,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - With an older gateware, `m2sdr_play` sends at the sample rate on the clock of the host, from the SigMF metadata or `--sample-rate`.
 - Fixed the start of an Ethernet RX stream: about `110 KB` of old samples, left in the RFIC RX FIFO, opened it with compressed timestamps. The gateware drains them while the UDP streamer is disabled, and `libm2sdr` waits `10 ms` for it before enabling the streamer.
 - Fixed a loss of the Ethernet control link: a full TX FIFO stalled the receive path of the whole LiteEth core, so the board stopped answering while the timed TX gate held a frame. The datagrams that do not fit are now dropped.
+- Fixed the sample streams of several Ethernet boards on one host, and of two programs on one board: they all received on UDP port 2345, and one of them took the datagrams of the others. A stream that finds the port taken receives on a free one and tells it to the board.
 
 [> 2026 Q2 to date (Apr - Jun)
 ------------------------------

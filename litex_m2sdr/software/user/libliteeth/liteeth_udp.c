@@ -224,10 +224,13 @@ int liteeth_udp_init(struct liteeth_udp_ctrl *u,
         goto fail_sock;
     }
 
+    /* No SO_REUSEADDR: with it, a second socket binds the same port and takes the
+     * datagrams of the first one. */
     int yes = 1;
-    (void)setsockopt(u->sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
 #ifdef SO_RXQ_OVFL
     (void)setsockopt(u->sock, SOL_SOCKET, SO_RXQ_OVFL, &yes, sizeof(yes));
+#else
+    (void)yes;
 #endif
 
     if (u->nonblock) {
@@ -243,9 +246,23 @@ int liteeth_udp_init(struct liteeth_udp_ctrl *u,
     (void)refresh_socket_buffer(u, SO_RCVBUF, &u->so_rcvbuf_actual_bytes);
     (void)refresh_socket_buffer(u, SO_SNDBUF, &u->so_sndbuf_actual_bytes);
 
+    /* The port asked for, or a free one when it is taken: by the stream of another board,
+     * or by another program on this board. The board is told the port in use, see
+     * liteeth_udp_listen_port(). */
     if (bind_any(u->sock, listen_ip, listen_port) < 0) {
-        perror("liteeth_udp: bind");
-        goto fail_sock;
+        if (errno != EADDRINUSE || listen_port == 0 ||
+            bind_any(u->sock, listen_ip, 0) < 0) {
+            perror("liteeth_udp: bind");
+            goto fail_sock;
+        }
+    }
+    {
+        struct sockaddr_in local;
+        socklen_t local_len = sizeof(local);
+
+        u->listen_port = listen_port;
+        if (getsockname(u->sock, (struct sockaddr *)&local, &local_len) == 0)
+            u->listen_port = ntohs(local.sin_port);
     }
 
     if (remote_ip && *remote_ip) {
@@ -276,6 +293,11 @@ fail_mem:
     free(u->buf_rd);
     memset(u, 0, sizeof(*u));
     return -1;
+}
+
+uint16_t liteeth_udp_listen_port(const struct liteeth_udp_ctrl *u)
+{
+    return u ? u->listen_port : 0;
 }
 
 void liteeth_udp_cleanup(struct liteeth_udp_ctrl *u)

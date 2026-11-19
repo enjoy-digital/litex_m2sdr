@@ -973,10 +973,6 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
             }
 
             eth_rx_config.mode = M2SDR_LITEETH_RX_MODE_UDP;
-            eth_rx_config.udp_port = listen_port;
-            rc = m2sdr_liteeth_rx_stream_prepare(dev, &eth_rx_config);
-            if (rc != M2SDR_ERR_OK)
-                return rc;
             eth_rx_needs_activate = 1;
         }
 
@@ -1005,6 +1001,13 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         }
 
         if (eth_rx_needs_activate) {
+            /* The board sends to the port the socket got: the default one, or a free one
+             * when another board or another program already receives on it. */
+            eth_rx_config.udp_port = liteeth_udp_listen_port(&dev->udp);
+            rc = m2sdr_liteeth_rx_stream_prepare(dev, &eth_rx_config);
+            if (rc != M2SDR_ERR_OK)
+                return rc;
+
             /* With the RX header, the frames start with its sync word: buffers aligned on it,
              * whatever the datagram the reception starts on and through lost datagrams. */
             liteeth_udp_set_rx_frame_sync(&dev->udp, dev->rx_header_enable,

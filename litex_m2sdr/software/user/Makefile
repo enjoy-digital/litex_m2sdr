@@ -119,7 +119,7 @@ LIBM2SDR_SHARED = libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so
 PROGS    = $(BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx \
            ../../doc/libm2sdr/example_tone_tx ../../doc/libm2sdr/example_rx_n
-TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio tests/test_m2sdr_host_queue tests/test_m2sdr_flash tests/test_si5351_trim tests/test_liteeth_udp_frame_sync tests/test_m2sdr_cal tests/test_m2sdr_analysis tests/test_m2sdr_fm
+TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio tests/test_m2sdr_host_queue tests/test_m2sdr_flash tests/test_si5351_trim tests/test_liteeth_udp_frame_sync tests/test_liteeth_udp_port tests/test_m2sdr_cal tests/test_m2sdr_analysis tests/test_m2sdr_fm
 
 LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_si5351_i2c.o \
@@ -230,8 +230,9 @@ test-sata-hostio: tests/test_m2sdr_sata_hostio
 test-host-queue: tests/test_m2sdr_host_queue
 	./tests/test_m2sdr_host_queue
 
-test-liteeth-udp: tests/test_liteeth_udp_frame_sync
+test-liteeth-udp: tests/test_liteeth_udp_frame_sync tests/test_liteeth_udp_port
 	./tests/test_liteeth_udp_frame_sync
+	./tests/test_liteeth_udp_port
 
 # With --tools, the round trip also goes through m2sdr_fm_tx and m2sdr_fm_rx, when they are built.
 test-fm: tests/test_m2sdr_fm $(FM_BINARIES)
@@ -268,6 +269,9 @@ tests/test_si5351_trim: tests/test_si5351_trim.o libm2sdr/m2sdr_si5351_i2c.o $(L
 
 tests/test_liteeth_udp_frame_sync: tests/test_liteeth_udp_frame_sync.o libliteeth/liteeth_udp.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_liteeth_udp_frame_sync.o libliteeth/liteeth_udp.o
+
+tests/test_liteeth_udp_port: tests/test_liteeth_udp_port.o libliteeth/liteeth_udp.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_liteeth_udp_port.o libliteeth/liteeth_udp.o
 
 tests/test_m2sdr_host_queue: tests/test_m2sdr_host_queue.o libm2sdr/m2sdr_host_queue.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_host_queue.o libm2sdr/m2sdr_host_queue.o $(PTHREAD_LIBS)
