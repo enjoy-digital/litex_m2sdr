@@ -642,13 +642,22 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     std::lock_guard<std::mutex> board_lock(board_mutex);
     std::string dev_id = makeDeviceIdentifier(args, path, eth_ip);
-    const bool board_shared = board_users.count(dev_id) != 0;
     int rc = m2sdr_open(&_dev, dev_id.c_str());
     if (rc != 0) {
         throw std::runtime_error(
             "SoapyLiteXM2SDR(): failed to open " + dev_id + " (" +
             std::string(m2sdr_strerror(rc)) + ")");
     }
+    /* A board is known by its serial number: one board can be reached through two links
+     * (PCIe and Ethernet image), under two identifiers. */
+    std::string board_id = dev_id;
+    {
+        struct m2sdr_devinfo info = {};
+
+        if (m2sdr_get_device_info(_dev, &info) == M2SDR_ERR_OK && info.serial[0] != '\0')
+            board_id = std::string("serial:") + info.serial;
+    }
+    const bool board_shared = board_users.count(board_id) != 0;
     rc = m2sdr_get_transport(_dev, &_transport);
     if (rc != M2SDR_ERR_OK) {
         m2sdr_close(_dev);
@@ -1080,7 +1089,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("Invalid TX antenna selection");
     }
 
-    _boardId = dev_id;
+    _boardId = board_id;
     board_users[_boardId]++;
     ctor_guard.armed = false;
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initialization complete");
