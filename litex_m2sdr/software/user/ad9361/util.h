@@ -88,13 +88,23 @@
 #define printk(format, ...)			({ if (0) printf(format, ## __VA_ARGS__); })
 #endif
 
+/* Not empty: an empty structure has no size in C (GNU) and one byte in C++, and the
+ * members of spi_device after it would not be at the same place for the C driver and for
+ * a C++ application (the SoapySDR module reads id_no to find the board of a transfer). */
 struct device {
+	uint8_t			unused;
 };
 
 struct spi_device {
 	struct device	dev;
 	uint8_t 		id_no;
 };
+
+#ifdef __cplusplus
+static_assert(sizeof(struct spi_device) == 2, "spi_device: same layout in C and in C++");
+#else
+_Static_assert(sizeof(struct spi_device) == 2, "spi_device: same layout in C and in C++");
+#endif
 
 struct axiadc_state {
 	struct ad9361_rf_phy	*phy;
