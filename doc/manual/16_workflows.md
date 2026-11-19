@@ -952,7 +952,8 @@ m2sdr_util clk-test
 ```
 
 `clk-test` measures the clocks of the board. With SoapySDR, use `clock_source=external` and
-read the sensor `ref_locked`.
+read the sensor `ref_locked`. Without a clock on the reference input, `m2sdr_rf` stops with
+`No clock on the SI5351 reference input` and the SoapySDR driver refuses the source.
 
 ```sh
 SoapySDRUtil --probe="driver=LiteXM2SDR,clock_source=external"

@@ -2,7 +2,7 @@
 
 Read this chapter to connect an existing SDR application to the board, or to write one with the
 SoapySDR API in C++ or Python. It covers the SoapySDR driver, the GNU Radio examples, GQRX,
-srsRAN and the SigMF recording format.
+SigDigger, srsRAN and the SigMF recording format.
 
 ## At a glance {#fw-glance}
 
@@ -78,6 +78,7 @@ LITEXM2SDR_ETH_IPS=192.168.1.50,192.168.1.51 SoapySDRUtil --find="driver=LiteXM2
 | `usb=path=2-1.3` | The USB3 board on this bus and port path |
 | `dev_id=usb:path=2-1.3` | The same, as a device identifier |
 | `usb_discovery=0` | No USB3 boards in the discovery |
+| `serial=4342c2c084854` | Among the boards found, the one with this serial number |
 
 ```sh
 SoapySDRUtil --probe="driver=LiteXM2SDR,path=/dev/m2sdr1"
@@ -133,7 +134,9 @@ timed TX mode.
   the RFIC is held in reset, and the RFIC is left running when the device is closed.
   `calibrate_delay` is ignored.
 - `clock_source`: the same sources are available through the standard clock API of
-  SoapySDR. Changing the source is refused while a stream is open. The reference selection is
+  SoapySDR. Changing the source is refused while a stream is open. `external` and `fpga`
+  are refused, with the clocks left as they were, when no clock reaches the reference input
+  of the clock generator: without it the RFIC has no reference. The reference selection is
   described in [Time synchronisation](#timing).
 - `refclk_ppm`: also a run-time setting. An application writes the setting `refclk_ppm` to trim
   the reference while streaming, in a range of 100 ppm on each side.
@@ -239,6 +242,27 @@ LITEX_M2SDR_ETH_IP=192.168.1.50 LITEX_M2SDR_SAMPLE_RATE=2000000 \
 
 While GQRX receives from an Ethernet board with SATA, `m2sdr_sata` can record the same stream
 to the SSD and replay it into GQRX; see [SATA recording](#flow-sata).
+
+## SigDigger {#fw-sigdigger}
+
+SigDigger is a signal analyser with a spectrum, a waterfall and inspectors for digital signals.
+It uses the board through SoapySDR. `suscli makeprof` creates a profile for each board it finds,
+and the profile is then selected in the settings of SigDigger.
+
+```sh
+LITEXM2SDR_ETH_IPS=192.168.1.50 suscli makeprof    # Ethernet board; a PCIe board needs no variable
+suscli profiles
+```
+
+- SigDigger selects the board by its serial number (`device=LiteXM2SDR,serial=...`). For an
+  Ethernet board at another address than `192.168.1.50`, set `LITEXM2SDR_ETH_IPS` in the
+  environment of SigDigger, to the address or to a list of addresses separated by commas.
+- SigDigger starts with a manual gain of 0 dB: raise `PGA` in its source panel, or the
+  spectrum only shows the noise of the converter.
+- SigDigger asks every device for its external clock reference. The driver refuses it when
+  no reference is connected, SigDigger logs `Failed to switch to external clock` and goes on
+  with the internal reference. With a 10 MHz reference connected, it is used.
+- Above a few MSPS SigDigger proposes to decimate; answer No to receive at the full rate.
 
 ## GNU Radio {#fw-gnuradio}
 

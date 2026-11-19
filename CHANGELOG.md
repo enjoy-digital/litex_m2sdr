@@ -33,6 +33,10 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added stream loss counters at the RFIC (RX overflow, TX underflow, capability bit `stream_counters`): the stream statistics of `libm2sdr` and the SoapySDR stream status report the samples lost in the FPGA over USB3 and Ethernet.
 - Fixed the USB3 TX rate with small writes (one buffer per call: `279` to `308 MB/s` in full duplex) and the `m2sdr_util` AD9361 loopback and PRBS tests over USB3.
 
+**SoapySDR Driver**
+- Fixed the board with SigDigger: its device selection (`device=LiteXM2SDR,serial=...`) was taken for a network host name, and its request for the external clock reference, made on every device, left the RFIC without a reference when none was connected. `device` is an identifier only when it looks like one, `serial` selects a board among those found, and the `external` and `fpga` clock sources are refused when no clock reaches the reference input (`m2sdr_rf --sync external` stops with the reason instead of timing out).
+- Fixed two devices open on one board in a process (SigDigger lists the board while it opens it): they are opened one after the other, the RFIC is initialised by the first and powered down by the last.
+
 **Signal Analysis**
 - Added `m2sdr_analyzer`: spectrum with traces, markers and a waterfall, channel power, ACPR, occupied bandwidth, tone figures (SNR, SINAD, SFDR, THD) and time-domain statistics, on the board RX or on a SigMF or raw capture, in a Dear ImGui window or as a text or JSON report without a display. The measurements are in libm2sdr (`m2sdr_analysis.h`).
 - Added the phase noise of a carrier to `m2sdr_analyzer`: L(f) and amplitude noise against the offset, integrated phase error, jitter, residual FM and spurs, with a floor of the board stored per board and drawn under the trace.

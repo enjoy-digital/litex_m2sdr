@@ -29,6 +29,8 @@
 #define SI5351_I2C_DRAIN_LIMIT 256
 #define SI5351_STATUS_SYS_INIT 0x80
 #define SI5351_STATUS_LOL_B    0x40
+#define SI5351_STATUS_LOS_CLKIN 0x10
+#define SI5351_CLKIN_TIMEOUT_MS 100
 #define SI5351_CONFIG_TIMEOUT_MS 100
 
 /* PLLB feedback Multisynth register block base (AN619 registers 34..41) and
@@ -337,6 +339,25 @@ bool m2sdr_si5351_i2c_check_litei2c(void *conn) {
 
 /* m2sdr_si5351_i2c_config */
 /*-------------------------*/
+
+/* Tells whether a clock reaches the CLKIN input of the SI5351C: its loss of signal flag
+ * is given a moment to clear after the input has been selected. */
+bool m2sdr_si5351_i2c_clkin_present(void *conn, uint8_t i2c_addr) {
+    uint8_t status = 0xff;
+    int timeout;
+
+    /* Old gateware without LiteI2C: the status cannot be read, the input is trusted. */
+    if (m2sdr_si5351_i2c_check_litei2c(conn) == false)
+        return true;
+
+    for (timeout = SI5351_CLKIN_TIMEOUT_MS; timeout > 0; timeout--) {
+        if (m2sdr_si5351_i2c_read(conn, i2c_addr, 0, &status, 1, true) &&
+            (status & SI5351_STATUS_LOS_CLKIN) == 0)
+            return true;
+        usleep(1000);
+    }
+    return false;
+}
 
 bool m2sdr_si5351_i2c_config_checked(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length) {
     int i;

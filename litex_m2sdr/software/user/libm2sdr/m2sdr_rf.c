@@ -581,6 +581,17 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
             return M2SDR_ERR_IO;
     }
 
+    /* With no clock on its CLKIN, the SI5351C leaves the AD9361 without a reference and
+     * every operation on it times out: stop here, with the reason. */
+    if (clock_source != M2SDR_CLOCK_SOURCE_INTERNAL &&
+        !m2sdr_si5351_i2c_clkin_present(conn, SI5351_I2C_ADDR)) {
+        M2SDR_LOGF("No clock on the SI5351 reference input: %s.\n",
+            clock_source == M2SDR_CLOCK_SOURCE_EXTERNAL ?
+            "connect a 10MHz reference to the uFL input, or use the internal clock source" :
+            "the FPGA does not provide its 10MHz, use the internal clock source");
+        return M2SDR_ERR_STATE;
+    }
+
     /* The table selection is driven only by the clock source and requested
      * AD9361 refclk. The SI5351 profile itself encodes the rest of the clock
      * tree. */
