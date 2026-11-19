@@ -619,29 +619,6 @@ class BaseSoC(SoCMini):
                 pclk_mux_direct_from_mmcm = (pcie_lanes == 1),
             )
             self.comb += ClockSignal("refclk_pcie").eq(self.pcie_phy.pcie_refclk)
-            if toolchain != "vivado":
-                # The pcie_s7 wrapper is a Vivado-generated IP (pcie_7x): without Vivado it cannot
-                # be generated during the build, so reuse the plain Verilog sources a previous
-                # Vivado build of the same PCIe configuration left in its .gen directory.
-                if pcie_ip_sources is None:
-                    raise ValueError(f"PCIe with --toolchain={toolchain} requires --pcie-ip-sources.")
-                # The IP instantiates macros from Vivado's XPM/UNIMACRO libraries: use local replacements.
-                platform.add_source_dir(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                    "litex_m2sdr", "gateware", "openxc7"))
-                pcie_ip_files = [os.path.join(pcie_ip_sources, "synth", "pcie_s7.v")]
-                pcie_ip_files += sorted(glob.glob(os.path.join(pcie_ip_sources, "source", "*.v")))
-                for filename in pcie_ip_files:
-                    if not os.path.isfile(filename):
-                        raise ValueError(f"PCIe IP source {filename} not found.")
-                    platform.add_source(filename)
-                self.pcie_phy.external_hard_ip = True
-                # The IP leaves the GTP's TXPI_SYNFREQ_PPM at its primitive default (0), which
-                # nextpnr rejects. The TX phase interpolator PPM controller is not used for PCIe:
-                # set the value LiteX's own transceiver PHYs use on cells that do not define it.
-                platform.toolchain._yosys_cmds += [
-                    "hierarchy -top {build_name}",
-                    "setparam -set TXPI_SYNFREQ_PPM 3'b001 t:GTPE2_CHANNEL r:TXPI_SYNFREQ_PPM %d",
-                ]
             if variant == "baseboard":
                 self.pcie_phy.add_gt_loc_constraints([M2_PCIE_GT_LOCS[3]], by_pipe_lane=False) # PERp3.
             if variant == "m2" and pcie_lanes > 1:
@@ -1468,6 +1445,43 @@ class BaseSoC(SoCMini):
             "clk4" : si5351_clk1,
             "clk5" : ClockSignal("clk10"),
         })
+
+        # openXC7 ----------------------------------------------------------------------------------
+
+        # Keep this call last in __init__ and the openXC7 code in its own method: Migen names
+        # modules from the bytecode following their creation and falls back to the class name when
+        # the attribute's index in this function's name table exceeds 255, so referencing new names
+        # earlier in __init__ renames unrelated signals of the Vivado builds (ex: eth_tx_marker).
+        if toolchain != "vivado":
+            self.add_openxc7_support(with_pcie=with_pcie, pcie_ip_sources=pcie_ip_sources)
+
+    # openXC7 Support ------------------------------------------------------------------------------
+
+    def add_openxc7_support(self, with_pcie=False, pcie_ip_sources=None):
+        platform = self.platform
+        if with_pcie:
+            # The pcie_s7 wrapper is a Vivado-generated IP (pcie_7x): without Vivado it cannot be
+            # generated during the build, so reuse the plain Verilog sources a previous Vivado
+            # build of the same PCIe configuration left in its .gen directory.
+            if pcie_ip_sources is None:
+                raise ValueError("PCIe with the openXC7 toolchain requires pcie_ip_sources (--pcie-ip-sources).")
+            # The IP instantiates macros from Vivado's XPM/UNIMACRO libraries: use local replacements.
+            platform.add_source_dir(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                "litex_m2sdr", "gateware", "openxc7"))
+            pcie_ip_files = [os.path.join(pcie_ip_sources, "synth", "pcie_s7.v")]
+            pcie_ip_files += sorted(glob.glob(os.path.join(pcie_ip_sources, "source", "*.v")))
+            for filename in pcie_ip_files:
+                if not os.path.isfile(filename):
+                    raise ValueError(f"PCIe IP source {filename} not found.")
+                platform.add_source(filename)
+            self.pcie_phy.external_hard_ip = True
+            # The IP leaves the GTP's TXPI_SYNFREQ_PPM at its primitive default (0), which nextpnr
+            # rejects. The TX phase interpolator PPM controller is not used for PCIe: set the value
+            # LiteX's own transceiver PHYs use on the cells that do not define it.
+            platform.toolchain._yosys_cmds += [
+                "hierarchy -top {build_name}",
+                "setparam -set TXPI_SYNFREQ_PPM 3'b001 t:GTPE2_CHANNEL r:TXPI_SYNFREQ_PPM %d",
+            ]
 
     # RFIC Datapath Hook -----------------------------------------------------------------------------
 
