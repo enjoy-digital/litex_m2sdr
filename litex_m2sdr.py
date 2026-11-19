@@ -353,6 +353,7 @@ class BaseSoC(SoCMini):
         with_gpio              = False,
         pps_input              = "m2",
         with_rfic_oversampling = False,
+        toolchain              = "vivado",
     ):
         if pps_input in ("tp1", "tp2") and with_gpio:
             raise ValueError("PPS input on TP1/TP2 cannot be used with --with-gpio.")
@@ -371,7 +372,7 @@ class BaseSoC(SoCMini):
 
         # Platform ---------------------------------------------------------------------------------
 
-        platform = Platform(build_multiboot=True)
+        platform = Platform(build_multiboot=True, toolchain=toolchain)
         platform.rfic_clk_freq = get_rfic_clk_freq(
             with_eth               = with_eth,
             eth_phy                = eth_phy,
@@ -1822,6 +1823,7 @@ def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # Build/Load/Utilities.
     parser.add_argument("--variant",          default="m2",              help="Design variant.", choices=["m2", "baseboard"])
+    parser.add_argument("--toolchain",        default="vivado",          help="FPGA toolchain (openxc7: experimental, build-only).", choices=["vivado", "openxc7"])
     parser.add_argument("--sys-clk-freq",     default=None, type=float,  help="System clock frequency in Hz (default: 100MHz with Ethernet, 125MHz otherwise).")
     parser.add_argument("--reset",            action="store_true",       help="Reset the device.")
     parser.add_argument("--build",            action="store_true",       help="Build bitstream.")
@@ -1902,6 +1904,11 @@ def main():
 
     args = parser.parse_args()
 
+    # The openXC7 flow is experimental and build-only: it produces no .bin/multiboot images and its
+    # timing analysis is not a sign-off, so its bitstreams must not be written to the SPI Flash.
+    if (args.toolchain != "vivado") and (args.flash or args.flash_multiboot):
+        parser.error(f"--flash/--flash-multiboot are not supported with --toolchain={args.toolchain}.")
+
     this_dir = os.path.dirname(os.path.abspath(__file__))
 
     wr_env = {
@@ -1942,6 +1949,7 @@ def main():
     soc = BaseSoC(
         # Generic.
         variant       = args.variant,
+        toolchain     = args.toolchain,
         sys_clk_freq  = int(args.sys_clk_freq),
 
         # RFIC.
@@ -2056,6 +2064,8 @@ def main():
             r += "_rfic_oversampling"
         if args.without_jtagbone:
             r += "_no_jtagbone"
+        if args.toolchain != "vivado":
+            r += f"_{args.toolchain}"
         return r
 
     builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")
