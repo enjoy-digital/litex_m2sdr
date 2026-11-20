@@ -942,6 +942,16 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("refclk_freq") > 0) {
         _refclk_hz = static_cast<int64_t>(std::stod(args.at("refclk_freq")));
     }
+    if (args.count("rf_freq_offset") > 0)
+        _rf_freq_offset_hz[SOAPY_SDR_TX] = _rf_freq_offset_hz[SOAPY_SDR_RX] = std::stod(args.at("rf_freq_offset"));
+    if (args.count("tx_freq_offset") > 0)
+        _rf_freq_offset_hz[SOAPY_SDR_TX] = std::stod(args.at("tx_freq_offset"));
+    if (args.count("rx_freq_offset") > 0)
+        _rf_freq_offset_hz[SOAPY_SDR_RX] = std::stod(args.at("rx_freq_offset"));
+    if (_rf_freq_offset_hz[SOAPY_SDR_TX] != 0.0 || _rf_freq_offset_hz[SOAPY_SDR_RX] != 0.0)
+        SoapySDR::logf(SOAPY_SDR_WARNING,
+            "RF frequency offsets TX %.0f Hz, RX %.0f Hz: the frequencies on the air differ from the ones requested",
+            _rf_freq_offset_hz[SOAPY_SDR_TX], _rf_freq_offset_hz[SOAPY_SDR_RX]);
     if (args.count("refclk_ppm") > 0)
         _refclk_ppm = resolve_refclk_ppm(_dev, args.at("refclk_ppm"));
     /* Sample rate (and bandwidth) applied by the RF init, before the application sets its own. */
@@ -1710,7 +1720,9 @@ void SoapyLiteXM2SDR::setFrequency(
     if (direction == SOAPY_SDR_RX)
         _rx_stream.frequency = frequency;
 
-    uint64_t lo_freq = static_cast<uint64_t>(frequency);
+    /* The application keeps its frequency (cache above); the RFIC is tuned with the offset. */
+    const double offset = (direction == SOAPY_SDR_TX || direction == SOAPY_SDR_RX) ? _rf_freq_offset_hz[direction] : 0.0;
+    uint64_t lo_freq = static_cast<uint64_t>(frequency + offset);
 
 #if USE_LITEETH
     LiteEthRfOpTimeout timeout("setFrequency");
@@ -2107,12 +2119,16 @@ void SoapyLiteXM2SDR::setSampleRate(
      * rate; an explicit tx_offset device arg overrides. */
     if (sample_rate_applied && _tx_dma_header_supported && _tx_gate_link_supported && rate > 0.0) {
         long long tx_offset_ns = _tx_offset_ns;
-        if (tx_offset_ns < 0) {
-            const double cycles = (_nChannels >= 2) ? M2SDR_TX_PIPELINE_CYCLES_2T2R
-                                                    : M2SDR_TX_PIPELINE_CYCLES_1T1R;
-            tx_offset_ns = (long long)(cycles * 1e9 / rate + 0.5);
-        }
+        const double cycles = (_nChannels >= 2) ? M2SDR_TX_PIPELINE_CYCLES_2T2R
+                                                : M2SDR_TX_PIPELINE_CYCLES_1T1R;
+        const long long pipeline_ns = (long long)(cycles * 1e9 / rate + 0.5);
+        if (tx_offset_ns < 0)
+            tx_offset_ns = pipeline_ns;
         int rc = m2sdr_set_tx_offset(_dev, (uint64_t)tx_offset_ns);
+        if (rc == 0) {
+            _tx_gate_offset_applied_ns = tx_offset_ns;
+            _tx_gate_pipeline_ns = pipeline_ns;
+        }
         if (rc != 0)
             SoapySDR::logf(SOAPY_SDR_WARNING, "m2sdr_set_tx_offset(%lld ns) failed: %s",
                 tx_offset_ns, m2sdr_strerror(rc));

@@ -885,10 +885,19 @@ int SoapyLiteXM2SDR::activateStream(
             : _rx_stream.time0_ns;
         _rx_stream.time_warned = false;
         _rx_stream.hw_time_warned = false;
+        /* Timed activation: the capture starts now and readStream() drops the samples before
+         * the requested time, which needs the hardware RX timestamps. */
+        _rx_stream.start_time_ns = 0;
         if (flags & SOAPY_SDR_HAS_TIME) {
-            SoapySDR::logf(SOAPY_SDR_WARNING,
-                "RX timed activation requested for %lld ns; timing not supported, starting immediately",
-                (long long)timeNs);
+            if (_rx_dma_header_bytes != 0 && _rx_stream.time_valid) {
+                _rx_stream.start_time_ns = timeNs;
+                SoapySDR::logf(SOAPY_SDR_DEBUG,
+                    "RX timed activation for %lld ns: earlier samples are dropped", (long long)timeNs);
+            } else {
+                SoapySDR::logf(SOAPY_SDR_WARNING,
+                    "RX timed activation requested for %lld ns; no RX timestamps, starting immediately",
+                    (long long)timeNs);
+            }
         }
 
     /* TX */
@@ -938,6 +947,7 @@ int SoapyLiteXM2SDR::activateStream(
         _tx_stream.time_error = false;
         _tx_stream.status_time_ns = 0;
         resetTimedTxTimeline();
+        _tx_stream.hw_next_valid = false;
         if (_tx_stream.timed_tx_enabled)
             initTimedTxTimeline();
         if (flags & SOAPY_SDR_HAS_TIME) {
@@ -2056,6 +2066,26 @@ int SoapyLiteXM2SDR::readStream(
     _rx_stream.remainderSamps = ret;
     _rx_stream.remainderTimeNs = buf_time_ns;
 
+    /* Timed activation: drop what was captured before the requested start time. */
+    if (_rx_stream.start_time_ns != 0 && samp_avail == 0 && (buf_flags & SOAPY_SDR_HAS_TIME)) {
+        const long long buf_end_ns = buf_time_ns + samples_to_ns(_rx_stream.samplerate, ret);
+        if (buf_end_ns <= _rx_stream.start_time_ns) {
+            this->releaseReadBuffer(stream, _rx_stream.remainderHandle);
+            _rx_stream.remainderHandle = -1;
+            _rx_stream.remainderSamps = 0;
+            _rx_stream.remainderOffset = 0;
+            return SOAPY_SDR_TIMEOUT;
+        }
+        if (buf_time_ns < _rx_stream.start_time_ns) {
+            size_t skip = ns_to_samples_ceil(_rx_stream.samplerate, _rx_stream.start_time_ns - buf_time_ns);
+            if (skip > _rx_stream.remainderSamps)
+                skip = _rx_stream.remainderSamps;
+            _rx_stream.remainderOffset += skip;
+            _rx_stream.remainderSamps -= skip;
+        }
+        _rx_stream.start_time_ns = 0;
+    }
+
     const size_t n = std::min((returnedElems - samp_avail), _rx_stream.remainderSamps);
 
     if (samp_avail > 0) {
@@ -2075,11 +2105,13 @@ int SoapyLiteXM2SDR::readStream(
         _rx_stream.time_warned = true;
     }
 
-    /* Read out channels from the new buffer. */
+    /* Read out channels from the new buffer (from its start, or after the samples dropped by
+     * a timed activation). */
+    const size_t newOffset = _rx_stream.remainderOffset * _nChannels * _bytesPerComplex;
     for (size_t i = 0; i < _rx_stream.channels.size(); i++) {
         const uint32_t chan = _rx_stream.channels[i];
         this->deinterleave(
-            _rx_stream.remainderBuff + (chan * _bytesPerComplex),
+            _rx_stream.remainderBuff + newOffset + (chan * _bytesPerComplex),
             buffs[i],
             n,
             _rx_stream.format,
@@ -2095,8 +2127,28 @@ int SoapyLiteXM2SDR::readStream(
         _rx_stream.remainderOffset = 0;
     }
 
-    return returnedElems;
+    if (flags & SOAPY_SDR_HAS_TIME)
+        _rx_stream.last_end_ns.store(timeNs + samples_to_ns(_rx_stream.samplerate,
+            static_cast<long long>(samp_avail + n)), std::memory_order_relaxed);
+    return static_cast<int>(samp_avail + n);
 }
+
+/* Board time for the timed-TX checks: the end of the last RX samples when an RX stream runs
+ * (no register access, which costs on every TX write), the board clock otherwise. */
+long long SoapyLiteXM2SDR::txCheckNowNs()
+{
+    const long long rx_end = _rx_stream.last_end_ns.load(std::memory_order_relaxed);
+    if (_rx_stream.opened && rx_end != 0)
+        return rx_end;
+    try {
+        return this->getHardwareTime("");
+    } catch (const std::exception &) {
+        return 0;
+    }
+}
+
+/* TX FIFO of the gateware between the DMA reader and the RFIC (bytes). */
+#define M2SDR_TX_FIFO_BYTES 65536LL
 
 /* Write to the TX stream. */
 int SoapyLiteXM2SDR::writeStream(
@@ -2104,13 +2156,15 @@ int SoapyLiteXM2SDR::writeStream(
     const void *const *buffs,
     const size_t numElems,
     int &flags,
-    const long long timeNs,
+    const long long timeNsIn,
     const long timeoutUs) {
     if (stream != TX_STREAM) {
         return SOAPY_SDR_NOT_SUPPORTED;
     }
 
     std::lock_guard<std::recursive_mutex> stream_lock(_tx_stream_mutex);
+    long long timeNs = timeNsIn;
+    bool has_time = (flags & SOAPY_SDR_HAS_TIME) != 0;
 
     if (!_tx_stream.opened || _tx_stream.stop_requested.load())
         return SOAPY_SDR_STREAM_ERROR;
@@ -2132,6 +2186,77 @@ int SoapyLiteXM2SDR::writeStream(
         return SOAPY_SDR_STREAM_ERROR;
     }
 
+    /* Hardware timed TX: after the first timed write, the stream keeps its own time. When the
+     * continuity is broken (TX underflow, or a write that does not follow the previous one),
+     * the next buffer is stamped again with that time; if that time is already too close to
+     * be met, the samples are dropped here, as a radio drops late packets, until the stream
+     * is back on time. Without this, after an underflow the samples went out late by the
+     * duration of the gap, for the rest of the stream. */
+    if (_tx_stream.timed_tx_hardware && _tx_stream.samplerate > 0.0 && returnedElems > 0) {
+        if (has_time) {
+            _tx_stream.hw_next_valid = true;
+        } else if (_tx_stream.hw_next_valid && _tx_stream.hw_burst_valid && usesLibm2sdrStream() &&
+                   (++_tx_stream.hw_check_count % 16) == 0) {
+            /* A continuing burst goes out at the pace of the DMA reader, whatever its time: check
+             * now and then that the next sample still airs at its time. It airs after what is
+             * queued: the buffers of the ring not read yet and the TX FIFO of the gateware. Late
+             * (e.g. the stream fell behind while the application waited for its first RX
+             * samples): drop samples here until it is back on time. Early: stamp the next buffer
+             * again, the gate then holds it. */
+            struct m2sdr_stream_stats st;
+            const long long now_ns = txCheckNowNs();
+            if (now_ns != 0 && m2sdr_get_stream_stats(_dev, M2SDR_TX, &st) == M2SDR_ERR_OK) {
+                const long long mtu = static_cast<long long>(this->getStreamMTU(stream));
+                const long long pending = std::max<long long>(0, st.sw_count - st.hw_count);
+                const long long fifo_samples = M2SDR_TX_FIFO_BYTES /
+                    static_cast<long long>(_nChannels * _bytesPerComplex);
+                const long long queued_ns = samples_to_ns(_tx_stream.samplerate,
+                    pending * mtu + (pending > 0 ? fifo_samples : 0) +
+                    static_cast<long long>(_tx_stream.remainderOffset));
+                const long long air_next_ns = now_ns + queued_ns;
+                const long long intended_ns = _tx_stream.hw_next_ns -
+                    (_tx_gate_offset_applied_ns - _tx_gate_pipeline_ns);
+                const long long tolerance_ns = 1000000;
+                if (intended_ns < air_next_ns - tolerance_ns) {
+                    _tx_stream.hw_next_ns += samples_to_ns(_tx_stream.samplerate,
+                        static_cast<long long>(returnedElems));
+                    _tx_stream.hw_check_count = 15; /* check again at the next write */
+                    _tx_stream.time_error = true;
+                    _tx_stream.status_time_ns = _tx_stream.hw_next_ns;
+                    return static_cast<int>(returnedElems);
+                }
+                if (intended_ns > air_next_ns + tolerance_ns)
+                    _tx_stream.hw_burst_valid = false;
+            }
+        }
+        if (!has_time && _tx_stream.hw_next_valid && !_tx_stream.hw_burst_valid) {
+            has_time = true;
+            timeNs = _tx_stream.hw_next_ns;
+        }
+        if (has_time) {
+            bool continues = false;
+            if (_tx_stream.hw_burst_valid) {
+                const long long expected_ns = _tx_stream.hw_burst_time_ns +
+                    samples_to_ns(_tx_stream.samplerate, _tx_stream.hw_burst_samples);
+                const long long tolerance_ns = samples_to_ns(_tx_stream.samplerate, 2);
+                continues = (timeNs >= expected_ns - tolerance_ns) && (timeNs <= expected_ns + tolerance_ns);
+            }
+            if (!continues) {
+                const long long now_ns = txCheckNowNs();
+                const long long min_lead_ns = samples_to_ns(_tx_stream.samplerate,
+                    static_cast<long long>(4 * this->getStreamMTU(stream)));
+                if (now_ns != 0 && timeNs < now_ns + min_lead_ns) {
+                    _tx_stream.hw_burst_valid = false;
+                    _tx_stream.hw_next_ns = timeNs + samples_to_ns(_tx_stream.samplerate,
+                        static_cast<long long>(returnedElems));
+                    _tx_stream.time_error = true;
+                    _tx_stream.status_time_ns = timeNs;
+                    return static_cast<int>(returnedElems);
+                }
+            }
+        }
+    }
+
     if (returnedElems == 0) {
         if (forceFlush) {
             if (flags & SOAPY_SDR_END_BURST)
@@ -2144,7 +2269,7 @@ int SoapyLiteXM2SDR::writeStream(
     }
 
     /* For timed bursts, pad future gaps with zeros and reject bursts that are too late. */
-    if (flags & SOAPY_SDR_HAS_TIME) {
+    if (has_time) {
         if (_tx_stream.timed_tx_enabled) {
             if (!_tx_stream.tx_timeline_valid)
                 initTimedTxTimeline();
@@ -2237,6 +2362,9 @@ int SoapyLiteXM2SDR::writeStream(
     const int accepted = ret;
     if (_tx_stream.hw_burst_valid)
         _tx_stream.hw_burst_samples += accepted;
+    if (_tx_stream.timed_tx_hardware && _tx_stream.hw_next_valid)
+        _tx_stream.hw_next_ns = (has_time ? timeNs : _tx_stream.hw_next_ns) +
+            samples_to_ns(_tx_stream.samplerate, static_cast<long long>(accepted));
     /* srsRAN can end a burst with less than one MTU; submit that tail now. */
     if (forceFlush && static_cast<size_t>(accepted) == returnedElems) {
         if (flags & SOAPY_SDR_END_BURST)

@@ -402,6 +402,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     /* Measured reference clock error in ppm, compensated through the SI5351
      * PLL feedback multiplier (positive = clock runs fast). */
     double _refclk_ppm = 0.0;
+    /* rf_freq_offset / rx_freq_offset / tx_freq_offset: added to the RF frequencies set on the
+     * RFIC, per direction (tests only, see the README). */
+    double _rf_freq_offset_hz[2] = {0.0, 0.0}; /* [SOAPY_SDR_TX, SOAPY_SDR_RX] */
     /* PLLB feedback block last written to the SI5351, so runtime retrims
      * only touch the registers that changed. */
     struct m2sdr_si5351_pllb_state _si5351_pllb = {};
@@ -440,6 +443,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
      * when the TX header module is present (_tx_dma_header_supported), so the gate CSR is
      * never poked on a bitstream without it. */
     long long _tx_offset_ns = -1;
+    /* Gate offset applied, and the part of it that is the pipeline latency (auto value). */
+    long long _tx_gate_offset_applied_ns = 0;
+    long long _tx_gate_pipeline_ns = 0;
 
     /* Last observed hardware gate underflow count (timed frames dropped for missing their
      * air-time), polled in readStreamStatus() when the hardware gate is engaged. */
@@ -499,6 +505,10 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         bool overflow  = false;
         bool burst_end = false;
         bool time_valid = false;
+        /* Timed activation: samples before this time are dropped (0 = none). */
+        long long start_time_ns = 0;
+        /* End time of the last samples returned by readStream() (0: none yet). */
+        std::atomic<long long> last_end_ns{0};
         long long time0_ns = 0;
         int64_t time0_count = 0;
         long long remainderTimeNs = 0;
@@ -554,6 +564,11 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         /* Hardware timed TX: start time and length of the burst being written. A timed write
          * that continues it is not stamped again (see writeStream()). */
         bool hw_burst_valid = false;
+        /* Hardware timed TX: time of the next sample of the stream, from the last timed write
+         * and the samples written since (SoapyUHD stamps only the first write of a burst). */
+        bool hw_next_valid = false;
+        unsigned hw_check_count = 0;
+        long long hw_next_ns = 0;
         long long hw_burst_time_ns = 0;
         long long hw_burst_samples = 0;
         int remainderFlags = 0;
@@ -617,6 +632,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         size_t userOffset,
         bool holdLast,
         const long timeoutUs);
+    long long txCheckNowNs();
     void markTxRemainderTime(const long long payloadTimeNs);
     void setBandwidthUnlocked(
         const int direction,
