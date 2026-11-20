@@ -206,12 +206,24 @@ class Platform(Xilinx7SeriesPlatform):
     default_clk_name   = "clk100"
     default_clk_period = 1e9/100e6
 
-    def __init__(self, build_multiboot=False):
+    def __init__(self, build_multiboot=False, toolchain="vivado"):
         device = "xc7a200t"
-        Xilinx7SeriesPlatform.__init__(self, f"{device}sbg484-3", _io, _connectors, toolchain="vivado")
+        Xilinx7SeriesPlatform.__init__(self, f"{device}sbg484-3", _io, _connectors, toolchain=toolchain)
+        self.toolchain_name = toolchain
         self.image_size = {"xc7a200t" : 0x00800000}[device]
         self.rfic_clk_freq = 245.76e6
 
+        if toolchain == "vivado":
+            self.add_vivado_bitstream_commands(build_multiboot=build_multiboot)
+        else:
+            # Open-source flow (openXC7: Yosys + nextpnr + Project X-Ray): experimental and
+            # build-only. Vivado Tcl has no equivalent there, so the pre-placement commands the
+            # design/cores append are collected in a list nothing reads and the platform commands
+            # are dropped (see add_platform_command). Only the .bit is produced: no .bin and no
+            # multiboot images.
+            self.toolchain.pre_placement_commands = []
+
+    def add_vivado_bitstream_commands(self, build_multiboot=False):
         self.toolchain.bitstream_commands = [
             "set_property BITSTREAM.CONFIG.UNUSEDPIN Pulldown [current_design]",
             "set_property BITSTREAM.CONFIG.SPI_BUSWIDTH 4 [current_design]",
@@ -240,6 +252,12 @@ class Platform(Xilinx7SeriesPlatform):
                 "write_bitstream -force {build_name}_fallback.bit ",
                 "write_cfgmem -force -format bin -interface spix1 -size 16 -loadbit \"up 0x0 \
                 {build_name}_fallback.bit\" -file {build_name}_fallback.bin"]
+
+    def add_platform_command(self, *args, **kwargs):
+        # Platform commands in this design are Vivado Tcl/XDC (false paths, DRC severities...).
+        if self.toolchain_name != "vivado":
+            return
+        Xilinx7SeriesPlatform.add_platform_command(self, *args, **kwargs)
 
     def detect_ftdi_chip(self):
         lsusb_log = subprocess.run(['lsusb'], capture_output=True, text=True)

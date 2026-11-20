@@ -6,6 +6,7 @@
 # Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
+import glob
 import inspect
 import os
 import sys
@@ -197,6 +198,9 @@ class CRG(LiteXModule):
         if not with_white_rabbit:
             # Keep clk10 on a dedicated MMCM so the SI5351C FPGA CLKIN path can be phase-steered later.
             self.clk10_mmcm = clk10_mmcm = S7MMCM(speedgrade=-3, fractional=False)
+            if platform.toolchain_name != "vivado":
+                # nextpnr (openXC7) only supports CLKFBOUT_MULT_F up to 63.
+                clk10_mmcm.clkfbout_mult_frange = (2, 63+1)
             self.comb += clk10_mmcm.reset.eq(self.rst)
             clk10_mmcm.register_clkin(clk100, 100e6)
             clk10_mmcm.expose_dps("clk200", with_csr=False)
@@ -353,6 +357,8 @@ class BaseSoC(SoCMini):
         with_gpio              = False,
         pps_input              = "m2",
         with_rfic_oversampling = False,
+        toolchain              = "vivado",
+        pcie_ip_sources        = None,
     ):
         if pps_input in ("tp1", "tp2") and with_gpio:
             raise ValueError("PPS input on TP1/TP2 cannot be used with --with-gpio.")
@@ -371,7 +377,7 @@ class BaseSoC(SoCMini):
 
         # Platform ---------------------------------------------------------------------------------
 
-        platform = Platform(build_multiboot=True)
+        platform = Platform(build_multiboot=True, toolchain=toolchain)
         platform.rfic_clk_freq = get_rfic_clk_freq(
             with_eth               = with_eth,
             eth_phy                = eth_phy,
@@ -582,7 +588,9 @@ class BaseSoC(SoCMini):
 
         # XADC -------------------------------------------------------------------------------------
 
-        self.xadc = S7SystemMonitor()
+        # The XADC primitive is not supported by the openXC7 flow (no XADC BEL in nextpnr).
+        if toolchain == "vivado":
+            self.xadc = S7SystemMonitor()
 
         # DNA --------------------------------------------------------------------------------------
 
@@ -1442,6 +1450,43 @@ class BaseSoC(SoCMini):
             "clk5" : ClockSignal("clk10"),
         })
 
+        # openXC7 ----------------------------------------------------------------------------------
+
+        # Keep this call last in __init__ and the openXC7 code in its own method: Migen names
+        # modules from the bytecode following their creation and falls back to the class name when
+        # the attribute's index in this function's name table exceeds 255, so referencing new names
+        # earlier in __init__ renames unrelated signals of the Vivado builds (ex: eth_tx_marker).
+        if toolchain != "vivado":
+            self.add_openxc7_support(with_pcie=with_pcie, pcie_ip_sources=pcie_ip_sources)
+
+    # openXC7 Support ------------------------------------------------------------------------------
+
+    def add_openxc7_support(self, with_pcie=False, pcie_ip_sources=None):
+        platform = self.platform
+        if with_pcie:
+            # The pcie_s7 wrapper is a Vivado-generated IP (pcie_7x): without Vivado it cannot be
+            # generated during the build, so reuse the plain Verilog sources a previous Vivado
+            # build of the same PCIe configuration left in its .gen directory.
+            if pcie_ip_sources is None:
+                raise ValueError("PCIe with the openXC7 toolchain requires pcie_ip_sources (--pcie-ip-sources).")
+            # The IP instantiates macros from Vivado's XPM/UNIMACRO libraries: use local replacements.
+            platform.add_source_dir(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                "litex_m2sdr", "gateware", "openxc7"))
+            pcie_ip_files = [os.path.join(pcie_ip_sources, "synth", "pcie_s7.v")]
+            pcie_ip_files += sorted(glob.glob(os.path.join(pcie_ip_sources, "source", "*.v")))
+            for filename in pcie_ip_files:
+                if not os.path.isfile(filename):
+                    raise ValueError(f"PCIe IP source {filename} not found.")
+                platform.add_source(filename)
+            self.pcie_phy.external_hard_ip = True
+            # The IP leaves the GTP's TXPI_SYNFREQ_PPM at its primitive default (0), which nextpnr
+            # rejects. The TX phase interpolator PPM controller is not used for PCIe: set the value
+            # LiteX's own transceiver PHYs use on the cells that do not define it.
+            platform.toolchain._yosys_cmds += [
+                "hierarchy -top {build_name}",
+                "setparam -set TXPI_SYNFREQ_PPM 3'b001 t:GTPE2_CHANNEL r:TXPI_SYNFREQ_PPM %d",
+            ]
+
     # RFIC Datapath Hook -----------------------------------------------------------------------------
 
     def add_rfic_datapath(self, rfic_sink, rfic_source, tx_source, rx_sink):
@@ -1826,6 +1871,7 @@ def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # Build/Load/Utilities.
     parser.add_argument("--variant",          default="m2",              help="Design variant.", choices=["m2", "baseboard"])
+    parser.add_argument("--toolchain",        default="vivado",          help="FPGA toolchain (openxc7: experimental, build-only).", choices=["vivado", "openxc7"])
     parser.add_argument("--sys-clk-freq",     default=None, type=float,  help="System clock frequency in Hz (default: 100MHz with Ethernet, 125MHz otherwise).")
     parser.add_argument("--reset",            action="store_true",       help="Reset the device.")
     parser.add_argument("--build",            action="store_true",       help="Build bitstream.")
@@ -1846,6 +1892,7 @@ def main():
     parser.add_argument("--pcie-gen",        default=2, type=int, help="PCIe Generation.", choices=[1, 2])
     parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
     parser.add_argument("--pcie-dmas",       default=1, type=int, help="Number of PCIe DMA channels (subclasses may use >1 for side-band streams).")
+    parser.add_argument("--pcie-ip-sources", default=None,        help="Vivado-generated pcie_s7 IP directory (with synth/ and source/), required for PCIe with --toolchain=openxc7.")
 
     # Ethernet parameters.
     parser.add_argument("--with-eth",        action="store_true",     help="Enable Ethernet Communication.")
@@ -1906,6 +1953,11 @@ def main():
 
     args = parser.parse_args()
 
+    # The openXC7 flow is experimental and build-only: it produces no .bin/multiboot images and its
+    # timing analysis is not a sign-off, so its bitstreams must not be written to the SPI Flash.
+    if (args.toolchain != "vivado") and (args.flash or args.flash_multiboot):
+        parser.error(f"--flash/--flash-multiboot are not supported with --toolchain={args.toolchain}.")
+
     this_dir = os.path.dirname(os.path.abspath(__file__))
 
     wr_env = {
@@ -1946,6 +1998,7 @@ def main():
     soc = BaseSoC(
         # Generic.
         variant       = args.variant,
+        toolchain     = args.toolchain,
         sys_clk_freq  = int(args.sys_clk_freq),
 
         # RFIC.
@@ -1958,6 +2011,7 @@ def main():
         pcie_gen      = args.pcie_gen,
         pcie_lanes    = args.pcie_lanes,
         pcie_dmas     = args.pcie_dmas,
+        pcie_ip_sources = args.pcie_ip_sources,
 
         # Ethernet.
         with_eth      = args.with_eth,
@@ -2060,6 +2114,8 @@ def main():
             r += "_rfic_oversampling"
         if args.without_jtagbone:
             r += "_no_jtagbone"
+        if args.toolchain != "vivado":
+            r += f"_{args.toolchain}"
         return r
 
     builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")
