@@ -2355,6 +2355,18 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 #ifdef CSR_CTRL_RESET_ADDR
 	litepcie_writel(litepcie_dev, CSR_CTRL_RESET_ADDR, 1);
 	msleep(10);
+
+	/* The core does not always answer 10 ms after its reset: BAR0 then reads all-ones and
+	 * the probe failed, about one module load in three right after an unload. Wait for the
+	 * first word of the identifier, 1 s at most (a read of an absent core can take a PCIe
+	 * completion timeout by itself). */
+	for (i = 0; i < 20; i++) {
+		if (litepcie_readl(litepcie_dev, CSR_IDENTIFIER_MEM_BASE) != 0xffffffff)
+			break;
+		msleep(50);
+	}
+	if (i)
+		dev_info(&dev->dev, "Core ready after %d more read(s) of the identifier\n", i);
 #endif
 
 	/* Read and display the FPGA identifier.
