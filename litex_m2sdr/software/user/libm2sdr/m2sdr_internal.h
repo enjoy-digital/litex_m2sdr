@@ -88,6 +88,9 @@ struct m2sdr_dev {
     int64_t rx_user_count;
     int64_t rx_release_count;
     int64_t tx_user_count;
+    /* Zero-copy PCIe TX: the buffers [tx_clean_count, tx_user_count) were written and are not
+     * cleared yet. See m2sdr_tx_ring_clean(). */
+    int64_t tx_clean_count;
     int64_t tx_submit_count;
     /* Zero-copy TX fill lead ahead of the LIVE reader cursor, in buffers. 0 = legacy
      * full-ring fill (max throughput/latency); small values (e.g. 2-3) hold the host a tight

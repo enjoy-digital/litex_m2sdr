@@ -1494,6 +1494,15 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         handle = static_cast<size_t>(_rx_stream.user_count++);
         _rx_stream.pendingReadBufs[handle] = buffer;
 
+        /* The TX ring is cleared behind the DMA reader when the application writes; when it
+         * does not (end of a burst), do it from here, now and then. Never wait for a TX call
+         * in progress: it clears the ring by itself. */
+        if (_tx_stream.opened && (_rx_stream.user_count % 4) == 0) {
+            std::unique_lock<std::recursive_mutex> tx_lock(_tx_stream_mutex, std::try_to_lock);
+            if (tx_lock.owns_lock())
+                (void)m2sdr_tx_ring_housekeeping(_dev);
+        }
+
         const size_t samples_per_buffer = total_samples / _nChannels;
         if (_rx_stream.time_valid && !(flags & SOAPY_SDR_HAS_TIME)) {
             /* Prefer the hardware capture time from the DMA header; it stays
