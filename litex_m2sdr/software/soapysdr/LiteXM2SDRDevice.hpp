@@ -551,6 +551,11 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         bool timed_tx_late_margin_configured = false;
         bool tx_timeline_valid = false;
         long long tx_next_time_ns = 0;
+        /* Hardware timed TX: start time and length of the burst being written. A timed write
+         * that continues it is not stamped again (see writeStream()). */
+        bool hw_burst_valid = false;
+        long long hw_burst_time_ns = 0;
+        long long hw_burst_samples = 0;
         int remainderFlags = 0;
         long long remainderTimeNs = 0;
     };
