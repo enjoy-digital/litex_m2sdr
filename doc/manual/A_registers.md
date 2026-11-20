@@ -46,7 +46,7 @@ Bank `capability`.
 | Register | Offset | Bits | Access | Description |
 |----------------------------|-------------|--------|---------|----------------------------------------|
 | `api_version` | `0x0000` | 32 | ro | API Version of the gateware (e.g., 0x0100 for v1.0). |
-| `features` | `0x0004` | 15 | ro | Hardware feature presence bitfield. |
+| `features` | `0x0004` | 16 | ro | Hardware feature presence bitfield. |
 | `pcie_config` | `0x0008` | 5 | ro | PCIe configuration. Valid only if features.pcie is set. |
 | `eth_config` | `0x000c` | 4 | ro | Ethernet configuration. Valid only if features.eth is set. |
 | `sata_config` | `0x0010` | 4 | ro | SATA configuration. Valid only if features.sata is set. |
@@ -71,6 +71,7 @@ Fields of `features`:
 | `stream_counters` | 12 | RFIC stream loss counters (RX overflow, TX underflow) are present. |
 | `eth_tx_header` | 13 | Ethernet TX stream marks its buffers: TX header and hardware timed TX over Ethernet. |
 | `eth_tx_status` | 14 | Ethernet TX FIFO level and dropped datagrams are readable: flow control of the host. |
+| `dfx` | 15 | TX/RX datapath Dynamic Function eXchange is present. |
 
 Fields of `pcie_config`:
 
