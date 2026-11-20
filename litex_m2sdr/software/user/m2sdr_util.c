@@ -1897,6 +1897,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
     uint32_t seed_wr = 0;
     uint32_t seed_rd = 0;
     int dma_word_count = DMA_BUFFER_SIZE / sizeof(uint32_t);
+    unsigned tx_buffers_per_pass = UINT_MAX;
     const uint32_t data_mask = get_data_mask(data_width);
     uint64_t validated_buffers = 0;
     uint8_t  run = (auto_rx_delay == 0);
@@ -1926,6 +1927,12 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
      * validated over the right number of words. */
     dma_word_count = (int)(dma.rd_buf_size / sizeof(uint32_t));
     rx_delay_errors_threshold = dma_word_count / 8;
+    /* Zero-copy: the buffers granted for a pass are already given to the kernel, fill them all. */
+    if (!zero_copy) {
+        tx_buffers_per_pass = dma.wr_buf_count / 4;
+        if (tx_buffers_per_pass == 0)
+            tx_buffers_per_pass = 1;
+    }
 #endif
 
     dma.reader_enable = 1;
@@ -1946,15 +1953,21 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
 #ifdef DMA_CHECK_DATA
         char *buf_wr;
         char *buf_rd;
+        unsigned tx_filled = 0;
 
         /* DMA-TX Write. */
-        while (1) {
+        /* Copy mode: a quarter of the ring at most per pass. There a buffer is given to the kernel
+         * with a blocking write(), up to a full ring per pass. The RX buffers are only read
+         * between two passes: with a full ring of writes they stay more than half a ring behind
+         * the hardware, the kernel skips them and stale buffers get checked. */
+        while (tx_filled < tx_buffers_per_pass) {
             /* Get Write buffer. */
             buf_wr = litepcie_dma_next_write_buffer(&dma);
             /* Break when no buffer available for Write. */
             if (!buf_wr)
                 break;
             work_done = 1;
+            tx_filled++;
             /* Write data to buffer. */
             write_pn_data((uint32_t *) buf_wr, dma_word_count, &seed_wr, data_mask, dma_word_count);
         }
