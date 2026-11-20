@@ -938,6 +938,11 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
                                     &dma->reader_hw_count, &dma->reader_sw_count);
                 dev->tx_user_count = dma->reader_sw_count;
                 dev->tx_submit_count = dma->reader_sw_count;
+                /* Start from an empty ring: what a previous stream left would be sent again. */
+                if (dma->buf_wr)
+                    memset(dma->buf_wr, 0, (size_t)dma->mmap_dma_info.dma_tx_buf_count *
+                                           dma->mmap_dma_info.dma_tx_buf_size);
+                dev->tx_clean_count = dma->reader_sw_count;
             }
         }
 
@@ -1394,6 +1399,11 @@ int m2sdr_stream_activate(struct m2sdr_dev *dev, enum m2sdr_direction direction)
                                     &dma->reader_sw_count);
                 dev->tx_user_count = dma->reader_hw_count;
                 dev->tx_submit_count = dma->reader_hw_count;
+                /* Start from an empty ring: what a previous stream left would be sent again. */
+                if (dma->buf_wr)
+                    memset(dma->buf_wr, 0, (size_t)dma->mmap_dma_info.dma_tx_buf_count *
+                                           dma->mmap_dma_info.dma_tx_buf_size);
+                dev->tx_clean_count = dma->reader_hw_count;
             }
         } else {
             return M2SDR_ERR_STATE;
@@ -1640,6 +1650,47 @@ static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
     }
 }
 
+/* Buffers kept behind the reader count before a buffer is cleared: the last ones may still be
+ * on their way to the board. */
+#define M2SDR_TX_CLEAN_MARGIN_BUFFERS 2
+
+/* Clear the buffers that were written and that the reader has read (see m2sdr.h). */
+static void m2sdr_tx_ring_clean(struct m2sdr_dev *dev, int64_t reader)
+{
+    struct litepcie_dma_ctrl *dma = &dev->tx_dma;
+    int64_t buffer_count = dma->mmap_dma_info.dma_tx_buf_count;
+    size_t  buf_size     = dma->mmap_dma_info.dma_tx_buf_size;
+    int64_t end          = reader - M2SDR_TX_CLEAN_MARGIN_BUFFERS;
+
+    if (buffer_count <= 0 || !dma->buf_wr)
+        return;
+    if (end > dev->tx_user_count)
+        end = dev->tx_user_count;
+    /* Written more than one turn ago: the buffers were written again since. */
+    if (end - dev->tx_clean_count > buffer_count)
+        dev->tx_clean_count = end - buffer_count;
+    while (dev->tx_clean_count < end) {
+        memset(dma->buf_wr + (size_t)(dev->tx_clean_count % buffer_count) * buf_size, 0, buf_size);
+        dev->tx_clean_count++;
+    }
+}
+
+int m2sdr_tx_ring_housekeeping(struct m2sdr_dev *dev)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE || !dev->zero_copy || !dev->tx_configured)
+        return M2SDR_ERR_OK;
+
+    struct litepcie_dma_ctrl *dma = &dev->tx_dma;
+    if (dev->tx_clean_count >= dev->tx_user_count)
+        return M2SDR_ERR_OK;
+    litepcie_dma_reader(dma->fds.fd, dma->reader_enable,
+                        &dma->reader_hw_count, &dma->reader_sw_count);
+    m2sdr_tx_ring_clean(dev, dma->reader_hw_count);
+    return M2SDR_ERR_OK;
+}
+
 /* Buffers skipped (sent as zeros) when the TX fill position resumes after an underflow. */
 #define M2SDR_TX_UNDERFLOW_SKIP_BUFFERS 3
 
@@ -1671,6 +1722,8 @@ static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
             if (lead > buffer_count)
                 lead = buffer_count;
 
+            m2sdr_tx_ring_clean(dev, reader);
+
             int64_t buffers_pending = dev->tx_user_count - reader;
             if (buffers_pending < 0) {
                 /* The reader has passed the fill position. Its count is the one of the last
@@ -1688,8 +1741,11 @@ static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
                 dev->pcie_tx_underflow_buffers += (uint64_t)(-buffers_pending);
                 for (int64_t k = 0; k < skip; k++)
                     memset(dma->buf_wr + (size_t)((reader + k) % buffer_count) * buf_size, 0, buf_size);
+                /* All the buffers written before were read: clear the ones not cleared yet. */
+                m2sdr_tx_ring_clean(dev, dev->tx_user_count + M2SDR_TX_CLEAN_MARGIN_BUFFERS);
                 dev->tx_user_count = reader + skip;
                 dev->tx_submit_count = reader + skip;
+                dev->tx_clean_count = reader + skip;
                 m2sdr_pcie_dma_update_tx_submit(dev);
                 return M2SDR_ERR_UNDERFLOW;
             }

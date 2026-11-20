@@ -1069,6 +1069,14 @@ int m2sdr_set_rx_offset(struct m2sdr_dev *dev, uint64_t offset_ns);
  * on a LitePCIe device, M2SDR_ERR_UNSUPPORTED otherwise. */
 int m2sdr_set_tx_lead_buffers(struct m2sdr_dev *dev, unsigned lead_buffers);
 
+/* Zero-copy PCIe TX: clear the buffers of the ring that the DMA reader has read. The reader
+ * never stops: it goes round the ring and sends again what the buffers hold. A stream with
+ * pauses (bursts of a terminal, a transmitter that stops) would otherwise see its last buffers
+ * sent again at each turn. The fill path does it by itself; an application that stops writing
+ * calls this from time to time (the SoapySDR driver does it from its RX path). Not thread safe
+ * against the TX calls of the same device. */
+int m2sdr_tx_ring_housekeeping(struct m2sdr_dev *dev);
+
 int m2sdr_get_buffer(struct m2sdr_dev *dev,
                      enum m2sdr_direction direction,
                      void **buffer,
