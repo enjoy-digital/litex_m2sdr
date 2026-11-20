@@ -1142,6 +1142,7 @@ void SoapyLiteXM2SDR::resetTimedTxTimeline()
 {
     _tx_stream.tx_timeline_valid = false;
     _tx_stream.tx_next_time_ns = 0;
+    _tx_stream.hw_burst_valid = false;
 }
 
 void SoapyLiteXM2SDR::initTimedTxTimeline()
@@ -2015,15 +2016,25 @@ int SoapyLiteXM2SDR::readStream(
         }
     }
 
-    /* Acquire a new read buffer from the DMA engine / UDP helper. */
+    /* Acquire a new read buffer from the DMA engine / UDP helper.
+     *
+     * The buffer comes with its own time (hardware timestamp of its header). When this read
+     * started in the rest of the previous buffer, flags already has HAS_TIME and timeNs is the
+     * time of that rest: they must not be given to acquireReadBuffer(), which would then keep
+     * them, and the new buffer would get the time of the rest. Its time, and the time of all
+     * the samples after it, would be late by the samples already taken, at every read that
+     * spans two buffers. */
     size_t handle;
+    int buf_flags = flags & ~SOAPY_SDR_HAS_TIME;
+    long long buf_time_ns = 0;
     int ret = this->acquireReadBuffer(
         stream,
         handle,
         (const void **)&_rx_stream.remainderBuff,
-        flags,
-        timeNs,
+        buf_flags,
+        buf_time_ns,
         timeoutUs);
+    flags |= (buf_flags & ~SOAPY_SDR_HAS_TIME);
 
     if (ret < 0) {
         if ((ret == SOAPY_SDR_TIMEOUT) && (samp_avail > 0)) {
@@ -2034,11 +2045,13 @@ int SoapyLiteXM2SDR::readStream(
 
     _rx_stream.remainderHandle = handle;
     _rx_stream.remainderSamps = ret;
-    _rx_stream.remainderTimeNs = timeNs;
+    _rx_stream.remainderTimeNs = buf_time_ns;
 
     const size_t n = std::min((returnedElems - samp_avail), _rx_stream.remainderSamps);
 
-    if (_rx_stream.time_valid) {
+    if (samp_avail > 0) {
+        /* The first sample returned is from the previous buffer: its time is already set. */
+    } else if (_rx_stream.time_valid) {
         timeNs = _rx_stream.remainderTimeNs +
                  samples_to_ns(_rx_stream.samplerate, _rx_stream.remainderOffset);
         flags |= SOAPY_SDR_HAS_TIME;
@@ -2176,6 +2189,30 @@ int SoapyLiteXM2SDR::writeStream(
             if (ret < 0)
                 return ret;
             markTxRemainderTime(_tx_stream.tx_next_time_ns);
+        } else if (_tx_stream.timed_tx_hardware) {
+            /* The gate of the FPGA drops a buffer that reaches it after its time, without any
+             * tolerance. In a continuous stream (srsRAN: one timed write per subframe) a buffer
+             * reaches the gate when the previous one ends, a few clock cycles after its own
+             * time: stamped, it would be dropped. Only the first buffer of a burst is stamped;
+             * a timed write that starts where the previous one ended continues the burst, and
+             * its samples follow without a stamp. */
+            bool continues_burst = false;
+            if (_tx_stream.hw_burst_valid) {
+                const long long expected_ns = _tx_stream.hw_burst_time_ns +
+                    samples_to_ns(_tx_stream.samplerate, _tx_stream.hw_burst_samples);
+                const long long tolerance_ns = samples_to_ns(_tx_stream.samplerate, 2);
+                continues_burst = (timeNs >= expected_ns - tolerance_ns) &&
+                                  (timeNs <= expected_ns + tolerance_ns);
+            }
+            int ret = ensureTxRemainderBuffer(stream, timeoutUs);
+            if (ret < 0)
+                return ret;
+            if (!continues_burst) {
+                markTxRemainderTime(timeNs);
+                _tx_stream.hw_burst_valid   = true;
+                _tx_stream.hw_burst_time_ns = timeNs;
+                _tx_stream.hw_burst_samples = 0;
+            }
         } else {
             int ret = ensureTxRemainderBuffer(stream, timeoutUs);
             if (ret < 0)
@@ -2189,10 +2226,14 @@ int SoapyLiteXM2SDR::writeStream(
         return ret;
 
     const int accepted = ret;
+    if (_tx_stream.hw_burst_valid)
+        _tx_stream.hw_burst_samples += accepted;
     /* srsRAN can end a burst with less than one MTU; submit that tail now. */
     if (forceFlush && static_cast<size_t>(accepted) == returnedElems) {
         if (flags & SOAPY_SDR_END_BURST)
             _tx_stream.remainderFlags |= SOAPY_SDR_END_BURST;
+        /* The rest of the buffer is sent as zeros: the next timed write starts a burst. */
+        _tx_stream.hw_burst_valid = false;
         ret = submitTxRemainder(stream, true);
         if (ret < 0 && accepted == 0)
             return ret;

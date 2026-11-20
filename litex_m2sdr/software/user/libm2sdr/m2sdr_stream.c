@@ -1640,6 +1640,9 @@ static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
     }
 }
 
+/* Buffers skipped (sent as zeros) when the TX fill position resumes after an underflow. */
+#define M2SDR_TX_UNDERFLOW_SKIP_BUFFERS 3
+
 static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned timeout_ms)
 {
     int64_t start = get_time_ms();
@@ -1670,10 +1673,24 @@ static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
 
             int64_t buffers_pending = dev->tx_user_count - reader;
             if (buffers_pending < 0) {
+                /* The reader has passed the fill position. Its count is the one of the last
+                 * interrupt: the reader itself is a little further, so a buffer written at
+                 * this count is in a slot already read. It would go out one turn of the ring
+                 * later, and the caller, which resumes just after it, would never get ahead
+                 * of the reader. Resume a few buffers further instead, and clear the buffers
+                 * in between (a cleared header has no timestamp: they go out as zeros). */
+                int64_t skip = M2SDR_TX_UNDERFLOW_SKIP_BUFFERS;
+                size_t  buf_size = dma->mmap_dma_info.dma_tx_buf_size;
+
+                if (skip > buffer_count / 2)
+                    skip = buffer_count / 2;
                 dev->pcie_tx_underflow_events++;
                 dev->pcie_tx_underflow_buffers += (uint64_t)(-buffers_pending);
-                dev->tx_user_count = reader;
-                dev->tx_submit_count = reader;
+                for (int64_t k = 0; k < skip; k++)
+                    memset(dma->buf_wr + (size_t)((reader + k) % buffer_count) * buf_size, 0, buf_size);
+                dev->tx_user_count = reader + skip;
+                dev->tx_submit_count = reader + skip;
+                m2sdr_pcie_dma_update_tx_submit(dev);
                 return M2SDR_ERR_UNDERFLOW;
             }
             if (buffers_pending < lead) {
