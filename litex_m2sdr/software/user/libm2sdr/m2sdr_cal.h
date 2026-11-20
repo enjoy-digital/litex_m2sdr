@@ -12,7 +12,9 @@
 #ifndef M2SDR_CAL_H
 #define M2SDR_CAL_H
 
+#ifndef __cplusplus
 #include <complex.h>
+#endif
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -48,6 +50,8 @@ struct m2sdr_cal_estimate {
     double match;         /* LTE: share of the energy under the PSS that correlates with it, 0 to 1. */
 };
 
+/* The sample functions take C99 complex samples: C only. The record below is also for C++. */
+#ifndef __cplusplus
 /* Interleaved I/Q of one channel to complex, scaled to full scale 1.0. `bits` is 12 for SC16
  * captures of the AD9361. `stride` is the number of int16 between two samples of the channel
  * (4 in 2T2R, 2 in 1T1R). The mean is removed. */
@@ -77,6 +81,7 @@ int m2sdr_cal_gsm_estimate(const float complex *x, size_t count, double max_cfo_
 #define M2SDR_CAL_SCAN_DECIM 4
 int m2sdr_cal_channelize(const float complex *x, size_t count, double offset_hz,
                          float complex *y, size_t *out_count);
+#endif /* !__cplusplus */
 
 /* Reference clock error, in ppm, for a signal received cfo_hz away from freq_hz: positive when
  * the clock runs fast, which lowers the received frequency. This is the value that
