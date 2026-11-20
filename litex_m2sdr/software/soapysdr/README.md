@@ -97,6 +97,8 @@ You can pass device arguments to configure the driver. These are most useful whe
     presence, plus the clk10 discipline state for `fpga`), and each RX/TX
     channel reports an AD9361 `lo_locked` VCO lock-detect sensor, matching
     what srsRAN's UHD backend polls after each retune.
+- **RF frequency offset (tests)**: `rf_freq_offset=HZ`, or per direction `tx_freq_offset=HZ` and `rx_freq_offset=HZ`
+  - Added to every RF frequency the application sets; the application still reads back the frequency it asked for. For lab tests of software that only accepts frequencies of standard bands: with the same offset on both ends, the signal on the air moves (e.g. a 5G band n3 FDD cell moved into the 2.4 GHz ISM band, with different offsets for the downlink and the uplink since the band's duplex gap is wider than the ISM band). A warning is logged at open.
 - **Reference clock trim**: `refclk_ppm=-5.75` or `refclk_ppm=stored`
   - Compensates a measured reference clock error in ppm (positive = clock runs fast) by trimming the SI5351 PLL feedback multiplier, correcting the AD9361 reference and all derived clocks (LOs and sample clocks) together with ~`2e-4ppm` resolution.
   - Useful on the internal XO to remove the CFO caused by the crystal tolerance without switching to an external reference: measure the offset on a known-good signal (`ppm = -offset_hz / carrier_hz * 1e6`) and pass it as a per-board calibration constant.
