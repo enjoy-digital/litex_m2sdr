@@ -286,7 +286,15 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
             if (dev.count("serial") != 0 && trimSerial(dev.at("serial")) == serial)
                 matching.push_back(dev);
         }
-        return matching;
+        discovered = std::move(matching);
+    }
+
+    /* The arguments of the search that do not describe the board (refclk_ppm, clock_source...) go
+     * with each result, as SoapySDR::Device::make() does on its own search. An application that
+     * enumerates and then opens a result (srsRAN) passes them to the driver this way. */
+    for (auto &dev : discovered) {
+        for (const auto &arg : args)
+            dev.insert(arg);
     }
     return discovered;
 }

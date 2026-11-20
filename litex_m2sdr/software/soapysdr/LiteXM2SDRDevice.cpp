@@ -30,6 +30,7 @@
 extern "C" {
 #include "m2sdr_ad9361_spi.h"
 #include "m2sdr_si5351_i2c.h"
+#include "m2sdr_cal.h"
 }
 
 #include "LiteXM2SDRDevice.hpp"
@@ -623,6 +624,31 @@ void SoapyLiteXM2SDR::resetDatapathUnlocked()
  *                                     Constructor
  **************************************************************************************************/
 
+/* RefClk trim asked for by refclk_ppm: a value in ppm, or 'stored' for the calibration record of
+ * the board (written by m2sdr_cal --store; SPI flash first, then its file). */
+static double resolve_refclk_ppm(struct m2sdr_dev *dev, const std::string &value)
+{
+    double ppm;
+
+    if (value == "stored") {
+        struct m2sdr_cal_record rec;
+        const enum m2sdr_cal_source source = m2sdr_cal_load(dev, M2SDR_CAL_FLASH_OFFSET, &rec);
+
+        if (source == M2SDR_CAL_SOURCE_NONE)
+            throw std::runtime_error(
+                "refclk_ppm=stored: no calibration record for this board (run m2sdr_cal measure --store)");
+        ppm = rec.refclk_ppm;
+        SoapySDR::logf(SOAPY_SDR_INFO, "RefClk trim %+.3f ppm, from the calibration record in %s",
+            ppm, source == M2SDR_CAL_SOURCE_FLASH ? "the SPI flash" : "its file");
+    } else {
+        ppm = std::stod(value);
+    }
+    /* Written to also reject NaN. */
+    if (!(ppm >= -M2SDR_REFCLK_PPM_MAX && ppm <= M2SDR_REFCLK_PPM_MAX))
+        throw std::runtime_error("refclk_ppm out of range (max +-100 ppm)");
+    return ppm;
+}
+
 SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     : _deviceArgs(args), _rx_buf_size(0), _tx_buf_size(0), _rx_buf_count(0), _tx_buf_count(0),
       _udp_inited(false),
@@ -916,13 +942,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("refclk_freq") > 0) {
         _refclk_hz = static_cast<int64_t>(std::stod(args.at("refclk_freq")));
     }
-    if (args.count("refclk_ppm") > 0) {
-        _refclk_ppm = std::stod(args.at("refclk_ppm"));
-        /* Written to also reject NaN. */
-        if (!(_refclk_ppm >= -M2SDR_REFCLK_PPM_MAX &&
-              _refclk_ppm <=  M2SDR_REFCLK_PPM_MAX))
-            throw std::runtime_error("refclk_ppm out of range (max +-100 ppm)");
-    }
+    if (args.count("refclk_ppm") > 0)
+        _refclk_ppm = resolve_refclk_ppm(_dev, args.at("refclk_ppm"));
     /* Sample rate (and bandwidth) applied by the RF init, before the application sets its own. */
     double init_samplerate = 30.72e6;
     if (args.count("init_samplerate") > 0) {
@@ -2943,11 +2964,8 @@ SoapySDR::ArgInfoList SoapyLiteXM2SDR::getSettingInfo(void) const {
 void SoapyLiteXM2SDR::writeSetting(const std::string &key, const std::string &value) {
 #ifdef CSR_SI5351_BASE
     if (key == "refclk_ppm") {
-        double ppm = std::stod(value);
-        if (!(ppm >= -M2SDR_REFCLK_PPM_MAX && ppm <= M2SDR_REFCLK_PPM_MAX))
-            throw std::runtime_error("refclk_ppm out of range (max +-100 ppm)");
-
         std::lock_guard<std::mutex> lock(_mutex);
+        const double ppm = resolve_refclk_ppm(_dev, value);
         const uint8_t (*config)[2];
         size_t length;
         struct m2sdr_si5351_pllb_trim_report report;

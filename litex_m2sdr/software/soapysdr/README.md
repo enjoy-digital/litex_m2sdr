@@ -97,9 +97,10 @@ You can pass device arguments to configure the driver. These are most useful whe
     presence, plus the clk10 discipline state for `fpga`), and each RX/TX
     channel reports an AD9361 `lo_locked` VCO lock-detect sensor, matching
     what srsRAN's UHD backend polls after each retune.
-- **Reference clock trim**: `refclk_ppm=-5.75`
+- **Reference clock trim**: `refclk_ppm=-5.75` or `refclk_ppm=stored`
   - Compensates a measured reference clock error in ppm (positive = clock runs fast) by trimming the SI5351 PLL feedback multiplier, correcting the AD9361 reference and all derived clocks (LOs and sample clocks) together with ~`2e-4ppm` resolution.
   - Useful on the internal XO to remove the CFO caused by the crystal tolerance without switching to an external reference: measure the offset on a known-good signal (`ppm = -offset_hz / carrier_hz * 1e6`) and pass it as a per-board calibration constant.
+  - `refclk_ppm=stored` takes the calibration record of the board, written by `m2sdr_cal measure --store` (SPI flash first, then its file); the open fails without a record. This is the way to trim the reference from an application that only passes device arguments, such as srsRAN: `device_args = driver=LiteXM2SDR,refclk_ppm=stored`.
   - Also exposed as a runtime setting: `writeSetting("refclk_ppm", "-5.75")` retrims while streams stay open, `readSetting("refclk_ppm")` returns the applied value, and `getSettingInfo()` reports the `+-100ppm` range together with the glitch-free window of the active clock topology. Within the window (about `+87/-144ppm` on the internal XO at `38.4MHz`, `+41/-52ppm` on a `10MHz` CLKIN, with the integer `40MHz` tables pinned at the positive edge) a retrim moves only the fractional PLL field in a single I2C burst, so a periodic loop (e.g. tracking a gNB SSB) can follow reference drift without phase hits; outside it the feedback is re-centred on the target, which still lands exactly but is not glitch-free for that one update (logged).
 - **Ethernet RX mode** (Ethernet devices): `eth_mode=udp|vrt`
   - `vrt` enables FPGA VRT RX streaming and Soapy RX will parse/strip VRT signal headers.

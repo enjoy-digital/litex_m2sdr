@@ -100,7 +100,7 @@ optional.
 | `bitmode` | `8`, `16` | Transport format: SC8 or SC16 |
 | `clock_source` | `internal`, `external`, `fpga` | Reference of the clock generator |
 | `refclk_freq` | Hz | Reference clock of the AD9361 |
-| `refclk_ppm` | ppm | Correction of a measured reference error |
+| `refclk_ppm` | ppm, or `stored` | Correction of a measured reference error |
 | `rx_agc_mode` | `slow`, `fast`, `hybrid`, `mgc` | RX gain control mode, both channels |
 | `rx_agc_pin` | `on`, `off` | Drive the AGC enable pin of the AD9361 |
 | `auto_bandwidth` | `on`, `off` | Follow the sample rate with the bandwidth |
@@ -140,6 +140,8 @@ timed TX mode.
   described in [Time synchronisation](#timing).
 - `refclk_ppm`: also a run-time setting. An application writes the setting `refclk_ppm` to trim
   the reference while streaming, in a range of 100 ppm on each side.
+  `refclk_ppm=stored` takes the value of the calibration record of the board, written by
+  `m2sdr_cal measure --store`; the open fails when the board has no record.
 - `eth_mode=vrt`: the RX stream is meant to come in VRT packets, which carry timestamps, while
   the TX stream stays raw UDP. The driver selects the VRT route when the library is built
   against the `csr.h` of the VRT build; built against the committed `csr.h`, it refuses this mode
@@ -304,6 +306,9 @@ rx_gain = 40
 
 - PCIe is the reference host link for LTE: over Ethernet the RX stream has no hardware
   timestamps yet.
+- On the internal oscillator the reference can be several ppm off, which is enough to hide a
+  cell from the LTE cell search at 1.8 GHz and above. Measure and store the error once with
+  `m2sdr_cal measure --store`, then use `device_args = driver=LiteXM2SDR,refclk_ppm=stored`.
 - All the LTE sample rates, from 1.92 to 23.04 MSPS, are in the supported range.
 - Do not pass antenna arguments such as `rxant=` or `txant=`: unknown antenna names make the
   driver fail at open.
