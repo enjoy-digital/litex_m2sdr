@@ -257,6 +257,14 @@ static int dma_buffer_count = DMA_BUFFER_COUNT;
 static unsigned int dma_buffer_size[DMA_CHANNEL_COUNT] = {
 	[0 ... DMA_CHANNEL_COUNT - 1] = DMA_BUFFER_SIZE
 };
+/* Reset of the SoC at probe. Off by default: the reset also restarts the system PLL while the
+ * PCIe core stays up, and the board can then send a malformed TLP to the host (fatal error at
+ * the root port; hosts have locked up on it). The probe stops the DMA engines and the
+ * interrupts instead. reset_at_probe=1 restores the previous behaviour. */
+static bool reset_at_probe;
+module_param(reset_at_probe, bool, 0444);
+MODULE_PARM_DESC(reset_at_probe, "Reset the SoC at probe (default 0: stop the DMA engines and the interrupts instead)");
+
 static unsigned int dma_buffer_per_irq[DMA_CHANNEL_COUNT] = {
 	[0 ... DMA_CHANNEL_COUNT - 1] = DMA_BUFFER_PER_IRQ
 };
@@ -2351,22 +2359,25 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 		goto fail1;
 	}
 
-	/* Reset LitePCIe core */
-#ifdef CSR_CTRL_RESET_ADDR
-	litepcie_writel(litepcie_dev, CSR_CTRL_RESET_ADDR, 1);
-	msleep(10);
+	/* Start from a quiet core: no interrupt source enabled. The DMA engines are stopped
+	 * below, once their registers are known and before the board may master the bus. */
+	litepcie_writel(litepcie_dev, CSR_PCIE_MSI_ENABLE_ADDR, 0);
 
-	/* The core does not always answer 10 ms after its reset: BAR0 then reads all-ones and
-	 * the probe failed, about one module load in three right after an unload. Wait for the
-	 * first word of the identifier, 1 s at most (a read of an absent core can take a PCIe
-	 * completion timeout by itself). */
-	for (i = 0; i < 20; i++) {
-		if (litepcie_readl(litepcie_dev, CSR_IDENTIFIER_MEM_BASE) != 0xffffffff)
-			break;
-		msleep(50);
+#ifdef CSR_CTRL_RESET_ADDR
+	if (reset_at_probe) {
+		litepcie_writel(litepcie_dev, CSR_CTRL_RESET_ADDR, 1);
+		msleep(10);
+
+		/* The core does not always answer 10 ms after its reset (the PLL locks again):
+		 * wait for the first word of the identifier, 1 s at most. */
+		for (i = 0; i < 20; i++) {
+			if (litepcie_readl(litepcie_dev, CSR_IDENTIFIER_MEM_BASE) != 0xffffffff)
+				break;
+			msleep(50);
+		}
+		if (i)
+			dev_info(&dev->dev, "Core ready after %d more read(s) of the identifier\n", i);
 	}
-	if (i)
-		dev_info(&dev->dev, "Core ready after %d more read(s) of the identifier\n", i);
 #endif
 
 	/* Read and display the FPGA identifier.
@@ -2506,6 +2517,7 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 
 	/* Core was reset and DMA buffers are now mapped: it is safe to let the
 	 * device bus-master (held off since pcim_enable_device above). */
+	litepcie_stop_dma(litepcie_dev);
 	pci_set_master(dev);
 
 #ifdef LITEPCIE_HAS_SATA_DMA
