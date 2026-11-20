@@ -942,6 +942,13 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("refclk_freq") > 0) {
         _refclk_hz = static_cast<int64_t>(std::stod(args.at("refclk_freq")));
     }
+    if (args.count("tx_scale") > 0) {
+        _tx_cf32_scale = std::stod(args.at("tx_scale"));
+        if (!(_tx_cf32_scale > 0.0 && _tx_cf32_scale <= 16.0))
+            throw std::runtime_error("tx_scale out of range (0, 16]");
+        SoapySDR::logf(SOAPY_SDR_INFO, "CF32 TX samples scaled by %.3f (%.1f dB)",
+            _tx_cf32_scale, 20.0 * std::log10(_tx_cf32_scale));
+    }
     if (args.count("rf_freq_offset") > 0)
         _rf_freq_offset_hz[SOAPY_SDR_TX] = _rf_freq_offset_hz[SOAPY_SDR_RX] = std::stod(args.at("rf_freq_offset"));
     if (args.count("tx_freq_offset") > 0)
