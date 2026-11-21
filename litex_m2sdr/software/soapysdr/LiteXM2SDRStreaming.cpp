@@ -917,7 +917,7 @@ int SoapyLiteXM2SDR::activateStream(
     /* TX */
     } else if (stream == TX_STREAM) {
         _tx_stream.stop_requested.store(false);
-        if (usesLibm2sdrStream()) {
+        if (usesLibm2sdrStream() && !_tx_stream.dma_kept) {
             for (size_t i = 0; i < _tx_stream.channels.size(); i++)
                 channel_configure(SOAPY_SDR_TX, _tx_stream.channels[i]);
             /* Crossbar Mux: Select PCIe streaming (LiteUSB: selected by the activation). */
@@ -931,6 +931,9 @@ int SoapyLiteXM2SDR::activateStream(
                 return SOAPY_SDR_STREAM_ERROR;
             }
             _tx_stream.user_count = 0;
+        } else if (usesLibm2sdrStream()) {
+            /* The DMA kept running since deactivateStream(): next burst. */
+            _tx_stream.dma_kept = false;
         } else if (isLiteEth()) {
             int rc = m2sdr_liteeth_tx_stream_activate(_dev);
             if (rc != M2SDR_ERR_OK) {
@@ -997,7 +1000,20 @@ int SoapyLiteXM2SDR::deactivateStream(
                 (long long)timeNs);
         }
     } else if (stream == TX_STREAM) {
-        stopTxStreamUnlocked();
+        if (_tx_stream.timed_tx_hardware && usesLibm2sdrStream()) {
+            /* SoapyUHD deactivates the TX stream at each end of burst and activates it again for
+             * the next one (discontinuous TX, e.g. srsRAN Project in TDD). The DMA keeps running:
+             * between bursts the ring runs dry and the cleared buffers go out as zeros, and the
+             * next burst is stamped, the gate holds it until its time. Stopping and restarting
+             * the DMA (and the channel setup) for every burst loses the start of the bursts.
+             * closeStream() stops it. */
+            if (_tx_stream.remainderHandle >= 0)
+                (void)submitTxRemainder(stream, true);
+            _tx_stream.hw_burst_valid = false;
+            _tx_stream.dma_kept = true;
+        } else {
+            stopTxStreamUnlocked();
+        }
         if (flags & SOAPY_SDR_HAS_TIME) {
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "TX timed deactivation requested for %lld ns; timing not supported, stopping immediately",
@@ -1028,6 +1044,7 @@ void SoapyLiteXM2SDR::stopRxStreamUnlocked()
 
 void SoapyLiteXM2SDR::stopTxStreamUnlocked()
 {
+    _tx_stream.dma_kept = false;
     if (usesLibm2sdrStream()) {
         /* Disable the DMA engine for TX. */
         int rc = m2sdr_stream_deactivate(_dev, M2SDR_TX);
@@ -1615,6 +1632,19 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
                                   timeout_us_to_ms(timeoutUs));
         if (rc == M2SDR_ERR_TIMEOUT)
             return SOAPY_SDR_TIMEOUT;
+        if (rc == M2SDR_ERR_UNDERFLOW && _tx_stream.timed_tx_hardware && !_tx_stream.hw_burst_valid) {
+            /* Between two bursts (discontinuous TX, e.g. TDD), the ring runs dry: nothing to
+             * send, the DMA reader airs the cleared buffers. The library resumed the fill ahead
+             * of the reader, and the burst that starts is stamped, the gate holds it until its
+             * time: not an underflow. */
+            if (timeoutUs == 0)
+                rc = m2sdr_try_get_buffer(_dev, M2SDR_TX, &buffer, &total_samples);
+            else
+                rc = m2sdr_get_buffer(_dev, M2SDR_TX, &buffer, &total_samples,
+                                      timeout_us_to_ms(timeoutUs));
+            if (rc == M2SDR_ERR_TIMEOUT)
+                return SOAPY_SDR_TIMEOUT;
+        }
         if (rc == M2SDR_ERR_UNDERFLOW) {
             _tx_stream.underflow = true;
             resetTimedTxTimeline();
@@ -1996,6 +2026,10 @@ int SoapyLiteXM2SDR::readStream(
     if (!_rx_stream.opened || _rx_stream.stop_requested.load())
         return SOAPY_SDR_STREAM_ERROR;
 
+    /* flags is an output: an application that passes the same variable at each call (srsRAN
+     * 4G) would otherwise see the END_ABRUPT of one overflow on every read after it. */
+    flags = 0;
+
     /* Determine the number of samples to return, respecting the MTU. */
     size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
 
@@ -2292,8 +2326,11 @@ int SoapyLiteXM2SDR::writeStream(
 
     if (returnedElems == 0) {
         if (forceFlush) {
-            if (flags & SOAPY_SDR_END_BURST)
+            if (flags & SOAPY_SDR_END_BURST) {
                 _tx_stream.remainderFlags |= SOAPY_SDR_END_BURST;
+                /* The next timed write starts a burst. */
+                _tx_stream.hw_burst_valid = false;
+            }
             int ret = submitTxRemainder(stream, true);
             if (ret < 0)
                 return ret;
