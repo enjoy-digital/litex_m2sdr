@@ -59,6 +59,12 @@ class HeaderInserterExtractor(LiteXModule):
         # current stamping bit-exact.
         self.rx_offset      = Signal(64) # i  CSR: RX pipeline offset (ns).
 
+        # TX lead (extractor only), for the TX gating of the RFIC (TDD): lead is set while the
+        # gate holds a timed frame whose air-time is less than tx_lead ns away, so the TX path
+        # can power up before the burst airs.
+        self.tx_lead        = Signal(32) # i  CSR: TX lead time (ns).
+        self.lead           = Signal()   # o  A timed frame airs within tx_lead.
+
         if with_csr:
             self.add_csr()
 
@@ -206,6 +212,9 @@ class HeaderInserterExtractor(LiteXModule):
                     NextState("DROP")
                 )
             )
+            # Lead: registered, like gate_now (one more sys-clock cycle, within the lead time).
+            self.sync += self.lead.eq(fsm.ongoing("WAIT") & (self.timestamp != 0) &
+                (gate_now + self.tx_lead >= self.timestamp))
             fsm.act("WAIT",
                 # Hold (RFIC airs zeros); release the cycle the FPGA time reaches the air-time.
                 If(gate_now >= self.timestamp,
@@ -369,10 +378,15 @@ class TXRXHeader(LiteXModule):
             self._rx_offset    = CSRStorage(64, reset=0, description=
                 "RX timestamp offset (ns): subtracted from the FPGA time before insertion into the "
                 "RX header, referring the stamp back to the antenna plane (the mirror of tx_offset).")
+            # TX lead for the TX gating of the RFIC (TDD), appended after the gate CSRs.
+            self._tx_lead      = CSRStorage(32, reset=20000, description=
+                "TX lead time (ns): the TX path of the RFIC is turned on this long before a timed "
+                "frame airs, when the TX gating of the RFIC (ad9361 txnrx_control.auto) is enabled.")
             self.comb += [
                 self.tx.tx_offset.eq(self._tx_offset.storage),
                 self._tx_underflow.status.eq(self.tx.underflow),
                 self.rx.rx_offset.eq(self._rx_offset.storage),
+                self.tx.tx_lead.eq(self._tx_lead.storage),
             ]
             self.sync += [
                 # Reset.

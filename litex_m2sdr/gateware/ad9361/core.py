@@ -156,6 +156,85 @@ class AD9361StreamCounters(LiteXModule):
             self.sync += If(ps.o, count.eq(count + step))
 
 
+# AD9361 TX Sample Delay ----------------------------------------------------------------------------
+
+class AD9361TXSampleDelay(LiteXModule):
+    """Delays a sample stream by depth samples: a ring in LUTRAM advanced on each sample (advance).
+    o is the sample written depth advances ago (read before the write of the same cycle)."""
+    def __init__(self, depth=256, width=48):
+        self.advance = Signal()
+        self.i       = Signal(width)
+        self.o       = Signal(width)
+
+        # # #
+
+        mem = Memory(width, depth)
+        wr  = mem.get_port(write_capable=True, async_read=True)
+        self.specials += mem, wr
+        addr = Signal(max=depth)
+        self.comb += [
+            wr.adr.eq(addr),
+            wr.dat_w.eq(self.i),
+            wr.we.eq(self.advance),
+            self.o.eq(wr.dat_r),
+        ]
+        self.sync += If(self.advance, addr.eq(Mux(addr == depth - 1, 0, addr + 1)))
+
+# AD9361 TXNRX Auto ---------------------------------------------------------------------------------
+
+class AD9361TXNRXAuto(LiteXModule):
+    """Turns the transmitter of the AD9361 on only while there is something to transmit.
+
+    For TDD (RX and TX on the same frequency): a transmitter that stays on between bursts airs its
+    own noise and raises the noise floor of its own receiver. With the ENSM in FDD independent
+    mode (pin control, set by the software), the TXNRX pin turns the TX path on and off, and this
+    module drives it:
+    - lead:  the timed-TX gate holds a stamped burst whose air-time is less than the lead time
+             away (input from the TX header extractor): the TX path powers up before the burst.
+    - data:  non-zero samples reach the PHY (rfic domain): the TX path stays on.
+    - hold:  the TX path stays on hold_cycles (sys clock) after the last of them, so that zero
+             samples inside a burst and the end of the burst go out.
+    Between bursts the DMA ring carries zero buffers: the samples are all zero and TX goes off.
+    """
+    def __init__(self, data_width=64, activity_cycles=256):
+        self.lead        = Signal()           # i (sys):  a timed burst airs within the lead time.
+        self.tx_valid    = Signal()           # i (rfic): PHY sample handshake.
+        self.tx_data     = Signal(data_width) # i (rfic): PHY sample (ia/qa/ib/qb).
+        self.hold_cycles = Signal(32)         # i (sys):  TX on time after the last non-zero sample.
+        self.txnrx       = Signal()           # o (sys):  TXNRX pin (1: TX on).
+
+        # # #
+
+        # Non-zero samples at the PHY (rfic), stretched over activity_cycles rfic cycles so the
+        # level crosses to sys (MultiReg) whatever the sample rate.
+        active_rfic  = Signal()
+        active_count = Signal(max=activity_cycles + 1)
+        self.sync.rfic += [
+            active_rfic.eq(active_count != 0),
+            If(self.tx_valid & (self.tx_data != 0),
+                active_count.eq(activity_cycles)
+            ).Elif(active_count != 0,
+                active_count.eq(active_count - 1)
+            )
+        ]
+        active = Signal()
+        self.specials += MultiReg(active_rfic, active)
+
+        # TX on while lead or active, then for hold_cycles.
+        hold = Signal(32)
+        self.sync += [
+            If(self.lead | active,
+                hold.eq(self.hold_cycles),
+                self.txnrx.eq(1)
+            ).Elif(hold != 0,
+                hold.eq(hold - 1)
+            ).Else(
+                self.txnrx.eq(0)
+            )
+        ]
+
+# AD9361 RFIC --------------------------------------------------------------------------------------
+
 class AD9361RFIC(LiteXModule):
     def __init__(self, rfic_pads, spi_pads, sys_clk_freq,
         with_tx_fifo = False, tx_fifo_depth = 8192,
@@ -222,11 +301,14 @@ class AD9361RFIC(LiteXModule):
         self.spi = AD9361SPIMaster(spi_pads, data_width=24, clk_divider=8)
 
         # Config / Status --------------------------------------------------------------------------
+        # TXNRX pin: the CSR value, or the automatic TX gating of add_txnrx_auto() when enabled.
+        self.txnrx = Signal() # TXNRX pin value (sys).
+        self.comb += self.txnrx.eq(self._config.fields.txnrx)
         self.sync += [
             # AD9361 Control.
             rfic_pads.rst_n.eq(self._config.fields.rst_n),
             rfic_pads.enable.eq(self._config.fields.enable),
-            rfic_pads.txnrx.eq(self._config.fields.txnrx),
+            rfic_pads.txnrx.eq(self.txnrx),
             rfic_pads.en_agc.eq(self._config.fields.en_agc),
 
             # AD9361 Control/Status IOs.
@@ -567,6 +649,56 @@ class AD9361RFIC(LiteXModule):
             self._rx_overflow_words.status.eq(counters.rx_overflow_words),
             self._tx_underflow_events.status.eq(counters.tx_underflow_events),
         ]
+
+    def add_txnrx_auto(self, lead, delay_samples=256):
+        """Automatic TX gating on the TXNRX pin (TDD), see AD9361TXNRXAuto.
+
+        lead: sys-domain input, a timed burst airs within the lead time (TX header extractor).
+        Added after the stream counters: keeps the AD9361 CSR map (and csr.h) of the previous
+        gateware. Disabled at reset: the pin keeps the CSR value (config.txnrx).
+        """
+        self._txnrx_control = CSRStorage(fields=[
+            CSRField("auto", size=1, offset=0, values=[
+                ("``0b0``", "TXNRX pin from config.txnrx."),
+                ("``0b1``", "TXNRX pin driven by the TX activity (TDD, ENSM in pin control)."),
+            ]),
+        ])
+        self._txnrx_hold = CSRStorage(32, reset=1250, description=
+            "TX on time (sys clock cycles) after the last non-zero TX sample, in auto mode.")
+
+        # # #
+
+        self.txnrx_auto = txnrx_auto = AD9361TXNRXAuto()
+        self.comb += [
+            txnrx_auto.lead.eq(lead),
+            txnrx_auto.hold_cycles.eq(self._txnrx_hold.storage),
+        ]
+        # Lead without a timestamp (continuous streams): in auto mode the samples go to the PHY
+        # through a delay of delay_samples samples (rfic domain, LUTRAM ring advanced on each PHY
+        # handshake) and the activity is detected before it, so TX turns on delay_samples sample
+        # periods before the first non-zero sample airs (256 samples: 22 us at 11.52 MSPS). The
+        # delay adds to the TX latency in auto mode only (compensated by the gate offset).
+        self.tx_delay = tx_delay = ClockDomainsRenamer("rfic")(AD9361TXSampleDelay(delay_samples))
+        tx_handshake = Signal()
+        tx_in        = Signal(48)
+        auto_rfic    = Signal()
+        self.specials += MultiReg(self._txnrx_control.fields.auto, auto_rfic, odomain="rfic")
+        self.comb += [
+            tx_handshake.eq(self.phy.sink.valid & self.phy.sink.ready),
+            tx_in.eq(Cat(self.gpio_tx_unpacker.source.data[0*16:0*16+12], self.gpio_tx_unpacker.source.data[1*16:1*16+12],
+                         self.gpio_tx_unpacker.source.data[2*16:2*16+12], self.gpio_tx_unpacker.source.data[3*16:3*16+12])),
+            tx_delay.advance.eq(tx_handshake & auto_rfic),
+            tx_delay.i.eq(tx_in),
+            txnrx_auto.tx_valid.eq(tx_handshake),
+            txnrx_auto.tx_data.eq(tx_in),
+            If(auto_rfic,
+                self.phy.sink.ia.eq(tx_delay.o[0:12]),
+                self.phy.sink.qa.eq(tx_delay.o[12:24]),
+                self.phy.sink.ib.eq(tx_delay.o[24:36]),
+                self.phy.sink.qb.eq(tx_delay.o[36:48]),
+            ),
+        ]
+        self.comb += If(self._txnrx_control.fields.auto, self.txnrx.eq(txnrx_auto.txnrx))
 
     def add_active_settings(self):
         # Last stream settings programmed by host software. These scratch CSRs let an independent

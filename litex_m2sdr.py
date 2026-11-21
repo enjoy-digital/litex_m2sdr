@@ -494,6 +494,9 @@ class BaseSoC(SoCMini):
             # RFIC stream loss counters (RX overflow, TX underflow), unconditional.
             stream_counters = True,
 
+            # TX gating of the RFIC on the TXNRX pin (TDD), unconditional.
+            txnrx_auto      = True,
+
             # Ethernet TX stream marks its buffers: TX header and hardware timed TX.
             eth_tx_header   = with_eth,
 
@@ -974,6 +977,9 @@ class BaseSoC(SoCMini):
         # Timed-TX gate: feed the FPGA time so the TX header extractor holds each frame until
         # its air-time (header timestamp) and drops too-late frames (see gateware/header.py).
         self.comb += self.header.tx.time.eq(self.time_gen.time)
+        # TX gating of the RFIC (TDD): TXNRX on from the lead of a timed burst to the end of its
+        # samples (see AD9361TXNRXAuto). Off at reset.
+        self.ad9361.add_txnrx_auto(lead=self.header.tx.lead)
         self.comb += [
             self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
             self.header.rx.timestamp.eq(self.time_gen.time),

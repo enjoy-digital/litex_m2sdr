@@ -622,6 +622,20 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             _tx_buf_count  = info.buffer_count;
             _tx_buf_stride = info.buffer_stride;
 
+            /* tx_ring_buffers: how far ahead of the DMA reader the application may fill the TX
+             * ring (0 = the whole ring). With hardware timed TX the gate holds a stamped buffer
+             * until its time, so a full ring lets the application run that far (up to about
+             * 45 ms at 11.52 MSPS) ahead of its RX timeline (srsRAN Project in TDD: PRACH
+             * requests overflow, DL task queue full). */
+            {
+                const size_t ring_lead = get_kwargs_size(searchArgs, _deviceArgs, "tx_ring_buffers", 0);
+                if (ring_lead > 0) {
+                    rc = m2sdr_set_tx_lead_buffers(_dev, static_cast<unsigned>(ring_lead));
+                    if (rc != M2SDR_ERR_OK)
+                        throw std::runtime_error("tx_ring_buffers: " + std::string(m2sdr_strerror(rc)));
+                    SoapySDR::logf(SOAPY_SDR_INFO, "TX ring filled at most %zu buffers ahead", ring_lead);
+                }
+            }
             /* Anchor the hardware gate underflow counter so readStreamStatus() only reports
              * drops that happen during this stream's lifetime. */
             if (_tx_stream.timed_tx_hardware)
@@ -820,6 +834,8 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
         _rx_stream.opened = false;
     } else if (stream == TX_STREAM) {
         stopTxStreamUnlocked();
+        /* Gating stays on across deactivate/activate (SoapyUHD cycles them): off at close. */
+        setTxGating(false);
         if (usesLibm2sdrStream()) {
             (void)m2sdr_stream_release(_dev, M2SDR_TX);
         } else if (isLiteEth()) {
@@ -931,6 +947,7 @@ int SoapyLiteXM2SDR::activateStream(
                 return SOAPY_SDR_STREAM_ERROR;
             }
             _tx_stream.user_count = 0;
+            setTxGating(true);
         } else if (isLiteEth()) {
             int rc = m2sdr_liteeth_tx_stream_activate(_dev);
             if (rc != M2SDR_ERR_OK) {

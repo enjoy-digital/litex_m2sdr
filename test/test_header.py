@@ -804,3 +804,39 @@ def test_header_inserter_rx_offset_clamps_at_zero():
     """A boot-time stamp (time still below rx_offset) clamps to 0 instead of wrapping to a
     huge bogus value."""
     assert _run_inserter_stamp(timestamp=1_000, rx_offset=1_500) == 0
+
+
+def test_gate_tx_lead():
+    """lead is set while a held timed frame airs within tx_lead ns, and not for untimed frames."""
+    for dw in (64, 128):
+        for timestamp, time_start, expect in [
+            (5000, 1000, False), # Air-time 4000 ns away, lead 1000 ns: no lead while held.
+            (5000, 4500, True),  # Air-time 500 ns away: lead.
+            (0,    4500, False), # Untimed frame: no lead.
+        ]:
+            dut = HeaderInserterExtractor(mode="extractor", data_width=dw, with_csr=False)
+            words = _gate_frame_words(dw, 0xA1A2A3A4A5A6A7A8, timestamp, [0x300, 0x301, 0x302])
+            seen = []
+
+            def gen():
+                yield dut.enable.eq(1)
+                yield dut.header_enable.eq(1)
+                yield dut.frame_cycles.eq(3)
+                yield dut.tx_lead.eq(1000)
+                yield dut.time.eq(time_start)
+                yield dut.source.ready.eq(1)
+                for i, word in enumerate(words[:2 if dw == 64 else 1]):
+                    while not (yield dut.sink.ready):
+                        yield
+                    yield dut.sink.valid.eq(1)
+                    yield dut.sink.first.eq(i == 0)
+                    yield dut.sink.data.eq(word)
+                    yield
+                    yield dut.sink.valid.eq(0)
+                    yield
+                for _ in range(16):
+                    seen.append((yield dut.lead))
+                    yield
+
+            run_simulation(dut, gen())
+            assert any(seen) == expect, (dw, timestamp, time_start, seen)
