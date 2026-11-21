@@ -27,6 +27,10 @@ extern "C" {
 #define ICAP_CMD_IPROG 0b01111
 
 #define ICAP_IDCODE_REG   0b01100
+#define ICAP_STAT_REG     0b00111
+#define ICAP_STAT_CRC_ERROR (1u << 0)
+#define ICAP_STAT_ID_ERROR  (1u << 15)
+#define ICAP_STAT_DEC_ERROR (1u << 16)
 
 #define ICAP_BOOTSTS_REG  0b10110
 #define ICAP_BOOTSTS_VALID    (1 << 0)

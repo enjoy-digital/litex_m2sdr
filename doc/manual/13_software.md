@@ -484,6 +484,7 @@ commands, by group:
 - Clock generator: `si5351-init`, `si5351-dump`, `si5351-read`, `si5351-write`.
 - RFIC: `ad9361-dump`, `ad9361-read`, `ad9361-write`, `ad9361-port-dump`, `ad9361-ensm-dump`.
 - Flash: `flash-write`, `flash-read`, `flash-reload`.
+- DFX: `dfx-status`, `dfx-load` ([Reconfigurable processing](#streaming-dfx)).
 
 ```sh
 m2sdr_util info

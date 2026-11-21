@@ -26,6 +26,7 @@ def test_capability_builds_with_valid_configuration():
         sata_gen="gen2",
         sata_mode="read+write",
         gpio_enabled=True,
+        dfx_enabled=True,
         wr_enabled=False,
         timed_tx=True,
         variant="m2",
