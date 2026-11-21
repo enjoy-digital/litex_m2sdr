@@ -931,6 +931,7 @@ int SoapyLiteXM2SDR::activateStream(
                 return SOAPY_SDR_STREAM_ERROR;
             }
             _tx_stream.user_count = 0;
+            setTxGating(true);
         } else if (usesLibm2sdrStream()) {
             /* The DMA kept running since deactivateStream(): next burst. */
             _tx_stream.dma_kept = false;
@@ -1044,6 +1045,7 @@ void SoapyLiteXM2SDR::stopRxStreamUnlocked()
 
 void SoapyLiteXM2SDR::stopTxStreamUnlocked()
 {
+    setTxGating(false);
     _tx_stream.dma_kept = false;
     if (usesLibm2sdrStream()) {
         /* Disable the DMA engine for TX. */

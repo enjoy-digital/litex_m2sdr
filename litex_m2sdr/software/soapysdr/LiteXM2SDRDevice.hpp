@@ -407,6 +407,14 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     double _rf_freq_offset_hz[2] = {0.0, 0.0}; /* [SOAPY_SDR_TX, SOAPY_SDR_RX] */
     /* tx_scale: digital gain applied to CF32 TX samples before the conversion (1.0 = none). */
     double _tx_cf32_scale = 1.0;
+    /* tx_gating: TX of the RFIC on only around the samples to send (TDD), from the gateware
+     * (M2SDR_FEATURE_TXNRX_AUTO), while the TX stream is active. Lead before a timed burst and
+     * hold after the last non-zero sample, in ns. */
+    bool _tx_gating = false;
+    bool _tx_gating_supported = false;
+    long long _tx_gating_lead_ns = 20000;
+    long long _tx_gating_hold_ns = 10000;
+    void setTxGating(bool enable);
     /* PLLB feedback block last written to the SI5351, so runtime retrims
      * only touch the registers that changed. */
     struct m2sdr_si5351_pllb_state _si5351_pllb = {};

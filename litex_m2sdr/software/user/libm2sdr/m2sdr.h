@@ -527,6 +527,12 @@ enum m2sdr_feature_flag {
 #else
     M2SDR_FEATURE_ETH_TX_HEADER = 0,
 #endif
+    /* TX gating of the RFIC on the TXNRX pin (TDD): TX on only around the samples to send. */
+#ifdef CSR_CAPABILITY_FEATURES_TXNRX_AUTO_OFFSET
+    M2SDR_FEATURE_TXNRX_AUTO = 1u << CSR_CAPABILITY_FEATURES_TXNRX_AUTO_OFFSET,
+#else
+    M2SDR_FEATURE_TXNRX_AUTO = 0,
+#endif
     /* The USB3 TX stream carries the TX header: hardware timed TX works over USB3. */
 #ifdef CSR_CAPABILITY_FEATURES_USB3_TX_HEADER_OFFSET
     M2SDR_FEATURE_USB3_TX_HEADER = 1u << CSR_CAPABILITY_FEATURES_USB3_TX_HEADER_OFFSET,

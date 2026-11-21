@@ -843,6 +843,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
                 _tx_gate_link_supported = isLitePCIe() ||
                     (isLiteUSB() && (caps.features & M2SDR_FEATURE_USB3_TX_HEADER) != 0);
                 _rfic_oversampling = (caps.features & M2SDR_FEATURE_RFIC_OVERSAMPLING) != 0;
+                _tx_gating_supported = (caps.features & M2SDR_FEATURE_TXNRX_AUTO) != 0;
             }
         }
         m2sdr_set_tx_header(_dev, false);
@@ -949,6 +950,15 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         SoapySDR::logf(SOAPY_SDR_INFO, "CF32 TX samples scaled by %.3f (%.1f dB)",
             _tx_cf32_scale, 20.0 * std::log10(_tx_cf32_scale));
     }
+    if (args.count("tx_gating") > 0)
+        _tx_gating = (args.at("tx_gating") == "1" || args.at("tx_gating") == "true");
+    if (args.count("tx_gating_lead_ns") > 0)
+        _tx_gating_lead_ns = std::stoll(args.at("tx_gating_lead_ns"));
+    if (args.count("tx_gating_hold_ns") > 0)
+        _tx_gating_hold_ns = std::stoll(args.at("tx_gating_hold_ns"));
+    if (_tx_gating_lead_ns < 0 || _tx_gating_lead_ns > 1000000 ||
+        _tx_gating_hold_ns < 0 || _tx_gating_hold_ns > 1000000)
+        throw std::runtime_error("tx_gating_lead_ns/tx_gating_hold_ns out of range [0, 1000000]");
     if (args.count("rf_freq_offset") > 0)
         _rf_freq_offset_hz[SOAPY_SDR_TX] = _rf_freq_offset_hz[SOAPY_SDR_RX] = std::stod(args.at("rf_freq_offset"));
     if (args.count("tx_freq_offset") > 0)
@@ -1189,6 +1199,8 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         /* Crossbar Mux/Demux : Select PCIe streaming */
         litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
         litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+
+        setTxGating(false);
 
         /* Power-Down AD9361 (left running when attached with bypass_init=1). */
         if (_rfInitDone)
@@ -3010,4 +3022,39 @@ std::string SoapyLiteXM2SDR::readSetting(const std::string &key) const {
     if (key == "refclk_ppm")
         return std::to_string(_refclk_ppm);
     return SoapySDR::Device::readSetting(key);
+}
+
+/* TX gating (TDD): the gateware drives the TXNRX pin (TX on from the lead of a timed burst to
+ * hold_ns after its last non-zero sample) and the ENSM is set to FDD independent mode, where
+ * TXNRX turns the TX path on and off and ENABLE (kept high) the RX path. Off: back to the FDD
+ * ENSM state, TX always on. */
+void SoapyLiteXM2SDR::setTxGating(bool enable)
+{
+#if defined(CSR_AD9361_TXNRX_CONTROL_ADDR) && defined(CSR_HEADER_TX_LEAD_ADDR)
+    if (!_tx_gating || !_tx_gating_supported || !ad9361_phy || !_dev)
+        return;
+#ifdef CONFIG_CLOCK_FREQUENCY
+    const long long sys_clk_mhz = CONFIG_CLOCK_FREQUENCY / 1000000;
+#else
+    const long long sys_clk_mhz = 125; /* sys clock of the gateware. */
+#endif
+    if (enable) {
+        litex_m2sdr_writel(_dev, CSR_HEADER_TX_LEAD_ADDR, static_cast<uint32_t>(_tx_gating_lead_ns));
+        litex_m2sdr_writel(_dev, CSR_AD9361_TXNRX_HOLD_ADDR,
+            static_cast<uint32_t>(_tx_gating_hold_ns * sys_clk_mhz / 1000));
+        litex_m2sdr_writel(_dev, CSR_AD9361_TXNRX_CONTROL_ADDR, 1);
+        ad9361_set_en_state_machine_mode(ad9361_phy, ENSM_MODE_PINCTRL_FDD_INDEP);
+        /* FDD independent mode, level (not pulse) pin control: ENABLE (RX) and TXNRX (TX) set
+         * the two paths. The mode call above leaves the ENSM pin control off. */
+        ad9361_spi_write(ad9361_phy->spi, REG_ENSM_CONFIG_2, 0x88);
+        ad9361_spi_write(ad9361_phy->spi, REG_ENSM_CONFIG_1, 0x1B);
+        SoapySDR::logf(SOAPY_SDR_INFO, "TX gating on (lead %lld ns, hold %lld ns)",
+            _tx_gating_lead_ns, _tx_gating_hold_ns);
+    } else {
+        ad9361_set_en_state_machine_mode(ad9361_phy, ENSM_MODE_FDD);
+        litex_m2sdr_writel(_dev, CSR_AD9361_TXNRX_CONTROL_ADDR, 0);
+    }
+#else
+    (void)enable;
+#endif
 }

@@ -156,6 +156,61 @@ class AD9361StreamCounters(LiteXModule):
             self.sync += If(ps.o, count.eq(count + step))
 
 
+# AD9361 TXNRX Auto ---------------------------------------------------------------------------------
+
+class AD9361TXNRXAuto(LiteXModule):
+    """Turns the transmitter of the AD9361 on only while there is something to transmit.
+
+    For TDD (RX and TX on the same frequency): a transmitter that stays on between bursts airs its
+    own noise and raises the noise floor of its own receiver. With the ENSM in FDD independent
+    mode (pin control, set by the software), the TXNRX pin turns the TX path on and off, and this
+    module drives it:
+    - lead:  the timed-TX gate holds a stamped burst whose air-time is less than the lead time
+             away (input from the TX header extractor): the TX path powers up before the burst.
+    - data:  non-zero samples reach the PHY (rfic domain): the TX path stays on.
+    - hold:  the TX path stays on hold_cycles (sys clock) after the last of them, so that zero
+             samples inside a burst and the end of the burst go out.
+    Between bursts the DMA ring carries zero buffers: the samples are all zero and TX goes off.
+    """
+    def __init__(self, data_width=64, activity_cycles=256):
+        self.lead        = Signal()           # i (sys):  a timed burst airs within the lead time.
+        self.tx_valid    = Signal()           # i (rfic): PHY sample handshake.
+        self.tx_data     = Signal(data_width) # i (rfic): PHY sample (ia/qa/ib/qb).
+        self.hold_cycles = Signal(32)         # i (sys):  TX on time after the last non-zero sample.
+        self.txnrx       = Signal()           # o (sys):  TXNRX pin (1: TX on).
+
+        # # #
+
+        # Non-zero samples at the PHY (rfic), stretched over activity_cycles rfic cycles so the
+        # level crosses to sys (MultiReg) whatever the sample rate.
+        active_rfic  = Signal()
+        active_count = Signal(max=activity_cycles + 1)
+        self.sync.rfic += [
+            active_rfic.eq(active_count != 0),
+            If(self.tx_valid & (self.tx_data != 0),
+                active_count.eq(activity_cycles)
+            ).Elif(active_count != 0,
+                active_count.eq(active_count - 1)
+            )
+        ]
+        active = Signal()
+        self.specials += MultiReg(active_rfic, active)
+
+        # TX on while lead or active, then for hold_cycles.
+        hold = Signal(32)
+        self.sync += [
+            If(self.lead | active,
+                hold.eq(self.hold_cycles),
+                self.txnrx.eq(1)
+            ).Elif(hold != 0,
+                hold.eq(hold - 1)
+            ).Else(
+                self.txnrx.eq(0)
+            )
+        ]
+
+# AD9361 RFIC --------------------------------------------------------------------------------------
+
 class AD9361RFIC(LiteXModule):
     def __init__(self, rfic_pads, spi_pads, sys_clk_freq,
         with_tx_fifo = False, tx_fifo_depth = 8192,
@@ -222,11 +277,14 @@ class AD9361RFIC(LiteXModule):
         self.spi = AD9361SPIMaster(spi_pads, data_width=24, clk_divider=8)
 
         # Config / Status --------------------------------------------------------------------------
+        # TXNRX pin: the CSR value, or the automatic TX gating of add_txnrx_auto() when enabled.
+        self.txnrx = Signal() # TXNRX pin value (sys).
+        self.comb += self.txnrx.eq(self._config.fields.txnrx)
         self.sync += [
             # AD9361 Control.
             rfic_pads.rst_n.eq(self._config.fields.rst_n),
             rfic_pads.enable.eq(self._config.fields.enable),
-            rfic_pads.txnrx.eq(self._config.fields.txnrx),
+            rfic_pads.txnrx.eq(self.txnrx),
             rfic_pads.en_agc.eq(self._config.fields.en_agc),
 
             # AD9361 Control/Status IOs.
@@ -567,6 +625,35 @@ class AD9361RFIC(LiteXModule):
             self._rx_overflow_words.status.eq(counters.rx_overflow_words),
             self._tx_underflow_events.status.eq(counters.tx_underflow_events),
         ]
+
+    def add_txnrx_auto(self, lead):
+        """Automatic TX gating on the TXNRX pin (TDD), see AD9361TXNRXAuto.
+
+        lead: sys-domain input, a timed burst airs within the lead time (TX header extractor).
+        Added after the stream counters: keeps the AD9361 CSR map (and csr.h) of the previous
+        gateware. Disabled at reset: the pin keeps the CSR value (config.txnrx).
+        """
+        self._txnrx_control = CSRStorage(fields=[
+            CSRField("auto", size=1, offset=0, values=[
+                ("``0b0``", "TXNRX pin from config.txnrx."),
+                ("``0b1``", "TXNRX pin driven by the TX activity (TDD, ENSM in pin control)."),
+            ]),
+        ])
+        self._txnrx_hold = CSRStorage(32, reset=1250, description=
+            "TX on time (sys clock cycles) after the last non-zero TX sample, in auto mode.")
+
+        # # #
+
+        self.txnrx_auto = txnrx_auto = AD9361TXNRXAuto()
+        self.comb += [
+            txnrx_auto.lead.eq(lead),
+            txnrx_auto.hold_cycles.eq(self._txnrx_hold.storage),
+        ]
+        self.comb += [
+            txnrx_auto.tx_valid.eq(self.phy.sink.valid & self.phy.sink.ready),
+            txnrx_auto.tx_data.eq(Cat(self.phy.sink.ia, self.phy.sink.qa, self.phy.sink.ib, self.phy.sink.qb)),
+        ]
+        self.comb += If(self._txnrx_control.fields.auto, self.txnrx.eq(txnrx_auto.txnrx))
 
     def add_active_settings(self):
         # Last stream settings programmed by host software. These scratch CSRs let an independent
