@@ -566,9 +566,6 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         /* Hardware timed TX: start time and length of the burst being written. A timed write
          * that continues it is not stamped again (see writeStream()). */
         bool hw_burst_valid = false;
-        /* deactivateStream() kept the DMA running (hardware timed TX): activateStream() goes on
-         * with it. */
-        bool dma_kept = false;
         /* Hardware timed TX: time of the next sample of the stream, from the last timed write
          * and the samples written since (SoapyUHD stamps only the first write of a burst). */
         bool hw_next_valid = false;
