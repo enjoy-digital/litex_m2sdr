@@ -97,6 +97,8 @@ You can pass device arguments to configure the driver. These are most useful whe
     presence, plus the clk10 discipline state for `fpga`), and each RX/TX
     channel reports an AD9361 `lo_locked` VCO lock-detect sensor, matching
     what srsRAN's UHD backend polls after each retune.
+- **TX digital scale**: `tx_scale=0.25`
+  - Multiplies CF32 TX samples before the conversion to the 12-bit samples of the RFIC, which saturates. For applications whose baseband peaks go beyond full scale and that have no back-off setting (srsUE in 5G SA mode). srsRAN Project has its own: `ru_sdr: amplitude_control: tx_gain_backoff`.
 - **RF frequency offset (tests)**: `rf_freq_offset=HZ`, or per direction `tx_freq_offset=HZ` and `rx_freq_offset=HZ`
   - Added to every RF frequency the application sets; the application still reads back the frequency it asked for. For lab tests of software that only accepts frequencies of standard bands: with the same offset on both ends, the signal on the air moves (e.g. a 5G band n3 FDD cell moved into the 2.4 GHz ISM band, with different offsets for the downlink and the uplink since the band's duplex gap is wider than the ISM band). A warning is logged at open.
 - **Reference clock trim**: `refclk_ppm=-5.75` or `refclk_ppm=stored`

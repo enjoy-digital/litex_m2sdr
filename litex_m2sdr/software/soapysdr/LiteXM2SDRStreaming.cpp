@@ -83,6 +83,20 @@ static inline int8_t clamp_to_sc8(int32_t value)
     return static_cast<int8_t>(value);
 }
 
+/* CF32 to the 12-bit samples of the RFIC (in 16 bits): saturated. A sample beyond full scale
+ * would otherwise overflow the 12 bits and come out with the opposite sign. */
+static inline int16_t cf32_to_sc12(float sample, double scale)
+{
+    if (!std::isfinite(sample))
+        return 0;
+    double v = std::nearbyint(static_cast<double>(sample) * scale);
+    if (v > scale)
+        v = scale;
+    if (v < -scale)
+        v = -scale;
+    return static_cast<int16_t>(v);
+}
+
 static inline int8_t cf32_to_sc8(float sample, double scale)
 {
     if (!std::isfinite(sample))
@@ -1749,20 +1763,21 @@ void SoapyLiteXM2SDR::interleaveCF32(
     uint32_t len,
     size_t offset) {
     const float *samples_cf32 = reinterpret_cast<const float*>(src) + (offset * _samplesPerComplex);
+    const float tx_scale = static_cast<float>(_tx_cf32_scale);
 
     if (_bytesPerSample == 2) {
         int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst);
         for (uint32_t i = 0; i < len; i++) {
-            dst_int16[0] = static_cast<int16_t>(samples_cf32[0] * _samplesScaling); /* I. */
-            dst_int16[1] = static_cast<int16_t>(samples_cf32[1] * _samplesScaling); /* Q. */
+            dst_int16[0] = cf32_to_sc12(samples_cf32[0] * tx_scale, _samplesScaling); /* I. */
+            dst_int16[1] = cf32_to_sc12(samples_cf32[1] * tx_scale, _samplesScaling); /* Q. */
             samples_cf32 += 2;
             dst_int16 += _nChannels * _samplesPerComplex;
         }
     } else if (_bytesPerSample == 1) {
         int8_t *dst_int8 = reinterpret_cast<int8_t*>(dst);
         for (uint32_t i = 0; i < len; i++) {
-            dst_int8[0] = cf32_to_sc8(samples_cf32[0], _samplesScaling); /* I. */
-            dst_int8[1] = cf32_to_sc8(samples_cf32[1], _samplesScaling); /* Q. */
+            dst_int8[0] = cf32_to_sc8(samples_cf32[0] * tx_scale, _samplesScaling); /* I. */
+            dst_int8[1] = cf32_to_sc8(samples_cf32[1] * tx_scale, _samplesScaling); /* Q. */
             samples_cf32 += 2;
             dst_int8 += _nChannels * _samplesPerComplex;
         }
@@ -2196,8 +2211,12 @@ int SoapyLiteXM2SDR::writeStream(
         if (has_time) {
             _tx_stream.hw_next_valid = true;
         } else if (_tx_stream.hw_next_valid && _tx_stream.hw_burst_valid && usesLibm2sdrStream() &&
+                   _tx_stream.hw_burst_samples > static_cast<long long>(_tx_stream.samplerate / 20.0) &&
                    (++_tx_stream.hw_check_count % 16) == 0) {
-            /* A continuing burst goes out at the pace of the DMA reader, whatever its time: check
+            /* Only for a burst that has been streaming for more than 50 ms (a base station): in
+             * a short burst (a terminal) the gate holds the first buffer and the queue does not
+             * drain at the sample rate, so the estimate below would not hold.
+             * A continuing burst goes out at the pace of the DMA reader, whatever its time: check
              * now and then that the next sample still airs at its time. It airs after what is
              * queued: the buffers of the ring not read yet and the TX FIFO of the gateware. Late
              * (e.g. the stream fell behind while the application waited for its first RX
@@ -2216,8 +2235,22 @@ int SoapyLiteXM2SDR::writeStream(
                 const long long air_next_ns = now_ns + queued_ns;
                 const long long intended_ns = _tx_stream.hw_next_ns -
                     (_tx_gate_offset_applied_ns - _tx_gate_pipeline_ns);
-                const long long tolerance_ns = 1000000;
-                if (intended_ns < air_next_ns - tolerance_ns) {
+                /* Late: drop as soon as it is past the error of the estimate (RX clock jitter, one
+                 * buffer of reader count). Early: stamp again only well beyond it, since a stamp
+                 * that is actually late would make the gate drop the buffer. */
+                const long long late_tolerance_ns  = 500000;
+                const long long early_tolerance_ns = 500000;
+                const long long estimate_ns = intended_ns - air_next_ns;
+                const long long plausible_bias_ns = 2000000;
+                if (!_tx_stream.hw_check_ref_valid &&
+                    estimate_ns > -plausible_bias_ns && estimate_ns < plausible_bias_ns) {
+                    _tx_stream.hw_check_ref_valid = true;
+                    _tx_stream.hw_check_ref_ns = estimate_ns;
+                }
+                /* Without a reference yet (far off, e.g. at start-up), the estimate itself. */
+                const long long drift_ns = estimate_ns -
+                    (_tx_stream.hw_check_ref_valid ? _tx_stream.hw_check_ref_ns : 0);
+                if (drift_ns < -late_tolerance_ns) {
                     _tx_stream.hw_next_ns += samples_to_ns(_tx_stream.samplerate,
                         static_cast<long long>(returnedElems));
                     _tx_stream.hw_check_count = 15; /* check again at the next write */
@@ -2225,7 +2258,7 @@ int SoapyLiteXM2SDR::writeStream(
                     _tx_stream.status_time_ns = _tx_stream.hw_next_ns;
                     return static_cast<int>(returnedElems);
                 }
-                if (intended_ns > air_next_ns + tolerance_ns)
+                if (drift_ns > early_tolerance_ns)
                     _tx_stream.hw_burst_valid = false;
             }
         }
@@ -2331,18 +2364,41 @@ int SoapyLiteXM2SDR::writeStream(
              * a timed write that starts where the previous one ended continues the burst, and
              * its samples follow without a stamp. */
             bool continues_burst = false;
+            long long gap_ns = 0;
             if (_tx_stream.hw_burst_valid) {
                 const long long expected_ns = _tx_stream.hw_burst_time_ns +
                     samples_to_ns(_tx_stream.samplerate, _tx_stream.hw_burst_samples);
                 const long long tolerance_ns = samples_to_ns(_tx_stream.samplerate, 2);
-                continues_burst = (timeNs >= expected_ns - tolerance_ns) &&
-                                  (timeNs <= expected_ns + tolerance_ns);
+                gap_ns = timeNs - expected_ns;
+                continues_burst = (gap_ns >= -tolerance_ns) && (gap_ns <= tolerance_ns);
+            }
+            /* A timed write after a gap, in the same burst (srsUE: timed writes without
+             * END_BURST): the samples of the partial buffer already went with the previous
+             * write, and that buffer already has its stamp. Appended, the new samples would go
+             * out early by the gap. A gap that ends within the current buffer is filled with
+             * zeros, the burst goes on; a longer one ends the buffer (zero tail) and the new
+             * samples start a new stamped buffer. */
+            if (!continues_burst && _tx_stream.hw_burst_valid && gap_ns > 0 &&
+                _tx_stream.remainderHandle >= 0 && _tx_stream.remainderOffset > 0) {
+                const size_t gap_samps = ns_to_samples_ceil(_tx_stream.samplerate, gap_ns);
+                if (gap_samps < _tx_stream.remainderSamps) {
+                    int zret = appendTxZeros(stream, gap_samps, timeoutUs);
+                    if (zret < 0)
+                        return zret;
+                    _tx_stream.hw_burst_samples += static_cast<long long>(gap_samps);
+                    continues_burst = true;
+                } else {
+                    int fret = submitTxRemainder(stream, true);
+                    if (fret < 0)
+                        return fret;
+                }
             }
             int ret = ensureTxRemainderBuffer(stream, timeoutUs);
             if (ret < 0)
                 return ret;
             if (!continues_burst) {
                 markTxRemainderTime(timeNs);
+                _tx_stream.hw_check_ref_valid = false;
                 _tx_stream.hw_burst_valid   = true;
                 _tx_stream.hw_burst_time_ns = timeNs;
                 _tx_stream.hw_burst_samples = 0;

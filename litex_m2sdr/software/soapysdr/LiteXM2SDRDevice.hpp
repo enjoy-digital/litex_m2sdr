@@ -405,6 +405,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     /* rf_freq_offset / rx_freq_offset / tx_freq_offset: added to the RF frequencies set on the
      * RFIC, per direction (tests only, see the README). */
     double _rf_freq_offset_hz[2] = {0.0, 0.0}; /* [SOAPY_SDR_TX, SOAPY_SDR_RX] */
+    /* tx_scale: digital gain applied to CF32 TX samples before the conversion (1.0 = none). */
+    double _tx_cf32_scale = 1.0;
     /* PLLB feedback block last written to the SI5351, so runtime retrims
      * only touch the registers that changed. */
     struct m2sdr_si5351_pllb_state _si5351_pllb = {};
@@ -568,6 +570,10 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
          * and the samples written since (SoapyUHD stamps only the first write of a burst). */
         bool hw_next_valid = false;
         unsigned hw_check_count = 0;
+        /* First estimate of a burst (just after its stamp, so on time): reference for the
+         * next checks, which then only see the drift (the estimate has a fixed bias). */
+        bool hw_check_ref_valid = false;
+        long long hw_check_ref_ns = 0;
         long long hw_next_ns = 0;
         long long hw_burst_time_ns = 0;
         long long hw_burst_samples = 0;
