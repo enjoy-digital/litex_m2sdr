@@ -2398,5 +2398,11 @@ static int64_t pcie_live_cursor(struct m2sdr_dev *dev, uint32_t loop_status_addr
     int64_t live_index  = (int64_t)(loop_status & 0xffff);
     int64_t stale_index = stale % buf_count;
     int64_t delta       = (live_index - stale_index + buf_count) % buf_count;
+    /* The live index can read a little behind the IRQ-updated count. Taken modulo the ring,
+     * that small negative delta became almost a whole ring ahead: a false RX overflow, a ring
+     * of samples skipped and the RX timeline shifted (seen with srsUE: SFN/slot sync lost
+     * after attach). A delta beyond half the ring is that case: keep the count. */
+    if (delta > buf_count / 2)
+        return stale;
     return stale + delta;
 }
