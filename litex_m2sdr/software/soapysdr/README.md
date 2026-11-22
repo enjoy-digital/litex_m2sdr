@@ -99,6 +99,8 @@ You can pass device arguments to configure the driver. These are most useful whe
     what srsRAN's UHD backend polls after each retune.
 - **TX digital scale**: `tx_scale=0.25`
   - Multiplies CF32 TX samples before the conversion to the 12-bit samples of the RFIC, which saturates. For applications whose baseband peaks go beyond full scale and that have no back-off setting (srsUE in 5G SA mode). srsRAN Project has its own: `ru_sdr: amplitude_control: tx_gain_backoff`.
+- **RF bandwidth scale**: `rf_bandwidth_scale=1.75`
+  - The automatic RF bandwidth (set from the sample rate when the application does not set one) is the sample rate times this scale (default 1.0, range 0.5 to 4). With the analog filters at the sample rate, a signal that fills most of it (5G NR 10 MHz at 11.52 MSPS: 9.36 MHz) loses SNR at the edges; 1.75 doubled the PDSCH SNR measured by srsUE.
 - **TX gating (TDD)**: `tx_gating=1`, optionally `tx_gating_lead_ns=20000` and `tx_gating_hold_ns=10000`
   - The transmitter of the RFIC is on only around the samples to send, instead of all the time the TX stream is active: from the lead time before a timed burst airs to the hold time after its last non-zero sample. The gateware drives the TXNRX pin and the AD9361 state machine is in FDD independent mode (pin control). For TDD, where RX and TX share one frequency: a transmitter left on between bursts airs its own noise and raises the noise floor of its own receiver by about 10 dB. Needs a gateware with the `txnrx_auto` feature; ignored otherwise.
 - **RF frequency offset (tests)**: `rf_freq_offset=HZ`, or per direction `tx_freq_offset=HZ` and `rx_freq_offset=HZ`
