@@ -269,7 +269,7 @@ static void aircraft_update(struct m2sdr_adsb_state *st, const struct m2sdr_adsb
         ac->has_altitude = true;
         ac->altitude_ft  = m->altitude_ft;
     }
-    if (m->has_velocity && m->has_track && !m->airspeed_true && m->velocity_subtype <= 2) {
+    if (m->has_velocity && m->has_track) {
         ac->has_velocity = true;
         ac->speed_kt     = m->speed_kt;
         ac->track_deg    = m->track_deg;

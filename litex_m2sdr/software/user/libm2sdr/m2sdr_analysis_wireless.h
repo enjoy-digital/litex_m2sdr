@@ -72,7 +72,7 @@ struct m2sdr_adsb_aircraft {
     char     callsign[9];
     bool     has_altitude;
     int      altitude_ft;
-    bool     has_velocity;
+    bool     has_velocity;      /* Ground speed and track; air speed and heading when only they came. */
     double   speed_kt, track_deg;
     int      vrate_fpm;
     bool     has_position;
