@@ -1148,6 +1148,123 @@ static void test_dvbt(void)
     free(res);
 }
 
+/* DAB */
+/*-----*/
+
+/* DAB mode I frames as EN 300 401 builds them: null symbol, phase reference, 75 symbols of
+ * pi/4-DQPSK with random data in place of the FIC and the subchannels. */
+struct dab_signal {
+    size_t start;               /* Sample of the frame the capture starts with. */
+    double freq_hz;
+    double snr_db;
+    double echo_us, echo_db;    /* A second path; echo_db -99 for none. */
+};
+
+static size_t make_dab(float complex *x, size_t max, const struct dab_signal *sig)
+{
+    enum { N = 2048, G = 504, L = 2552, NUL = 2656, FRAME = 196608, K = 1536 };
+    const double fs = M2SDR_DAB_SAMPLE_RATE;
+    static const float complex turns[4] = { 0.70710678f + 0.70710678f * I, -0.70710678f + 0.70710678f * I,
+                                            -0.70710678f - 0.70710678f * I, 0.70710678f - 0.70710678f * I };
+    struct m2sdr_fft *ifft = m2sdr_fft_alloc(N, true);
+    float complex *f = malloc(N * sizeof(*f)), *t = malloc(N * sizeof(*t)), *z = malloc(K * sizeof(*z));
+    float complex prs[K];
+    const size_t total = max + sig->start, nframes = total / FRAME + 1;
+    float complex *all = calloc(nframes * FRAME, sizeof(*all));
+    const size_t echo = (size_t)lround(sig->echo_us * 1e-6 * fs);
+    const double echo_amp = pow(10.0, sig->echo_db / 20.0);
+    size_t fr, i;
+    double power = 0;
+    int s, c;
+
+    m2sdr_dab_phase_reference(prs);
+    for (fr = 0; fr < nframes; fr++) {
+        float complex *a = all + fr * FRAME;
+
+        for (s = 0; s < 76; s++) {
+            memset(f, 0, N * sizeof(*f));
+            for (c = 0; c < K; c++) {
+                const int k = c < 768 ? c - 768 : c - 767;
+
+                z[c] = s == 0 ? prs[c] : z[c] * turns[(int)(rng_uniform() * 4) & 3];
+                f[(k + N) % N] = z[c];
+            }
+            m2sdr_fft_run(ifft, f, t);
+            for (i = 0; i < (size_t)L; i++)
+                a[NUL + (size_t)s * L + i] = t[(i + N - G) % N];
+        }
+    }
+    if (sig->echo_db > -99.0)
+        for (i = nframes * FRAME; i-- > echo;)
+            all[i] += (float)echo_amp * all[i - echo];
+    for (i = 0; i < max; i++) {
+        x[i] = all[i + sig->start] * (float complex)cexp(I * 2.0 * M_PI * sig->freq_hz * (double)i / fs);
+        power += crealf(x[i] * conjf(x[i]));
+    }
+    /* Power of the symbols: the null symbols take 1.35 % of the time. */
+    power /= (double)max * (1.0 - (double)NUL / FRAME);
+    for (i = 0; i < max; i++)
+        x[i] *= (float)(0.1 / sqrt(power));
+    add_noise(x, max, 0.01 * pow(10.0, -sig->snr_db / 10.0));
+    m2sdr_fft_free(ifft);
+    free(f);
+    free(t);
+    free(z);
+    free(all);
+    return max;
+}
+
+static void test_dab(void)
+{
+    static const struct dab_signal signals[] = {
+        /* start    freq_hz   snr  echo_us echo_db */
+        {      0,       0.0, 25.0,   0.0, -99.0 },
+        {  77777,  -12345.6, 20.0,   0.0, -99.0 },
+        { 150000,   97000.0, 15.0,  30.0,  -6.0 },   /* Offset, an echo inside the guard interval. */
+        {  20000,     300.0, 10.0,   0.0, -99.0 },
+    };
+    const double fs = M2SDR_DAB_SAMPLE_RATE;
+    const size_t max = (size_t)(0.2 * fs);
+    float complex *x = malloc(max * sizeof(*x));
+    struct m2sdr_dab_result *res = malloc(sizeof(*res));
+    size_t i;
+
+    printf("DAB:\n");
+    if (!x || !res) {
+        CHECK("allocation", 0);
+        free(x);
+        free(res);
+        return;
+    }
+    for (i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
+        const struct dab_signal *sig = &signals[i];
+        const double a2 = sig->echo_db > -99.0 ? pow(10.0, sig->echo_db / 10.0) : 0.0;
+
+        make_dab(x, max, sig);
+        printf(" start %zu, offset %.1f Hz, SNR %.0f dB%s\n", sig->start, sig->freq_hz, sig->snr_db,
+               sig->echo_db > -99.0 ? ", echo" : "");
+        CHECK("analyse", m2sdr_dab_analyse(x, max, fs, res) == 0);
+        CHECK("found, phase reference", res->found && res->prs);
+        CHECK("frames", res->frames >= 1);
+        CHECK_NEAR("carrier offset (Hz)", res->freq_error_hz, sig->freq_hz, 5.0);
+        /* The noise is over 2.048 MHz, the carriers over 1.536 MHz: 1.25 dB more on them. With
+         * an echo of amplitude a, the equalised carriers keep (1 - a^2) / (1 + a^2) of their SNR. */
+        CHECK_NEAR("SNR on the carriers (dB)", res->null_snr_db, sig->snr_db + 1.25, 0.5);
+        CHECK_NEAR("MER (dB)", res->mer_db, sig->snr_db + 1.25 + 10.0 * log10((1.0 - a2) / (1.0 + a2)), 1.0);
+        if (sig->echo_db > -99.0) {
+            CHECK_NEAR("echo delay (us)", res->echo_delay_us, sig->echo_us, 0.5);
+            CHECK_NEAR("echo level (dB)", res->echo_level_db, sig->echo_db, 1.5);
+        }
+    }
+    memset(x, 0, max * sizeof(*x));
+    add_noise(x, max, 0.01);
+    CHECK("noise", m2sdr_dab_analyse(x, max, fs, res) == 0 && !res->found);
+    CHECK("bad sample rate", m2sdr_dab_analyse(x, max, 2.4e6, res) != 0);
+    CHECK("too short", m2sdr_dab_analyse(x, 100000, fs, res) != 0);
+    free(x);
+    free(res);
+}
+
 static int write_dvbt(const char *path)
 {
     static const struct dvbt_signal sig = { 8192, 8, 2, 2, 20, 166667.0, 30.0, 0.0, -99.0 };
@@ -1196,6 +1313,53 @@ static int check_dvbt_report(const char *path)
     return 0;
 }
 
+static int write_dab(const char *path)
+{
+    static const struct dab_signal sig = { 50000, 4321.0, 25.0, 0.0, -99.0 };
+    const size_t max = (size_t)(0.25 * M2SDR_DAB_SAMPLE_RATE);
+    float complex *x = malloc(max * sizeof(*x));
+    FILE *f = fopen(path, "wb");
+    size_t i;
+
+    if (!x || !f)
+        return 1;
+    make_dab(x, max, &sig);
+    for (i = 0; i < max; i++) {
+        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
+                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
+        if (fwrite(v, sizeof(v), 1, f) != 1)
+            return 1;
+    }
+    free(x);
+    return fclose(f) == 0 ? 0 : 1;
+}
+
+static int check_dab_report(const char *path)
+{
+    static char json[32768];
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f) {
+        printf("test_m2sdr_analysis: cannot open %s\n", path);
+        return 1;
+    }
+    n = fread(json, 1, sizeof(json) - 1, f);
+    fclose(f);
+    json[n] = '\0';
+    printf("DAB report of m2sdr_analyzer:\n");
+    CHECK("ensemble and phase reference", strstr(json, "\"found\": true") && strstr(json, "\"phase_reference\": true"));
+    CHECK_NEAR("carrier offset (Hz)", json_number(json, "dab", "carrier_offset_hz"), 4321.0, 5.0);
+    CHECK("MER over 24 dB", json_number(json, "dab", "mer_db") > 24.0);
+    CHECK("SNR over 24 dB", json_number(json, "dab", "snr_db") > 24.0);
+    if (failures) {
+        printf("test_m2sdr_analysis: %d FAILED\n", failures);
+        return 1;
+    }
+    printf("test_m2sdr_analysis: DAB report checked\n");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     float complex *x;
@@ -1212,6 +1376,10 @@ int main(int argc, char **argv)
         return write_dvbt(argv[2]);
     if (argc == 3 && strcmp(argv[1], "--check-dvbt") == 0)
         return check_dvbt_report(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--write-dab") == 0)
+        return write_dab(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-dab") == 0)
+        return check_dab_report(argv[2]);
 
     x = malloc(COUNT * sizeof(*x));
     if (!x)
@@ -1225,6 +1393,7 @@ int main(int argc, char **argv)
     test_demod();
     test_lte();
     test_dvbt();
+    test_dab();
     if (failures) {
         printf("test_m2sdr_analysis: %d FAILED\n", failures);
         return 1;

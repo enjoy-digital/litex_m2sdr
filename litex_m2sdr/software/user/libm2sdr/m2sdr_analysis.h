@@ -428,6 +428,63 @@ struct m2sdr_dvbt_config {
 int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate, const struct m2sdr_dvbt_config *cfg,
                        struct m2sdr_dvbt_result *res);
 
+/* DAB */
+/*-----*/
+
+#define M2SDR_DAB_SAMPLE_RATE  2048000.0
+#define M2SDR_DAB_BINS         384     /* Groups of carriers of the per-carrier traces. */
+#define M2SDR_DAB_ECHO_BINS    512     /* Points of the echo profile. */
+#define M2SDR_DAB_MAX_POINTS   4096
+
+/* A DAB/DAB+ ensemble (EN 300 401), transmission mode I, tuned near its centre: a reception
+ * check, not a decoder. The FIC and the audio are not looked at.
+ *
+ * The sample rate is 2.048 MSPS. The frame (96 ms) is found from its null symbol, the timing
+ * and the fractional carrier offset from the guard intervals, the integer carrier offset and
+ * the channel from the phase reference symbol. The data symbols, pi/4-DQPSK, are equalised
+ * with the channel of their frame and a common phase, then compared with the four points of
+ * their symbol: even ones on the axes, odd ones between them. 200 ms of samples hold a whole
+ * frame wherever it starts. */
+struct m2sdr_dab_result {
+    bool   found;               /* Null symbols and guard intervals of mode I found. */
+    double sync_quality;        /* Correlation of the guard intervals, 0 to 1; given without a signal too. */
+    double null_depth_db;       /* Power of the symbols over that of the null symbol. */
+    double null_snr_db;         /* Signal to noise ratio on the carriers: what the null symbols leave on them
+                                 * is noise. Valid with the phase reference. The MER is below it by what
+                                 * the transmitter and the receiver add. */
+    double power_dbfs;          /* Of the capture. */
+    bool   prs;                 /* Phase reference symbol found: the figures below are valid. */
+    double prs_quality;         /* Its correlation with the one of the standard, 0 to 1. */
+    double freq_error_hz;       /* Centre of the ensemble, from the centre of the capture. */
+    int    carrier_offset;      /* Its whole carriers (1 kHz). */
+    int    frames;              /* Analysed. */
+    int    symbols;             /* Data symbols analysed. */
+    double mer_db;
+    /* Per group of carriers, the lowest first: MER, and power of the channel in dB from its
+     * mean. bins groups of carriers_per_bin carriers each. */
+    int    bins;
+    double carriers_per_bin;
+    float  mer_bin_db[M2SDR_DAB_BINS];
+    float  channel_bin_db[M2SDR_DAB_BINS];
+    /* Echo profile: impulse response of the channel in dB from its strongest path, point i at
+     * echo_start_us + i * echo_step_us from that path. */
+    float  echo_db[M2SDR_DAB_ECHO_BINS];
+    double echo_start_us, echo_step_us;
+    double echo_delay_us;       /* The strongest other path: its delay and its level. */
+    double echo_level_db;
+    double guard_us;            /* 246 us. */
+    /* Equalised data carriers, turned onto the four points (+-1 +-j) / sqrt(2), mean power 1. */
+    int    npoints;
+    float complex points[M2SDR_DAB_MAX_POINTS];
+};
+
+/* Returns 0, or -1 on a bad argument (sample rate, less than 110 ms of samples) or an
+ * allocation failure. Without an ensemble, found = false. */
+int m2sdr_dab_analyse(const float complex *x, size_t count, double sample_rate, struct m2sdr_dab_result *res);
+
+/* Phase reference symbol of mode I: prs[c] for carrier k = c - 768 (c < 768) or c - 767. */
+void m2sdr_dab_phase_reference(float complex prs[1536]);
+
 #ifdef __cplusplus
 }
 #endif
