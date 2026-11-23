@@ -1212,8 +1212,213 @@ static void test_wifi(void)
     }
 }
 
-int main(void)
+/* Captures for m2sdr_analyzer */
+/*------------------------------*/
+
+/* Samples as SC16, one channel, 12 bits. */
+static int write_sc16(const char *path, const float complex *x, size_t count)
 {
+    FILE *f = fopen(path, "wb");
+    size_t i;
+
+    if (!f)
+        return 1;
+    for (i = 0; i < count; i++) {
+        const short v[2] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
+
+        if (fwrite(v, sizeof(v), 1, f) != 1) {
+            fclose(f);
+            return 1;
+        }
+    }
+    return fclose(f) == 0 ? 0 : 1;
+}
+
+static double json_number(const char *json, const char *section, const char *name)
+{
+    char key[64];
+    const char *p;
+
+    snprintf(key, sizeof(key), "\"%s\"", section);
+    p = strstr(json, key);
+    if (!p)
+        return NAN;
+    snprintf(key, sizeof(key), "\"%s\":", name);
+    p = strstr(p, key);
+    return p ? strtod(p + strlen(key), NULL) : NAN;
+}
+
+static char *read_report(const char *path)
+{
+    static char json[262144];
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f) {
+        printf("test_m2sdr_analysis_wireless: cannot open %s\n", path);
+        return NULL;
+    }
+    n = fread(json, 1, sizeof(json) - 1, f);
+    fclose(f);
+    json[n] = '\0';
+    return json;
+}
+
+static int report_done(const char *what)
+{
+    if (failures) {
+        printf("test_m2sdr_analysis_wireless: %d FAILED\n", failures);
+        return 1;
+    }
+    printf("test_m2sdr_analysis_wireless: %s report checked\n", what);
+    return 0;
+}
+
+/* Wi-Fi: 0.11 s at 20 MSPS, a beacon, data at 24 and 54 Mbps and an ACK, 32 dB, 30 kHz off. */
+static int write_wifi(const char *path)
+{
+    const size_t count = (size_t)(0.11 * WIFI_FS);
+    float complex *x = calloc(count, sizeof(*x)), *pk = malloc(40000 * sizeof(*pk));
+    const float complex flat = 1.0f;
+    uint8_t f[512];
+    size_t len, at = 20000;
+    int i, n, rc = 1;
+
+    if (!x || !pk)
+        goto out;
+    wifi_init();
+    for (i = 0; i < 4; i++) {
+        static const int rate[4] = { 0, 4, 0, 7 };
+
+        n   = i == 0 ? wifi_beacon(f, wifi_bssid, "M2SDR-Test") : i == 2 ? wifi_ack(f, wifi_sta) : wifi_data_frame(f, wifi_bssid, wifi_sta, 400);
+        len = wifi_packet(&wifi_rates[rate[i]], f, n, 0x21 + (unsigned)i, pk);
+        wifi_add(x, count, pk, len, at, &flat, 1, 0.1, 30000.0);
+        at += len + 400000;
+    }
+    add_noise(x, count, 0.01 / pow(10.0, 32.0 / 10.0));
+    rc = write_sc16(path, x, count);
+out:
+    free(x);
+    free(pk);
+    return rc;
+}
+
+static int check_wifi_report(const char *path)
+{
+    const char *json = read_report(path);
+
+    if (!json)
+        return 1;
+    printf("Wi-Fi report of m2sdr_analyzer:\n");
+    CHECK("four packets, FCS right", json_number(json, "wifi", "packets") == 4 && json_number(json, "wifi", "fcs_ok") == 4);
+    CHECK("the network and its SSID", strstr(json, "\"bssid\": \"02:4d:32:53:44:52\"") && strstr(json, "\"ssid\": \"M2SDR-Test\""));
+    CHECK("54 Mbps data", strstr(json, "\"format\": \"54 Mbps\", \"length\": 428") != NULL);
+    CHECK_NEAR("carrier offset (Hz)", json_number(json, "packet_list", "carrier_offset_hz"), 30000.0, 3000.0);
+    CHECK("EVM under -20 dB", json_number(json, "packet_list", "evm_db") < -20.0);
+    CHECK("airtime", json_number(json, "wifi", "busy_fraction") > 0.0 && json_number(json, "wifi", "busy_fraction") < 0.05);
+    return report_done("Wi-Fi");
+}
+
+/* ADS-B: 0.5 s at 2.4 MSPS, the published messages every 10 ms, 20 dB. */
+static int write_adsb(const char *path)
+{
+    static const char *const hex[5] = { ADSB_IDENT, ADSB_ODD, ADSB_GROUND, ADSB_EVEN, ADSB_AIR };
+    const double fs = 2.4e6;
+    const size_t count = (size_t)(0.5 * fs);
+    float complex *x = calloc(count, sizeof(*x));
+    uint8_t msg[14];
+    int k, rc;
+
+    if (!x)
+        return 1;
+    for (k = 0; k < 40; k++) {
+        hex_bytes(hex[k % 5], msg, 14);
+        add_squitter(x, count, fs, (2000.0 + 10000.0 * k) * 1e-6, msg, -20.0, 20000.0);
+    }
+    add_noise(x, count, pow(10.0, -40.0 / 10.0));
+    rc = write_sc16(path, x, count);
+    free(x);
+    return rc;
+}
+
+static int check_adsb_report(const char *path)
+{
+    const char *json = read_report(path);
+    const char *p;
+
+    if (!json)
+        return 1;
+    printf("ADS-B report of m2sdr_analyzer:\n");
+    CHECK("40 messages", json_number(json, "adsb", "messages") == 40);
+    CHECK_NEAR("message rate (/s)", json_number(json, "adsb", "message_rate"), 80.0, 1e-6);
+    CHECK("KLM1023", strstr(json, "\"icao\": \"4840D6\", \"callsign\": \"KLM1023\"") != NULL);
+    p = strstr(json, "\"icao\": \"40621D\"");
+    CHECK("40621D at 38000 ft", p && json_number(p, "icao", "altitude_ft") == 38000.0);
+    CHECK_NEAR("its latitude", p ? json_number(p, "icao", "lat_deg") : NAN, 52.2572, 1e-3);
+    CHECK_NEAR("its longitude", p ? json_number(p, "icao", "lon_deg") : NAN, 3.9194, 1e-3);
+    return report_done("ADS-B");
+}
+
+/* LoRa: 1 s at 1 MSPS, an SF7 packet at 125 kHz and an SF9 one at 250 kHz. */
+static int write_lora(const char *path)
+{
+    static const struct lora_signal sig[2] = {
+        { 7, 125e3, 0.1000037, 12000.0, 5.0, 8, 0x34, 20 },
+        { 9, 250e3, 0.4000011, -8000.0, 5.0, 8, 0x12, 16 },
+    };
+    const double fs = 1e6;
+    const size_t count = (size_t)fs;
+    float complex *x = calloc(count, sizeof(*x));
+    uint16_t data[32];
+    int s, k, rc;
+
+    if (!x)
+        return 1;
+    for (s = 0; s < 2; s++) {
+        for (k = 0; k < sig[s].symbols; k++)
+            data[k] = (uint16_t)(rng_uniform() * (1 << sig[s].sf));
+        add_lora(x, count, fs, &sig[s], data, 0.1);
+    }
+    /* 5 dB in 125 kHz. */
+    add_noise(x, count, 0.01 / pow(10.0, 5.0 / 10.0) * fs / 125e3);
+    rc = write_sc16(path, x, count);
+    free(x);
+    return rc;
+}
+
+static int check_lora_report(const char *path)
+{
+    const char *json = read_report(path);
+    const char *p;
+
+    if (!json)
+        return 1;
+    printf("LoRa report of m2sdr_analyzer:\n");
+    CHECK("two packets", json_number(json, "lora", "packets") == 2);
+    p = strstr(json, "\"sf\": 7");
+    CHECK("SF7, 125 kHz, sync 0x34", p && json_number(p, "sf", "bw_hz") == 125e3 && json_number(p, "sf", "sync_word") == 0x34 &&
+          json_number(p, "sf", "symbols") == 20);
+    p = strstr(json, "\"sf\": 9");
+    CHECK("SF9, 250 kHz, sync 0x12", p && json_number(p, "sf", "bw_hz") == 250e3 && json_number(p, "sf", "sync_word") == 0x12 &&
+          json_number(p, "sf", "symbols") == 16);
+    CHECK_NEAR("SF9 offset (Hz)", p ? json_number(p, "sf", "carrier_offset_hz") : NAN, -8000.0, 100.0);
+    return report_done("LoRa");
+}
+
+int main(int argc, char **argv)
+{
+    if (argc == 3 && strcmp(argv[1], "--write-wifi") == 0)
+        return write_wifi(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-wifi") == 0)
+        return check_wifi_report(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--write-adsb") == 0)
+        return write_adsb(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-adsb") == 0)
+        return check_adsb_report(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--write-lora") == 0)
+        return write_lora(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-lora") == 0)
+        return check_lora_report(argv[2]);
     test_adsb_decode();
     test_adsb();
     test_lora();
