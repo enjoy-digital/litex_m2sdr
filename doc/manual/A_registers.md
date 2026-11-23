@@ -46,7 +46,7 @@ Bank `capability`.
 | Register | Offset | Bits | Access | Description |
 |----------------------------|-------------|--------|---------|----------------------------------------|
 | `api_version` | `0x0000` | 32 | ro | API Version of the gateware (e.g., 0x0100 for v1.0). |
-| `features` | `0x0004` | 15 | ro | Hardware feature presence bitfield. |
+| `features` | `0x0004` | 16 | ro | Hardware feature presence bitfield. |
 | `pcie_config` | `0x0008` | 5 | ro | PCIe configuration. Valid only if features.pcie is set. |
 | `eth_config` | `0x000c` | 4 | ro | Ethernet configuration. Valid only if features.eth is set. |
 | `sata_config` | `0x0010` | 4 | ro | SATA configuration. Valid only if features.sata is set. |
@@ -71,6 +71,7 @@ Fields of `features`:
 | `stream_counters` | 12 | RFIC stream loss counters (RX overflow, TX underflow) are present. |
 | `eth_tx_header` | 13 | Ethernet TX stream marks its buffers: TX header and hardware timed TX over Ethernet. |
 | `eth_tx_status` | 14 | Ethernet TX FIFO level and dropped datagrams are readable: flow control of the host. |
+| `txnrx_auto` | 15 | TX gating of the RFIC on the TXNRX pin (ad9361 txnrx_control, header tx_lead). |
 
 Fields of `pcie_config`:
 
@@ -489,6 +490,8 @@ Bank `ad9361`.
 | `rx_overflow_` `events` | `0x0078` | 32 | ro | RX overflow events: times the RX stream started losing words. |
 | `rx_overflow_` `words` | `0x007c` | 32 | ro | RX words lost (64-bit words, counted by 16). |
 | `tx_underflow_` `events` | `0x0080` | 32 | ro | TX underflow events: times the TX stream ran dry after providing words. |
+| `txnrx_control` | `0x0084` | 1 | rw | `0b0`: TXNRX pin from config.txnrx. `0b1`: TXNRX pin driven by the TX activity (TDD, ENSM in pin control). Reset `0x0`. |
+| `txnrx_hold` | `0x0088` | 32 | rw | TX on time (sys clock cycles) after the last non-zero TX sample, in auto mode. Reset `0x4e2`. |
 
 Fields of `config`:
 
@@ -572,6 +575,7 @@ Bank `header`.
 | `tx_offset` | `0x0030` | 64 | rw | Timed-TX pipeline offset (ns): added to the FPGA time before comparing against the header air-time so the signal is on the air at exactly the timestamp (loopback-calibrated). Reset `0x0`. |
 | `tx_underflow` | `0x0038` | 32 | ro | TX underflow count: timed frames that missed their air-time (dropped whole; the RFIC aired zeros for them). |
 | `rx_offset` | `0x003c` | 64 | rw | RX timestamp offset (ns): subtracted from the FPGA time before insertion into the RX header, referring the stamp back to the antenna plane (the mirror of tx_offset). Reset `0x0`. |
+| `tx_lead` | `0x0044` | 32 | rw | TX lead time (ns): the TX path of the RFIC is turned on this long before a timed frame airs, when the TX gating of the RFIC (ad9361 txnrx_control.auto) is enabled. Reset `0x4e20`. |
 
 Fields of `tx_control`:
 
