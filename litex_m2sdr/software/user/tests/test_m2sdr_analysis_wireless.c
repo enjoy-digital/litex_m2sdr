@@ -363,10 +363,179 @@ static void test_adsb(void)
     }
 }
 
+/* LoRa */
+/*------*/
+
+struct lora_signal {
+    int    sf;
+    double bw;
+    double start_s;
+    double freq_hz;
+    double snr_db;          /* In the bandwidth. */
+    int    preamble;
+    int    sync_word;
+    int    symbols;
+};
+
+/* A LoRa packet at fs: preamble of up-chirps, the two symbols of the sync word ((sw >> 4) * 8 and
+ * (sw & 15) * 8), 2.25 down-chirps, data symbols; continuous phase. Symbol s starts at
+ * -bw/2 + s bw / 2^sf and wraps at bw/2. */
+static void add_lora(float complex *x, size_t count, double fs, const struct lora_signal *sig,
+                     const uint16_t *data, double amp)
+{
+    const int n = 1 << sig->sf;
+    const double t_sym = n / sig->bw;
+    const int nseg = sig->preamble + 2 + 3 + sig->symbols;
+    double phase = 2.0 * M_PI * rng_uniform();
+    size_t i;
+
+    for (i = (size_t)ceil(sig->start_s * fs); i < count; i++) {
+        const double t = ((double)i + 0.5) / fs - sig->start_s;
+        double u = t / t_sym, fr;
+        int seg = (int)floor(u), s = 0, down = 0;
+
+        if (seg >= sig->preamble + 4) {
+            /* The quarter down-chirp, then the data from 0.25 symbol later. */
+            if (u < sig->preamble + 4.25) {
+                seg  = sig->preamble + 4;
+                down = 1;
+            } else {
+                u  -= 0.25;
+                seg = (int)floor(u);
+                if (seg >= nseg - 1)
+                    break;
+                s = data[seg - sig->preamble - 4];
+            }
+        } else if (seg >= sig->preamble + 2) {
+            down = 1;
+        } else if (seg >= sig->preamble) {
+            s = seg == sig->preamble ? (sig->sync_word >> 4) * 8 : (sig->sync_word & 15) * 8;
+        }
+        u -= floor(u);
+        fr = down ? sig->bw / 2.0 - sig->bw * u : sig->bw * fmod((double)s / n + u, 1.0) - sig->bw / 2.0;
+        x[i] += (float complex)(amp * cexp(I * phase));
+        phase += 2.0 * M_PI * (fr + sig->freq_hz) / fs;
+    }
+}
+
+/* Packets of sigs[], the noise of the SNR of the first one; the SNR of the others is checked when
+ * they do not overlap (else it reads the SINR). */
+static void test_lora_signal(float complex *x, size_t count, double fs, const struct lora_signal *sigs, int nsig,
+                             const struct m2sdr_lora_config *cfg, bool check_others)
+{
+    struct m2sdr_lora_result *res = malloc(sizeof(*res));
+    uint16_t data[4][M2SDR_LORA_MAX_SYMBOLS];
+    double amp = 0.1, t0;
+    int s, k;
+
+    if (!res) {
+        CHECK("allocation", 0);
+        return;
+    }
+    memset(x, 0, count * sizeof(*x));
+    for (s = 0; s < nsig; s++) {
+        for (k = 0; k < sigs[s].symbols; k++)
+            data[s][k] = (uint16_t)(rng_uniform() * (1 << sigs[s].sf));
+        add_lora(x, count, fs, &sigs[s], data[s], amp * pow(10.0, (sigs[s].snr_db - sigs[0].snr_db) / 20.0));
+    }
+    /* Noise over fs, of power amp^2 / snr in the bandwidth of the first packet. */
+    add_noise(x, count, amp * amp / pow(10.0, sigs[0].snr_db / 10.0) * fs / sigs[0].bw);
+    t0 = now_ms();
+    CHECK("analyse", m2sdr_lora_analyse(x, count, fs, cfg, res) == 0);
+    printf("  time of one analysis: %.1f ms for %.0f ms of samples\n", now_ms() - t0, count / fs * 1e3);
+    printf("  packets: %d\n", res->packets);
+    CHECK("packets", res->packets == nsig && res->npackets == nsig);
+    for (s = 0; s < nsig && s < res->npackets; s++) {
+        const struct lora_signal *sig = &sigs[s];
+        const struct m2sdr_lora_packet *pk = &res->packet[s];
+        const double t_sym = (1 << sig->sf) / sig->bw, bin_hz = sig->bw / (1 << sig->sf);
+        int wrong = 0;
+
+        printf("  SF%d, %.0f kHz, offset %.1f kHz, SNR %.1f dB\n", sig->sf, sig->bw / 1e3, sig->freq_hz / 1e3, sig->snr_db);
+        CHECK("SF and bandwidth", pk->sf == sig->sf && pk->bw_hz == sig->bw);
+        /* The peaks are interpolated to a small part of a bin at these SNR. */
+        CHECK_NEAR("carrier offset (Hz)", pk->freq_error_hz, sig->freq_hz, 0.1 * bin_hz);
+        /* The timing comes from the same peaks: a small part of a sample of the bandwidth. */
+        CHECK_NEAR("start (us)", pk->time_s * 1e6, sig->start_s * 1e6, 0.5e6 / sig->bw);
+        if (s == 0 || check_others) {
+            /* The peak of a chirp of SNR r holds N^2 A^2, with N sigma^2 of noise: its power
+             * varies by sqrt(2 / (N r)), over the P chirps of the preamble by sqrt(P) less. The
+             * noise of a bin is the median of N bins: 1.2 / sqrt(N P). Three times that, and
+             * 0.3 dB for the chirp cut at the band edges (its SNR stops near 21 dB at SF7). */
+            const double nn = 1 << sig->sf, r = pow(10.0, sig->snr_db / 10.0);
+            const double rel = sqrt(2.0 / (nn * r * sig->preamble) + 1.44 / (nn * sig->preamble) * pow(1.0 + 1.0 / (nn * r), 2.0));
+
+            CHECK_NEAR("SNR (dB)", pk->snr_db, sig->snr_db, 3.0 * 4.34 * rel + 0.3);
+        }
+        if (nsig == 1)
+            /* The chirp and the noise of the bandwidth: amp^2 (1 + 1 / snr), within 0.2 dB. */
+            CHECK_NEAR("RSSI (dBFS)", pk->rssi_dbfs, 10.0 * log10(amp * amp * (1.0 + pow(10.0, -sig->snr_db / 10.0))), 0.2);
+        CHECK("preamble, sync word", pk->preamble_symbols == sig->preamble && pk->sync && pk->sync_word == sig->sync_word);
+        for (k = 0; k < sig->symbols && k < pk->symbols; k++)
+            wrong += pk->symbol[k] != data[s][k];
+        CHECK("data symbols", pk->symbols == sig->symbols && wrong == 0 && pk->complete);
+        CHECK_NEAR("airtime (ms)", pk->airtime_s * 1e3, (sig->preamble + 4.25 + sig->symbols) * t_sym * 1e3, 1e3 / sig->bw);
+    }
+    free(res);
+}
+
+static void test_lora(void)
+{
+    static const struct lora_signal single[] = {
+        /* sf  bw       start      freq_hz  snr  pre  sync  symbols */
+        {  7, 125e3, 0.0100037,  12300.0,  0.0,   8, 0x34, 20 },
+        {  9, 250e3, 0.0033333, -20000.0, -8.0,   8, 0x12, 30 },
+        {  8, 500e3, 0.0011111,  40000.0,  5.0,  12, 0x34, 40 },
+        { 12, 125e3, 0.0500000,   3000.0, -15.0,  8, 0x34, 10 },
+    };
+    static const struct lora_signal pair[] = {
+        /* Two SFs on the same channel at once: orthogonal. The preamble of the second is under
+         * the data of the first: its SNR reads the SINR. */
+        {  7, 125e3, 0.0200000,   1000.0,  3.0,   8, 0x34, 40 },
+        { 10, 125e3, 0.0300000,   1000.0,  0.0,   8, 0x34,  8 },
+    };
+    const double fs = 1e6;
+    const size_t max = (size_t)(0.85 * fs);   /* The SF12 packet and one symbol after it. */
+    float complex *x = malloc(max * sizeof(*x));
+    struct m2sdr_lora_result *res = malloc(sizeof(*res));
+    struct m2sdr_lora_config cfg;
+    size_t i;
+
+    printf("LoRa:\n");
+    if (!x || !res) {
+        CHECK("allocation", 0);
+        free(x);
+        free(res);
+        return;
+    }
+    for (i = 0; i < sizeof(single) / sizeof(single[0]); i++) {
+        const size_t count = single[i].sf == 12 ? max : max / 4;
+
+        test_lora_signal(x, count, fs, &single[i], 1, NULL, true);
+    }
+    printf(" two packets at once\n");
+    test_lora_signal(x, max / 2, fs, pair, 2, NULL, false);
+    printf(" known SF and bandwidth\n");
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.sf    = 9;
+    cfg.bw_hz = 250e3;
+    test_lora_signal(x, max / 4, fs, &single[1], 1, &cfg, true);
+
+    memset(x, 0, max * sizeof(*x));
+    add_noise(x, max, 0.01);
+    CHECK("noise: no packet", m2sdr_lora_analyse(x, max, fs, NULL, res) == 0 && res->packets == 0);
+    CHECK("bad sample rate", m2sdr_lora_analyse(x, max, 1.1e6, NULL, res) != 0);
+    CHECK("bad SF", (cfg.sf = 6, m2sdr_lora_analyse(x, max, fs, &cfg, res) != 0));
+    CHECK("too short", m2sdr_lora_analyse(x, 1000, fs, NULL, res) != 0);
+    free(x);
+    free(res);
+}
+
 int main(void)
 {
     test_adsb_decode();
     test_adsb();
+    test_lora();
     if (failures) {
         printf("test_m2sdr_analysis_wireless: %d FAILED\n", failures);
         return 1;
