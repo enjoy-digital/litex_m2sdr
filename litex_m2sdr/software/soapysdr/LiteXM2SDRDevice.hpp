@@ -572,6 +572,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         long long timed_tx_latency_ns = 0;
         long long timed_tx_late_margin_ns = 0;
         bool timed_tx_late_margin_configured = false;
+        bool strict_timing = false;       /* tx_strict_timing: terminal timing (see writeStream) */
         bool tx_timeline_valid = false;
         long long tx_next_time_ns = 0;
         /* Hardware timed TX: start time and length of the burst being written. A timed write
@@ -585,6 +586,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
          * next checks, which then only see the drift (the estimate has a fixed bias). */
         bool hw_check_ref_valid = false;
         bool hw_catchup = false;          /* dropping samples until slightly early */
+        bool hw_restamp_on_time = false;  /* next stamp comes from the check (on time or early) */
+        bool hw_ref_pending = false;      /* early stamp made: take the reference at the next check */
         long long hw_check_ref_ns = 0;
         long long hw_next_ns = 0;
         long long hw_burst_time_ns = 0;
