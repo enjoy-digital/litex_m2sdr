@@ -349,8 +349,8 @@ struct an_ui {
     int    wf_palette;
     bool   wf_on;
     bool   wf_auto;                /* Levels to be set from the next result. */
+    int    tab;                    /* View shown: its index in an_modes[]. */
     /* Phase noise. */
-    int    tab;                    /* View shown: 0 spectrum, 1 time, 2 statistics, 3 phase noise, 4 modulation, 5 LTE, 6 DVB-T, 7 DAB. */
     bool   pn_am;
     struct an_floor *fl;
     const char *floor_path;        /* Where "Store as floor" writes; NULL: nowhere. */
@@ -374,6 +374,14 @@ struct an_ui {
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
 };
+
+int  run_gui(struct an_source *src, const struct an_settings *set, int first_view, struct an_floor *fl,
+             const char *floor_path);
+
+/* Views of the spectrum. */
+void draw_spectrum(struct an_ui *ui, bool live, bool *changed);
+void draw_time(struct an_ui *ui, bool live, bool *changed);
+void draw_statistics(struct an_ui *ui, bool live, bool *changed);
 
 /* Widgets of the views. */
 uint32_t palette_color(int palette, float t);
