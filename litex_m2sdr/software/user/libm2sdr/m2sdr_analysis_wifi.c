@@ -147,7 +147,7 @@ static int parity7(unsigned v)
 }
 
 /* Viterbi of the rate 1/2 code, K = 7: soft[2 t] and soft[2 t + 1] the A and B of bit t (> 0
- * for a 1, 0 for a punctured one), the code ending in state 0 (tail). dec holds nbits words.
+ * for a 1, 0 for a punctured one), from state 0. dec holds nbits words.
  *
  * State: the last 6 bits, the newest in bit 5. Old states 2j and 2j + 1 lead to new states j
  * (bit 0) and j + 32 (bit 1); both generators take the new bit, so that a 1 inverts the two
@@ -193,7 +193,12 @@ static void viterbi(const float *soft, int nbits, uint8_t *out, uint64_t *dec)
         }
         memcpy(m, nm, sizeof(m));
     }
+    /* From the best state: the tail brings the code to state 0, but the pad bits after it
+     * (scrambled, not zero) move it on. */
     ns = 0;
+    for (s = 1; s < 64; s++)
+        if (m[s] > m[ns])
+            ns = s;
     for (t = nbits - 1; t >= 0; t--) {
         out[t] = (uint8_t)(((unsigned)ns >> 5) & 1u);
         ns = (int)((((unsigned)ns & 31u) << 1) | ((dec[t] >> ns) & 1u));
