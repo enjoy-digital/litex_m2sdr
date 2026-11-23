@@ -146,6 +146,7 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_analysis_dvbt.o \
 	libm2sdr/m2sdr_analysis_dab.o \
 	libm2sdr/m2sdr_analysis_dvbt2.o \
+	libm2sdr/m2sdr_analysis_fm.o \
 	libm2sdr/m2sdr_hal_litepcie.o \
 	libm2sdr/m2sdr_hal_liteeth.o \
 	liblitepcie/litepcie_dma.o \
@@ -521,6 +522,7 @@ install_dev: $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 	install -m 644 libm2sdr/m2sdr_cal.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_fm.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_analysis.h $(PREFIX)/include/litex_m2sdr/libm2sdr
+	install -m 644 libm2sdr/m2sdr_analysis_fm.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -d $(PREFIX)/share/litex_m2sdr/examples
 	@for ex in example_sync_rx example_sync_tx example_tone_tx example_rx_n; do \
 		if [ -f ../../doc/libm2sdr/$$ex.c ]; then \
