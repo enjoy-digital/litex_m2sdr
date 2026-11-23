@@ -136,6 +136,64 @@ uint32_t m2sdr_adsb_crc(const uint8_t *msg, int bits);
  * when it is not a DF17 or DF18. The CRC is not checked. */
 int m2sdr_adsb_decode(const uint8_t msg[14], struct m2sdr_adsb_message *m);
 
+/* LoRa */
+/*------*/
+
+#define M2SDR_LORA_MAX_PACKETS   32
+#define M2SDR_LORA_MAX_SYMBOLS   256
+
+struct m2sdr_lora_packet {
+    double   time_s;            /* Start of the preamble, from the first sample. */
+    int      sf;                /* Spreading factor, 7 to 12. */
+    double   bw_hz;             /* 125, 250 or 500 kHz. */
+    double   freq_error_hz;     /* Carrier, from the centre of the capture (within +-bw/4). */
+    double   rssi_dbfs;         /* Power in the bandwidth over the packet, noise included. */
+    double   snr_db;            /* Signal over the noise in the bandwidth, from the preamble: the
+                                 * LoRa figure, below 0 dB down to the limit of the SF. */
+    int      preamble_symbols;  /* Up-chirps (8 in LoRaWAN). */
+    bool     sync;              /* Sync word and down-chirps found: the data symbols follow. */
+    int      sync_symbols[2];   /* The two of the sync word. */
+    int      sync_word;         /* From them, when both are multiples of 8: 0x34 public (LoRaWAN),
+                                 * 0x12 private; -1 otherwise. */
+    int      symbols;           /* Data symbols demodulated (the first M2SDR_LORA_MAX_SYMBOLS in symbol[]). */
+    bool     complete;          /* The packet ends inside the capture. */
+    double   airtime_s;         /* From the start of the preamble to the end of the last symbol. */
+    uint16_t symbol[M2SDR_LORA_MAX_SYMBOLS];   /* 0 to 2^sf - 1. */
+};
+
+/* Known parameters, to search less: 0 for each found. */
+struct m2sdr_lora_config {
+    int      sf;
+    double   bw_hz;
+};
+
+/* LoRa chirp spread spectrum packets (868 MHz ISM band or any), tuned on their channel.
+ *
+ * Each bandwidth is cut out of the capture (FFT, then the bins of the bandwidth back to time:
+ * a sample rate of the bandwidth), which needs sample_rate / bw_hz to be a power of two (1 MSPS
+ * takes the three bandwidths). Each spreading factor then dechirps windows of 2^sf samples:
+ * four windows or more in a row with the same strong FFT peak are up-chirps of a preamble. The
+ * peak of the down-chirps after them gives, with that of the up-chirps, the carrier offset and
+ * the timing; the symbols are then read on their own windows, the FFT peak of each. A packet
+ * taken by the wrong bandwidth and SF of the same chirp slope (SF + 2 at twice the bandwidth) is
+ * left to the right one, the stronger peak.
+ *
+ * Not decoded: the header and the payload (Gray mapping, interleaving, Hamming code, whitening,
+ * CRC): symbol[] holds the FFT bins as received. */
+struct m2sdr_lora_result {
+    int      packets;           /* Found (in packet[], the first M2SDR_LORA_MAX_PACKETS). */
+    double   busy_fraction;     /* Time of the capture with a packet on the air. */
+    double   power_dbfs;        /* Of the capture. */
+    int      npackets;
+    struct m2sdr_lora_packet packet[M2SDR_LORA_MAX_PACKETS];
+};
+
+/* cfg may be NULL. Returns 0, or -1 on a bad argument (no bandwidth searched divides the sample
+ * rate by a power of two, less than 16 symbols of SF7 at 500 kHz) or an allocation failure.
+ * Without a packet, packets = 0. */
+int m2sdr_lora_analyse(const float complex *x, size_t count, double sample_rate,
+                       const struct m2sdr_lora_config *cfg, struct m2sdr_lora_result *res);
+
 #ifdef __cplusplus
 }
 #endif
