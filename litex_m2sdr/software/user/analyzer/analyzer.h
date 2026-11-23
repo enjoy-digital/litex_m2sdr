@@ -107,6 +107,8 @@
 #define AN_GNSS_DEFAULT_MS      10            /* Milliseconds of a GPS acquisition. */
 #define AN_TWO_LOG2             18            /* Samples of a coherence or direction finding capture: 2^18. */
 #define AN_COHERENCE_FFT_LEN    1024          /* Default of the coherence. */
+#define AN_DF_CAL_SPAN_HZ       5e6           /* A stored calibration serves this far from its frequency. */
+#define AN_DF_CAL_MAX           64            /* Calibrations stored per board. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 /* Monitoring. */
@@ -171,6 +173,13 @@ struct an_settings {
     /* Two channels: RX1 and RX2 captured together. */
     bool   coherence_on;           /* Coherence, gain, phase and delay between RX1 and RX2. */
     int    coherence_fft_len;
+    bool   df_on;                  /* Direction finding with two antennas. */
+    double df_spacing_m;           /* 0: half the wavelength. */
+    double df_freq_hz;             /* Signal, from the centre; 0: the strongest. */
+    double df_bw_hz;               /* 0: the main lobe of its peak. */
+    bool   df_cal_given;           /* df_cal_deg given: the stored calibration is not used. */
+    double df_cal_deg;
+    bool   df_cal_store;           /* --report: store the phase read as the calibration (source at broadside). */
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -308,6 +317,12 @@ struct an_result {
     bool   two_channels;           /* The capture had both channels: the modes of two are measured. */
     struct m2sdr_coherence_result coherence;
     bool   coherence_valid;
+    struct m2sdr_df_result df;
+    bool   df_valid;
+    double df_spacing_m;           /* Used. */
+    double df_cal_deg;             /* Used, */
+    int    df_cal_source;          /* from: 0 none, 1 the command line or the view, 2 the store. */
+    double df_cal_freq_hz;         /* The frequency of the stored one. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
@@ -432,6 +447,13 @@ struct an_mode {
 
 /* The views and modes, in the order of their tabs, NULL terminated. */
 extern const struct an_mode *const an_modes[];
+
+/* Direction finding: phase of RX2 against RX1 of the board, per frequency, from a source at
+ * broadside; kept per board (or in the file of --df-cal-file) in a text file (mode_df.c). */
+int    df_cal_init(uint64_t dna);
+const char *df_cal_file(void);
+bool   df_cal_lookup(double freq_hz, double *phase_deg, double *at_hz);
+int    df_cal_store(double freq_hz, double phase_deg);
 
 /* The flag of a mode in settings; NULL for a view of the spectrum. */
 static inline bool *an_mode_flag(const struct an_mode *m, struct an_settings *set)
