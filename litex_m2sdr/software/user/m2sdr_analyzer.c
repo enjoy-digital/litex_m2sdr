@@ -66,6 +66,8 @@
 #define AN_DEMOD_MIN_LOG2       14
 #define AN_DEMOD_MAX_LOG2       22
 #define AN_LTE_SECONDS          0.045         /* Capture of an LTE analysis: a whole frame wherever it starts. */
+#define AN_DVBT_SECONDS         0.15          /* Capture of a DVB-T analysis: a TPS frame wherever it starts. */
+#define AN_DVBT_RATE            (64e6 / 7.0)  /* Elementary rate of an 8 MHz DVB-T channel. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 
@@ -94,6 +96,7 @@ struct an_settings {
     int    demod_log2;             /* Its capture: 2^demod_log2 samples. */
     struct m2sdr_demod_config demod;
     bool   lte_on;                 /* LTE downlink carrier. */
+    bool   dvbt_on;                /* DVB-T multiplex. */
 };
 
 static const char *const window_names[] = { "Hann", "Flat-top", "Blackman-Harris", "Rectangular" };
@@ -560,6 +563,8 @@ struct an_result {
     bool   demod_valid;            /* Measured; demod.signal and demod.locked say what was found. */
     struct m2sdr_lte_result lte;
     bool   lte_valid;              /* Measured: the sample rate was one of LTE; lte.found says the rest. */
+    struct m2sdr_dvbt_result dvbt;
+    bool   dvbt_valid;             /* Measured: the sample rate was one of DVB-T; dvbt.found says the rest. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
@@ -577,6 +582,8 @@ static size_t capture_samples(const struct an_settings *set)
         count = (size_t)1 << set->demod_log2;
     if (set->lte_on && count < (size_t)(AN_LTE_SECONDS * set->sample_rate))
         count = (size_t)(AN_LTE_SECONDS * set->sample_rate);
+    if (set->dvbt_on && count < (size_t)(AN_DVBT_SECONDS * set->sample_rate))
+        count = (size_t)(AN_DVBT_SECONDS * set->sample_rate);
     return count < AN_TIME_POINTS ? AN_TIME_POINTS : count;
 }
 
@@ -655,6 +662,12 @@ static int analyse(const float complex *x, size_t count, const struct an_setting
         const size_t n = (size_t)(AN_LTE_SECONDS * set->sample_rate);
 
         res->lte_valid = m2sdr_lte_analyse(x, count < n ? count : n, set->sample_rate, &res->lte) == 0;
+    }
+    res->dvbt_valid = false;
+    if (set->dvbt_on) {
+        const size_t n = (size_t)(AN_DVBT_SECONDS * set->sample_rate);
+
+        res->dvbt_valid = m2sdr_dvbt_analyse(x, count < n ? count : n, set->sample_rate, &res->dvbt) == 0;
     }
     res->time_count = count < AN_TIME_POINTS ? count : AN_TIME_POINTS;
     memcpy(res->time, x, res->time_count * sizeof(*x));
@@ -842,7 +855,7 @@ static void report_json(const struct an_source *src, const struct an_result *res
     print_json_number("gain_imbalance_db", res->stats.gain_imbalance_db, false);
     print_json_number("quadrature_deg", res->stats.quadrature_deg, false);
     print_json_number("clipped", res->stats.clipped, true);
-    printf("  }%s\n", set->pn_on || set->demod_on || set->lte_on ? "," : "");
+    printf("  }%s\n", set->pn_on || set->demod_on || set->lte_on || set->dvbt_on ? "," : "");
     if (set->lte_on) {
         const struct m2sdr_lte_result *l = &res->lte;
         static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
@@ -881,6 +894,38 @@ static void report_json(const struct an_source *src, const struct an_result *res
                 print_json_number("data_evm_percent", 100.0 * l->data_evm, true);
             } else {
                 printf("\n");
+            }
+        }
+        printf("  }%s\n", set->pn_on || set->demod_on || set->dvbt_on ? "," : "");
+    }
+    if (set->dvbt_on) {
+        const struct m2sdr_dvbt_result *t = &res->dvbt;
+        const bool ok = res->dvbt_valid && t->found;
+
+        printf("  \"dvbt\": {\n");
+        print_json_number("sync_quality", res->dvbt_valid ? t->sync_quality : 0.0, false);
+        printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
+        if (ok) {
+            printf("    \"mode\": \"%dk\",\n", t->fft_len / 1024);
+            printf("    \"guard_interval\": \"1/%d\",\n", t->guard);
+            print_json_number("power_db", t->power_dbfs + off, false);
+            printf("    \"pilots\": %s%s\n", t->pilots ? "true" : "false", t->pilots ? "," : "");
+            if (t->pilots) {
+                print_json_number("carrier_hz", set->freq_hz + t->freq_error_hz, false);
+                print_json_number("carrier_offset_hz", t->freq_error_hz, false);
+                printf("    \"tps\": %s,\n", t->tps ? "true" : "false");
+                if (t->tps) {
+                    printf("    \"constellation\": \"%s\",\n", m2sdr_modulation_name(t->tps_modulation));
+                    printf("    \"hierarchy\": %d,\n", t->tps_hierarchy);
+                    printf("    \"code_rate_hp\": \"%s\",\n", t->code_rate_hp);
+                    printf("    \"code_rate_lp\": \"%s\",\n", t->code_rate_lp);
+                    if (t->cell_id >= 0)
+                        printf("    \"cell_id\": %d,\n", t->cell_id);
+                }
+                printf("    \"mer_against\": \"%s\",\n", m2sdr_modulation_name(t->modulation));
+                print_json_number("echo_delay_us", t->echo_delay_us, false);
+                print_json_number("echo_level_db", t->echo_level_db, false);
+                print_json_number("mer_db", t->mer_db, true);
             }
         }
         printf("  }%s\n", set->pn_on || set->demod_on ? "," : "");
@@ -1059,6 +1104,42 @@ static void report_text(const struct an_source *src, const struct an_result *res
         }
     }
 
+    if (set->dvbt_on) {
+        const struct m2sdr_dvbt_result *t = &res->dvbt;
+
+        printf("\nDVB-T:\n");
+        if (!res->dvbt_valid) {
+            printf("  The sample rate must be the one of the channel: 9.142857 MSPS (8 MHz), 8 MSPS (7 MHz)\n"
+                   "  or 6.857143 MSPS (6 MHz).\n");
+        } else if (!t->found) {
+            printf("  No multiplex found (guard interval correlation %.3f).\n", t->sync_quality);
+        } else {
+            printf("  Mode       : %dk, guard interval 1/%d (%.0f us), %.1f %s\n", t->fft_len / 1024, t->guard, t->guard_us,
+                   t->power_dbfs + off, unit);
+            printf("  Sync       : guard correlation %.2f (about %.1f dB S/N)\n", t->sync_quality, t->sync_snr_db);
+            if (!t->pilots) {
+                printf("  Pilots     : not found (coherence %.2f): too much noise for the figures below.\n", t->pilot_quality);
+            } else {
+                printf("  Multiplex  : %.6f MHz (%+.1f Hz from the centre)\n", (set->freq_hz + t->freq_error_hz) / 1e6, t->freq_error_hz);
+                if (t->tps) {
+                    printf("  TPS        : %s, hierarchy %s, code rate %s", m2sdr_modulation_name(t->tps_modulation),
+                           t->tps_hierarchy ? "yes" : "none", t->code_rate_hp);
+                    if (t->tps_hierarchy)
+                        printf(" (LP %s, alpha %d)", t->code_rate_lp, t->tps_hierarchy);
+                    if (t->cell_id >= 0)
+                        printf(", cell %d", t->cell_id);
+                    printf("\n");
+                } else {
+                    printf("  TPS        : not read\n");
+                }
+                printf("  MER        : %.1f dB against %s, over %d symbols\n", t->mer_db, m2sdr_modulation_name(t->modulation), t->symbols);
+                if (t->echo_level_db > -99.0)
+                    printf("  Echo       : strongest at %+.2f us, %.1f dB (guard interval %.0f us)\n", t->echo_delay_us,
+                           t->echo_level_db, t->guard_us);
+            }
+        }
+    }
+
     if (set->demod_on) {
         const struct m2sdr_demod_result *d = &res->demod;
 
@@ -1216,6 +1297,11 @@ static const ImU32 lte_mod_colors[M2SDR_MOD_COUNT] = {
 #define LTE_SCALE_W        52.0f     /* Room of the scale, right of the grid. */
 #define LTE_NARROW_W       700.0f    /* Under this width of the view, the constellation goes under the grid. */
 #define AN_LTE_HOLD        10        /* Captures a frame stays shown without a cell, or its symbols without data. */
+#define AN_DVBT_HISTORY    120       /* Captures of the MER trace. */
+#define DVBT_UHF_BASE_HZ   306e6     /* European UHF channel n is centred at 306 + 8 n MHz (21 to 69). */
+#define DVBT_COL_MER       0xff40c0ffu
+#define DVBT_COL_CHANNEL   0xffffb040u
+#define DVBT_COL_NEEDED    0xa04040ffu
 
 /* Shared between the worker, which captures and analyses, and the UI, which draws. */
 struct an_shared {
@@ -1258,7 +1344,7 @@ struct an_ui {
     bool   wf_on;
     bool   wf_auto;                /* Levels to be set from the next result. */
     /* Phase noise. */
-    int    tab;                    /* View shown: 0 spectrum, 1 time, 2 statistics, 3 phase noise, 4 modulation, 5 LTE. */
+    int    tab;                    /* View shown: 0 spectrum, 1 time, 2 statistics, 3 phase noise, 4 modulation, 5 LTE, 6 DVB-T. */
     bool   pn_am;
     struct an_floor *fl;
     const char *floor_path;        /* Where "Store as floor" writes; NULL: nowhere. */
@@ -1275,6 +1361,11 @@ struct an_ui {
     uint8_t lte_points_mod[M2SDR_LTE_MAX_POINTS];
     int    lte_npoints, lte_points_sfn;
     unsigned lte_points_seq;
+    /* DVB-T: MER of the last captures, oldest first, for as long as the tuning stays. */
+    float  dvbt_mer[AN_DVBT_HISTORY];
+    int    dvbt_nmer;
+    double dvbt_freq_hz, dvbt_rate;
+    int    dvbt_channel;
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
 };
@@ -2595,6 +2686,260 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
     igEndGroup();
 }
 
+/* DVB-T */
+/*-------*/
+
+/* C/N for quasi error free reception in a Gaussian channel (EN 300 744, annex A), by
+ * constellation and code rate: what the MER must at least reach. NAN when not known. */
+static double dvbt_needed_db(const struct m2sdr_dvbt_result *t)
+{
+    static const double cn[3][5] = {
+        {  3.1,  4.9,  5.9,  6.9,  7.7 },
+        {  8.8, 11.1, 12.5, 13.5, 13.9 },
+        { 14.4, 16.5, 18.0, 19.3, 20.1 },
+    };
+    static const char *const rates[5] = { "1/2", "2/3", "3/4", "5/6", "7/8" };
+    int m, r;
+
+    if (!t->tps || t->tps_hierarchy)
+        return NAN;
+    m = t->tps_modulation == M2SDR_MOD_QPSK ? 0 : t->tps_modulation == M2SDR_MOD_16QAM ? 1 : 2;
+    for (r = 0; r < 5; r++)
+        if (strcmp(t->code_rate_hp, rates[r]) == 0)
+            return cn[m][r];
+    return NAN;
+}
+
+/* MER of each result, kept while the tuning stays the same: the trace to follow when moving an
+ * antenna. A capture without the pilots counts as 0 dB. */
+static void dvbt_keep(struct an_ui *ui)
+{
+    const struct an_result *res = &ui->res;
+
+    if (!res->set.dvbt_on || !res->dvbt_valid)
+        return;
+    if (res->set.freq_hz != ui->dvbt_freq_hz || res->set.sample_rate != ui->dvbt_rate || res->set.channel != ui->dvbt_channel) {
+        ui->dvbt_freq_hz = res->set.freq_hz;
+        ui->dvbt_rate    = res->set.sample_rate;
+        ui->dvbt_channel = res->set.channel;
+        ui->dvbt_nmer    = 0;
+    }
+    if (ui->dvbt_nmer == AN_DVBT_HISTORY) {
+        memmove(ui->dvbt_mer, ui->dvbt_mer + 1, (AN_DVBT_HISTORY - 1) * sizeof(ui->dvbt_mer[0]));
+        ui->dvbt_nmer--;
+    }
+    ui->dvbt_mer[ui->dvbt_nmer++] = res->dvbt.found && res->dvbt.pilots ? (float)res->dvbt.mer_db : 0.0f;
+}
+
+static void dvbt_retune(struct an_ui *ui, double freq_hz, bool *changed)
+{
+    ui->set.freq_hz = freq_hz;
+    traces_reset(ui);
+    *changed = true;
+}
+
+static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
+{
+    static const double rates[3] = { 64e6 / 7.0, 8e6, 48e6 / 7.0 };
+    static const char *const rate_names[3] = { "8 MHz", "7 MHz", "6 MHz" };
+    static float px[M2SDR_DVBT_MAX_POINTS], py[M2SDR_DVBT_MAX_POINTS];
+    static float complex ref[256];
+    const struct an_result *res = &ui->res;
+    const struct m2sdr_dvbt_result *t = &res->dvbt;
+    struct m2sdr_plot plot;
+    ImVec2 avail, sq;
+    float side, left_w, h, y0;
+    double needed, half_hz;
+    char text[160];
+    int i, nref;
+
+    if (live) {
+        int ch = (int)lround((ui->set.freq_hz - DVBT_UHF_BASE_HZ) / 8e6);
+
+        igTextUnformatted("Channel:", NULL);
+        for (i = 0; i < 3; i++) {
+            igSameLine(0.0f, 8.0f);
+            if (igSmallButton(rate_names[i])) {
+                ui->set.sample_rate = rates[i];
+                ui->set.bandwidth   = 0;
+                view_full(ui);
+                traces_reset(ui);
+                *changed = true;
+            }
+        }
+        igSameLine(0.0f, 16.0f);
+        igTextUnformatted("UHF", NULL);
+        igSameLine(0.0f, 4.0f);
+        igSetNextItemWidth(100.0f);
+        if (igInputInt("##uhf", &ch, 1, 1, 0) && ch >= 21 && ch <= 69)
+            dvbt_retune(ui, DVBT_UHF_BASE_HZ + 8e6 * ch, changed);
+        if (t->found && t->pilots && res->dvbt_valid && fabs(t->freq_error_hz) > 500.0) {
+            igSameLine(0.0f, 16.0f);
+            snprintf(text, sizeof(text), "Centre on the multiplex (%+.1f kHz)", t->freq_error_hz / 1e3);
+            if (igSmallButton(text))
+                dvbt_retune(ui, ui->set.freq_hz + 1e3 * round(t->freq_error_hz / 1e3), changed);
+        }
+    }
+    if (!res->set.dvbt_on) {
+        igTextUnformatted("Waiting for a capture.", NULL);
+        return;
+    }
+    if (!res->dvbt_valid) {
+        igPushTextWrapPos(0.0f);
+        igTextUnformatted("The sample rate must be the one of the channel: 9.142857 MSPS for 8 MHz, 8 MSPS for 7 MHz, "
+                          "6.857143 MSPS for 6 MHz.", NULL);
+        igPopTextWrapPos();
+        return;
+    }
+    if (!t->found) {
+        igPushTextWrapPos(0.0f);
+        igText("No DVB-T multiplex (guard interval correlation %.3f): tune near the centre of one.", t->sync_quality);
+        igPopTextWrapPos();
+    }
+    needed = dvbt_needed_db(t);
+
+    igGetContentRegionAvail(&avail);
+    side   = 0.55f * avail.y < 0.42f * avail.x ? 0.55f * avail.y : 0.42f * avail.x;
+    sq     = m2sdr_plot_square(side);
+    left_w = avail.x - sq.x - 8.0f;
+
+    /* MER: the figure, large, and its trace over the last captures. */
+    igBeginGroup();
+    y0 = igGetCursorPosY();
+    igPushFont(NULL, 2.4f * igGetStyle()->FontSizeBase);
+    if (t->found && t->pilots)
+        igTextColored(isfinite(needed) && t->mer_db < needed ? (ImVec4){ 1.0f, 0.45f, 0.35f, 1.0f } : (ImVec4){ 0.4f, 1.0f, 0.5f, 1.0f },
+                      "MER %.1f dB", t->mer_db);
+    else
+        igTextColored((ImVec4){ 1.0f, 0.45f, 0.35f, 1.0f }, "MER --");
+    igPopFont();
+    if (isfinite(needed))
+        igText("Needed for %s %s: %.1f dB (Gaussian channel), margin %+.1f dB", m2sdr_modulation_name(t->tps_modulation),
+               t->code_rate_hp, needed, t->found && t->pilots ? t->mer_db - needed : -needed);
+    else
+        igTextUnformatted(t->found && t->pilots ? "TPS not read: no reference for the MER needed." : " ", NULL);
+    h = sq.y - (igGetCursorPosY() - y0);
+    if (m2sdr_plot_begin(&plot, "##dvbtmer", (ImVec2){ left_w, h > 80.0f ? h : 80.0f },
+                         -(double)(AN_DVBT_HISTORY - 1), 0.0, M2SDR_PLOT_PLAIN, 0.0, 40.0, "MER (dB), last captures")) {
+        if (isfinite(needed))
+            m2sdr_plot_hline(&plot, needed, DVBT_COL_NEEDED);
+        if (ui->dvbt_nmer > 0)
+            m2sdr_plot_trace(&plot, ui->dvbt_mer, (size_t)ui->dvbt_nmer, -(double)(ui->dvbt_nmer - 1), 0.0, DVBT_COL_MER);
+        m2sdr_plot_end(&plot);
+    }
+    igEndGroup();
+    igSameLine(0.0f, 8.0f);
+
+    /* Equalised data carriers. */
+    nref = m2sdr_constellation(t->found && t->pilots ? t->modulation : M2SDR_MOD_64QAM, ref);
+    snprintf(text, sizeof(text), "Q against I, equalised data carriers; crosses: %s",
+             m2sdr_modulation_name(t->found && t->pilots ? t->modulation : M2SDR_MOD_64QAM));
+    if (m2sdr_plot_begin(&plot, "##dvbtconst", sq, -1.6, 1.6, M2SDR_PLOT_PLAIN, -1.6, 1.6, text)) {
+        if (t->found && t->pilots) {
+            for (i = 0; i < t->npoints; i++) {
+                px[i] = crealf(t->points[i]);
+                py[i] = cimagf(t->points[i]);
+            }
+            m2sdr_plot_points(&plot, px, py, (size_t)t->npoints, 1.0f, 0x90ffd080u);
+        }
+        for (i = 0; i < nref; i++) {
+            const float x = m2sdr_plot_x(&plot, crealf(ref[i])), y = m2sdr_plot_y(&plot, cimagf(ref[i]));
+            ImDrawList_AddLine(plot.dl, (ImVec2){ x - 4.0f, y }, (ImVec2){ x + 5.0f, y }, 0xa0ffffffu, 1.0f);
+            ImDrawList_AddLine(plot.dl, (ImVec2){ x, y - 4.0f }, (ImVec2){ x, y + 5.0f }, 0xa0ffffffu, 1.0f);
+        }
+        m2sdr_plot_end(&plot);
+    }
+
+    if (!t->found || !t->pilots)
+        return;
+
+    /* Channel response and MER per group of carriers, across the multiplex. */
+    igGetContentRegionAvail(&avail);
+    half_hz = 0.5 * (t->carriers - 1) * res->set.sample_rate / t->fft_len;
+    legend_item(DVBT_COL_CHANNEL, "channel (dB from its mean)", avail.x);
+    legend_item(DVBT_COL_MER, "MER (dB)", avail.x);
+    igNewLine();
+    if (m2sdr_plot_begin(&plot, "##dvbtchan", (ImVec2){ 0.5f * avail.x - 4.0f, 0.0f }, -half_hz, half_hz, M2SDR_PLOT_FREQ,
+                         -20.0, 40.0, "")) {
+        m2sdr_plot_hline(&plot, 0.0, 0x40ffffffu);
+        if (isfinite(needed))
+            m2sdr_plot_hline(&plot, needed, DVBT_COL_NEEDED);
+        m2sdr_plot_trace(&plot, t->channel_bin_db, (size_t)t->bins, -half_hz, half_hz, DVBT_COL_CHANNEL);
+        m2sdr_plot_trace(&plot, t->mer_bin_db, (size_t)t->bins, -half_hz, half_hz, DVBT_COL_MER);
+        if (plot.hovered) {
+            int b = (int)((plot.mouse_x + half_hz) / (2.0 * half_hz) * t->bins);
+
+            b = b < 0 ? 0 : b >= t->bins ? t->bins - 1 : b;
+            snprintf(text, sizeof(text), "%+.3f MHz: channel %+.1f dB, MER %.1f dB", plot.mouse_x / 1e6, t->channel_bin_db[b],
+                     t->mer_bin_db[b]);
+            m2sdr_plot_text(&plot, 8.0f, 4.0f, text, 0xffffffffu);
+        }
+        m2sdr_plot_end(&plot);
+    }
+    igSameLine(0.0f, 8.0f);
+
+    /* Echo profile, the guard interval shaded: echoes inside it do no harm. */
+    {
+        const double x0 = t->echo_start_us * 1e-6, x1 = (t->echo_start_us + M2SDR_DVBT_ECHO_BINS * t->echo_step_us) * 1e-6;
+
+        if (m2sdr_plot_begin(&plot, "##dvbtecho", (ImVec2){ 0.0f, 0.0f }, x0, x1, M2SDR_PLOT_TIME, -40.0, 0.0,
+                             "Echoes (dB from the strongest path)")) {
+            m2sdr_plot_band(&plot, 0.0, t->guard_us * 1e-6 < x1 ? t->guard_us * 1e-6 : x1, 0x2040ff40u);
+            m2sdr_plot_trace(&plot, t->echo_db, M2SDR_DVBT_ECHO_BINS, x0, x1, DVBT_COL_MER);
+            if (plot.hovered) {
+                int b = (int)((plot.mouse_x - x0) / (x1 - x0) * M2SDR_DVBT_ECHO_BINS);
+
+                b = b < 0 ? 0 : b >= M2SDR_DVBT_ECHO_BINS ? M2SDR_DVBT_ECHO_BINS - 1 : b;
+                snprintf(text, sizeof(text), "%+.2f us (%.0f m): %.1f dB", 1e6 * plot.mouse_x, 299.792458 * 1e6 * plot.mouse_x,
+                         t->echo_db[b]);
+                m2sdr_plot_text(&plot, 8.0f, 4.0f, text, 0xffffffffu);
+            }
+            m2sdr_plot_end(&plot);
+        }
+    }
+}
+
+static void draw_dvbt_results(struct an_ui *ui)
+{
+    const struct an_result *res = &ui->res;
+    const struct m2sdr_dvbt_result *t = &res->dvbt;
+    const double needed = dvbt_needed_db(t);
+
+    igSeparatorText("DVB-T");
+    if (!res->dvbt_valid || !t->found) {
+        igTextUnformatted("No multiplex.", NULL);
+        return;
+    }
+    if (igBeginTable("##dvbt", 2, ImGuiTableFlags_SizingStretchProp, (ImVec2){ 0.0f, 0.0f }, 0.0f)) {
+        label_value("Mode", "%dk, guard 1/%d", t->fft_len / 1024, t->guard);
+        label_value("Guard interval", "%.0f us", t->guard_us);
+        label_value("Guard correlation", "%.2f (%.1f dB)", t->sync_quality, t->sync_snr_db);
+        label_value("Power", "%.1f dBFS", t->power_dbfs);
+        if (t->pilots) {
+            label_value("Multiplex", "%.6f MHz", (res->set.freq_hz + t->freq_error_hz) / 1e6);
+            label_value("Offset", "%+.1f Hz", t->freq_error_hz);
+            if (t->tps) {
+                label_value("Constellation", "%s", m2sdr_modulation_name(t->tps_modulation));
+                label_value("Code rate", t->tps_hierarchy ? "HP %s, LP %s" : "%s", t->code_rate_hp, t->code_rate_lp);
+                label_value("Hierarchy", t->tps_hierarchy ? "alpha %d" : "none", t->tps_hierarchy);
+                if (t->cell_id >= 0)
+                    label_value("Cell", "%d", t->cell_id);
+            } else {
+                label_value("TPS", "not read");
+            }
+            label_value("MER", "%.1f dB", t->mer_db);
+            if (isfinite(needed))
+                label_value("Margin", "%+.1f dB", t->mer_db - needed);
+            if (t->echo_level_db > -99.0)
+                label_value("Strongest echo", "%+.2f us, %.1f dB", t->echo_delay_us, t->echo_level_db);
+            label_value("Symbols", "%d", t->symbols);
+        } else {
+            label_value("Pilots", "not found (%.2f)", t->pilot_quality);
+        }
+        igEndTable();
+    }
+}
+
 static void draw_lte_results(struct an_ui *ui)
 {
     static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
@@ -2744,6 +3089,10 @@ static void draw_results(struct an_ui *ui, struct an_shared *sh, bool *changed)
     }
     if (ui->tab == 5) {
         draw_lte_results(ui);
+        goto status;
+    }
+    if (ui->tab == 6) {
+        draw_dvbt_results(ui);
         goto status;
     }
 
@@ -2996,6 +3345,7 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
             if (traces_update(&ui) == 0)
                 waterfall_push(&ui);
             lte_keep(&ui);
+            dvbt_keep(&ui);
         } else {
             pthread_mutex_unlock(&sh.lock);
         }
@@ -3055,8 +3405,17 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
                         draw_lte(&ui, src->live && !src->no_rf_init, &changed);
                         igEndTabItem();
                     }
+                    if (igBeginTabItem("DVB-T", NULL, select == 6 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                        tab = 6;
+                        draw_dvbt(&ui, src->live && !src->no_rf_init, &changed);
+                        igEndTabItem();
+                    }
                     if (select < 0 && (tab == 5) != ui.set.lte_on) {
                         ui.set.lte_on = tab == 5;
+                        changed = true;
+                    }
+                    if (select < 0 && (tab == 6) != ui.set.dvbt_on) {
+                        ui.set.dvbt_on = tab == 6;
                         changed = true;
                     }
                     /* The phase noise and the demodulation need their own captures: they are
@@ -3189,6 +3548,11 @@ static void help(void)
            "                         The sample rate is 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS, for\n"
            "                         6, 15, 25, 50 or 100 resource blocks around the centre.\n"
            "\n"
+           "DVB-T options:\n"
+           "      --dvbt             With --report: reception of a DVB-T multiplex tuned near its centre:\n"
+           "                         mode, TPS, MER, channel and echoes. The sample rate is the one of\n"
+           "                         the channel (default with --dvbt: 9.142857 MSPS, 8 MHz).\n"
+           "\n"
            "Phase noise options:\n"
            "      --phase-noise      With --report: phase noise of the strongest carrier.\n"
            "      --pn-samples N     Samples of its capture (default: %d): more reach lower offsets.\n"
@@ -3202,7 +3566,7 @@ static void help(void)
            "\n"
            "Output options:\n"
            "      --view NAME        View shown first: spectrum, time, statistics, phase-noise,\n"
-           "                         modulation or lte.\n"
+           "                         modulation, lte or dvbt.\n"
            "      --report           Measure one capture and print the result, without a display.\n"
            "      --json             With --report: JSON.\n"
            "      --export-csv PATH  With --report: write the spectrum to a CSV file.\n"
@@ -3266,6 +3630,7 @@ int main(int argc, char **argv)
         { "demod-samples",   required_argument, NULL, 41 },
         { "no-rf-init",      no_argument,       NULL, 42 },
         { "lte",             no_argument,       NULL, 43 },
+        { "dvbt",            no_argument,       NULL, 44 },
         { NULL, 0, NULL, 0 }
     };
     struct m2sdr_cli_device cli_dev;
@@ -3470,8 +3835,10 @@ int main(int argc, char **argv)
                 view = 4;
             } else if (strcmp(optarg, "lte") == 0) {
                 view = 5;
+            } else if (strcmp(optarg, "dvbt") == 0) {
+                view = 6;
             } else {
-                m2sdr_cli_invalid_choice("view", optarg, "spectrum, time, statistics, phase-noise, modulation or lte");
+                m2sdr_cli_invalid_choice("view", optarg, "spectrum, time, statistics, phase-noise, modulation, lte or dvbt");
                 return 1;
             }
             break;
@@ -3548,6 +3915,7 @@ int main(int argc, char **argv)
             break;
         case 42: src.no_rf_init = true; break;
         case 43: set.lte_on = true; break;
+        case 44: set.dvbt_on = true; break;
         case 34: src.tx_tone = true; break;
         case 35:
             if (m2sdr_cli_parse_int_range(optarg, 0, 89, &src.tx_att) != 0) {
@@ -3575,6 +3943,11 @@ int main(int argc, char **argv)
         set.demod_on = true;
     if (view == 5)
         set.lte_on = true;
+    if (view == 6)
+        set.dvbt_on = true;
+    /* A file gives its own rate. */
+    if (set.dvbt_on && !rate_given)
+        set.sample_rate = AN_DVBT_RATE;
     if (src.no_rf_init && (file || src.tx_tone)) {
         m2sdr_cli_error("--no-rf-init is for a board, without --tx-tone");
         return 1;

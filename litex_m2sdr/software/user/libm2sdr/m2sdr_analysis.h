@@ -352,6 +352,70 @@ struct m2sdr_lte_result {
  * allocation failure. Without a cell, found = false. */
 int m2sdr_lte_analyse(const float complex *x, size_t count, double sample_rate, struct m2sdr_lte_result *res);
 
+/* DVB-T */
+/*-------*/
+
+#define M2SDR_DVBT_BINS        512     /* Groups of carriers of the per-carrier traces. */
+#define M2SDR_DVBT_ECHO_BINS   512     /* Points of the echo profile. */
+#define M2SDR_DVBT_MAX_POINTS  4096
+
+/* A DVB-T multiplex (EN 300 744), 2k or 8k, tuned near its centre: a reception check, as a
+ * TV installer's meter does, not a decoder. The error correction and the transport stream
+ * are not looked at.
+ *
+ * The sample rate is the elementary rate of the channel, 8/7 of its bandwidth: 64/7 MSPS
+ * (9.142857 MSPS) for 8 MHz, 8 MSPS for 7 MHz, 48/7 MSPS for 6 MHz. The multiplex may be off
+ * the centre of the capture by up to about half the gap between its band and the sample
+ * rate, enough for the 1/6 MHz offsets of some networks.
+ *
+ * The mode and the guard interval come from the correlation of the guard intervals, the
+ * integer carrier offset from the continual pilots, the channel from the scattered pilots
+ * of four symbols, and the transmission parameters from the TPS. The MER is that of the
+ * equalised data carriers against the constellation of the TPS, or the one they fit best
+ * without a TPS. */
+struct m2sdr_dvbt_result {
+    bool   found;               /* Guard intervals found: an OFDM signal of DVB-T. */
+    int    fft_len;             /* 2048 (2k) or 8192 (8k). */
+    int    carriers;            /* 1705 or 6817. */
+    int    guard;               /* Guard interval: 1/guard of the useful part, 4, 8, 16 or 32. */
+    double guard_us;
+    double sync_quality;        /* Correlation of the guard intervals, 0 to 1; given without a signal too. */
+    double sync_snr_db;         /* The signal to noise ratio it gives: a rough figure. */
+    double power_dbfs;          /* Of the capture. */
+    bool   pilots;              /* Continual pilots found: the figures below are valid. */
+    double pilot_quality;       /* Their coherence from symbol to symbol, 0 to 1. */
+    double freq_error_hz;       /* Centre of the multiplex, from the centre of the capture. */
+    int    symbols;             /* Analysed. */
+    bool   tps;                 /* TPS sync word found: the parameters below are read. */
+    int    tps_fft_len, tps_guard;
+    enum m2sdr_modulation tps_modulation;   /* QPSK, 16QAM or 64QAM. */
+    int    tps_hierarchy;       /* 0: none, 1, 2 or 4: alpha. */
+    char   code_rate_hp[4], code_rate_lp[4];  /* "1/2" to "7/8". */
+    int    cell_id;             /* -1 when the TPS does not carry it or it was not read. */
+    enum m2sdr_modulation modulation;       /* The MER is against it. */
+    double mer_db;
+    /* Per group of carriers, the lowest first: MER, and power of the channel in dB from its
+     * mean. bins groups of carriers_per_bin carriers each. */
+    int    bins;
+    double carriers_per_bin;
+    float  mer_bin_db[M2SDR_DVBT_BINS];
+    float  channel_bin_db[M2SDR_DVBT_BINS];
+    /* Echo profile: impulse response of the channel in dB from its strongest path, point i at
+     * echo_start_us + i * echo_step_us from that path. */
+    float  echo_db[M2SDR_DVBT_ECHO_BINS];
+    double echo_start_us, echo_step_us;
+    double echo_delay_us;       /* The strongest other path: its delay and its level. */
+    double echo_level_db;
+    /* Equalised data carriers, mean power 1. */
+    int    npoints;
+    float complex points[M2SDR_DVBT_MAX_POINTS];
+};
+
+/* Returns 0, or -1 on a bad argument (sample rate, less than the time of eight 8k symbols)
+ * or an allocation failure. Without a multiplex, found = false. 150 ms of samples carry the
+ * TPS of a frame wherever it starts. */
+int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate, struct m2sdr_dvbt_result *res);
+
 #ifdef __cplusplus
 }
 #endif

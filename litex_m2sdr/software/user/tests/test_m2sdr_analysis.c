@@ -932,6 +932,236 @@ static int check_lte_report(const char *path)
     return 0;
 }
 
+/* DVB-T */
+/*-------*/
+
+/* A DVB-T multiplex built as EN 300 744 sets its pilots and TPS, with random data in place of
+ * the coded stream: what the analysis reads. */
+struct dvbt_signal {
+    int    n;                   /* 2048 or 8192. */
+    int    g;                   /* Guard interval: 4 to 32. */
+    int    con;                 /* TPS constellation field: 0 QPSK, 1 16QAM, 2 64QAM. */
+    int    hp;                  /* TPS code rate field: 0 (1/2) to 4 (7/8). */
+    int    start;               /* Symbol of the frame the capture starts with. */
+    double freq_hz;             /* Carrier offset. */
+    double snr_db;
+    double echo_us, echo_db;    /* A second path; echo_db -99 for none. */
+};
+
+static const int dvbt_cp[] = {
+       0,   48,   54,   87,  141,  156,  192,  201,  255,  279,  282,  333,  432,  450,  483,
+     525,  531,  618,  636,  714,  759,  765,  780,  804,  873,  888,  918,  939,  942,  969,
+     984, 1050, 1101, 1107, 1110, 1137, 1140, 1146, 1206, 1269, 1323, 1377, 1491, 1683, 1704,
+};
+static const int dvbt_tps[] = {
+      34,   50,  209,  346,  413,  569,  595,  688,  790,  901, 1073, 1219, 1262, 1286, 1469,
+    1594, 1687,
+};
+
+static size_t make_dvbt(float complex *x, size_t max, double fs, const struct dvbt_signal *sig)
+{
+    const int k = sig->n == 8192 ? 6817 : 1705, gl = sig->n / sig->g, l = sig->n + gl;
+    const int side = sig->con == 0 ? 2 : sig->con == 1 ? 4 : 8;
+    const double scale = 1.0 / sqrt(2.0 * (side * side - 1) / 3.0);
+    struct m2sdr_fft *ifft = m2sdr_fft_alloc((size_t)sig->n, true);
+    float complex *f = malloc((size_t)sig->n * sizeof(*f)), *t = malloc((size_t)sig->n * sizeof(*t));
+    uint8_t *w = malloc((size_t)k), *kind = calloc((size_t)k, 1), tps[68];
+    float tps_state = 1.0f;
+    const size_t nsym = max / (size_t)l;
+    const size_t echo = (size_t)lround(sig->echo_us * 1e-6 * fs);
+    const double echo_amp = pow(10.0, sig->echo_db / 20.0);
+    unsigned reg = 0x7ff;
+    size_t s, i, count = nsym * (size_t)l;
+    double power = 0;
+    int c, b;
+
+    for (c = 0; c < k; c++) {
+        w[c] = (uint8_t)((reg >> 10) & 1u);
+        reg = ((reg << 1) | (w[c] ^ ((reg >> 8) & 1u))) & 0x7ffu;
+    }
+    for (b = 0; b < k; b += 1704) {
+        for (c = 0; c < (int)(sizeof(dvbt_cp) / sizeof(dvbt_cp[0])); c++)
+            if (b + dvbt_cp[c] < k)
+                kind[b + dvbt_cp[c]] = 1;
+        for (c = 0; c < (int)(sizeof(dvbt_tps) / sizeof(dvbt_tps[0])); c++)
+            if (b + dvbt_tps[c] < k)
+                kind[b + dvbt_tps[c]] = 2;
+    }
+    memset(x, 0, max * sizeof(*x));
+    for (s = 0; s < nsym; s++) {
+        const int fsym = (int)((s + (size_t)sig->start) % 68), frame = (int)(((s + (size_t)sig->start) / 68) % 4);
+
+        if (fsym == 0 || s == 0) {
+            /* TPS of the frame: s0, the sync word (inverted in even frames), length 23, then the parameters. */
+            const unsigned sync = frame % 2 ? 0xca11u : 0x35eeu;
+            unsigned v[] = { 0x17, (unsigned)frame, (unsigned)sig->con, 0, (unsigned)sig->hp, (unsigned)sig->hp,
+                             (unsigned)(sig->g == 32 ? 0 : sig->g == 16 ? 1 : sig->g == 8 ? 2 : 3), sig->n == 8192 ? 1u : 0u };
+            const int bits[] = { 6, 2, 2, 3, 3, 3, 2, 2 };
+            int pos = 17, j;
+
+            memset(tps, 0, sizeof(tps));
+            for (j = 0; j < 16; j++)
+                tps[1 + j] = (uint8_t)((sync >> (15 - j)) & 1u);
+            for (j = 0; j < 8; j++) {
+                int q;
+
+                for (q = bits[j] - 1; q >= 0; q--)
+                    tps[pos++] = (uint8_t)((v[j] >> q) & 1u);
+            }
+        }
+        tps_state = fsym == 0 ? 1.0f : tps[fsym] ? -tps_state : tps_state;
+        memset(f, 0, (size_t)sig->n * sizeof(*f));
+        for (c = 0; c < k; c++) {
+            float complex v;
+
+            if (kind[c] == 1 || (c >= 3 * (fsym % 4) && (c - 3 * (fsym % 4)) % 12 == 0))
+                v = (4.0f / 3.0f) * (w[c] ? -1.0f : 1.0f);
+            else if (kind[c] == 2)
+                v = tps_state * (w[c] ? -1.0f : 1.0f);
+            else
+                v = (float complex)(scale * ((2 * (int)(rng_uniform() * side) - side + 1) +
+                                             I * (2 * (int)(rng_uniform() * side) - side + 1)));
+            f[(c - (k - 1) / 2 + sig->n) % sig->n] = v;
+        }
+        m2sdr_fft_run(ifft, f, t);
+        for (i = 0; i < (size_t)l; i++)
+            x[s * (size_t)l + i] = t[(i + (size_t)sig->n - (size_t)gl) % (size_t)sig->n];
+    }
+    if (sig->echo_db > -99.0)
+        for (i = count; i-- > echo;)
+            x[i] += (float)echo_amp * x[i - echo];
+    for (i = 0; i < count; i++) {
+        x[i] *= (float complex)cexp(I * 2.0 * M_PI * sig->freq_hz * (double)i / fs);
+        power += crealf(x[i] * conjf(x[i]));
+    }
+    power /= (double)count;
+    for (i = 0; i < count; i++)
+        x[i] *= (float)(0.1 / sqrt(power));
+    add_noise(x, count, 0.01 * pow(10.0, -sig->snr_db / 10.0));
+    m2sdr_fft_free(ifft);
+    free(f);
+    free(t);
+    free(w);
+    free(kind);
+    return count;
+}
+
+static void test_dvbt(void)
+{
+    static const struct dvbt_signal signals[] = {
+        /*  n     g  con hp start  freq_hz   snr echo_us echo_db */
+        { 8192,  8,  2,  2,   0,       0.0, 30.0,  0.0, -99.0 },   /* France: 8k 64QAM 3/4 1/8. */
+        { 8192,  8,  2,  2,  40,  166667.0, 25.0, 20.0,  -6.0 },   /* 1/6 MHz offset, an echo. */
+        { 8192,  4,  1,  1,  13,   -2500.0, 20.0,  0.0, -99.0 },
+        { 2048, 32,  0,  0,  60,   12000.0, 15.0,  0.0, -99.0 },
+    };
+    static const enum m2sdr_modulation mods[3] = { M2SDR_MOD_QPSK, M2SDR_MOD_16QAM, M2SDR_MOD_64QAM };
+    static const char *const rates[5] = { "1/2", "2/3", "3/4", "5/6", "7/8" };
+    const double fs = 64e6 / 7.0;
+    const size_t max = (size_t)(0.15 * fs);
+    float complex *x = malloc(max * sizeof(*x));
+    struct m2sdr_dvbt_result *res = malloc(sizeof(*res));
+    size_t i;
+
+    printf("DVB-T:\n");
+    if (!x || !res) {
+        CHECK("allocation", 0);
+        free(x);
+        free(res);
+        return;
+    }
+    for (i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
+        const struct dvbt_signal *sig = &signals[i];
+        const size_t count = make_dvbt(x, max, fs, sig);
+
+        printf(" %dk, guard 1/%d, offset %.0f Hz, SNR %.0f dB%s\n", sig->n / 1024, sig->g, sig->freq_hz, sig->snr_db,
+               sig->echo_db > -99.0 ? ", echo" : "");
+        CHECK("analyse", m2sdr_dvbt_analyse(x, count, fs, res) == 0);
+        CHECK("found, pilots, TPS", res->found && res->pilots && res->tps);
+        CHECK_NEAR("FFT length", res->fft_len, sig->n, 0);
+        CHECK_NEAR("guard interval", res->guard, sig->g, 0);
+        CHECK_NEAR("carrier offset (Hz)", res->freq_error_hz, sig->freq_hz, 20.0);
+        CHECK("TPS mode and guard", res->tps_fft_len == sig->n && res->tps_guard == sig->g);
+        CHECK("TPS constellation", res->tps_modulation == mods[sig->con] && res->modulation == mods[sig->con]);
+        CHECK("TPS code rate", strcmp(res->code_rate_hp, rates[sig->hp]) == 0);
+        /* The channel is estimated on noisy pilots: the MER reads a little under the SNR. An
+         * echo of amplitude a leaves the equalised carriers (1 - a^2) / (1 + a^2) of it. */
+        {
+            const double a2 = sig->echo_db > -99.0 ? pow(10.0, sig->echo_db / 10.0) : 0.0;
+
+            CHECK_NEAR("MER (dB)", res->mer_db, sig->snr_db - 1.0 + 10.0 * log10((1.0 - a2) / (1.0 + a2)), 1.5);
+        }
+        if (sig->echo_db > -99.0) {
+            CHECK_NEAR("echo delay (us)", res->echo_delay_us, sig->echo_us, 0.5);
+            CHECK_NEAR("echo level (dB)", res->echo_level_db, sig->echo_db, 1.5);
+        }
+    }
+    /* Constellation without the TPS: the one the data fits best. */
+    {
+        const struct dvbt_signal sig = { 8192, 8, 1, 2, 0, 0.0, 25.0, 0.0, -99.0 };
+        const size_t count = make_dvbt(x, max, fs, &sig);
+
+        printf(" no TPS (too short a capture)\n");
+        CHECK("analyse", m2sdr_dvbt_analyse(x, count / 4, fs, res) == 0 && res->pilots && !res->tps);
+        CHECK("16QAM found", res->modulation == M2SDR_MOD_16QAM);
+    }
+    memset(x, 0, max * sizeof(*x));
+    add_noise(x, max, 0.01);
+    CHECK("noise", m2sdr_dvbt_analyse(x, max, fs, res) == 0 && !res->found);
+    CHECK("bad sample rate", m2sdr_dvbt_analyse(x, max, 10e6, res) != 0);
+    CHECK("too short", m2sdr_dvbt_analyse(x, 50000, fs, res) != 0);
+    free(x);
+    free(res);
+}
+
+static int write_dvbt(const char *path)
+{
+    static const struct dvbt_signal sig = { 8192, 8, 2, 2, 20, 166667.0, 30.0, 0.0, -99.0 };
+    const double fs = 64e6 / 7.0;
+    const size_t max = (size_t)(0.16 * fs);
+    float complex *x = malloc(max * sizeof(*x));
+    FILE *f = fopen(path, "wb");
+    size_t count, i;
+
+    if (!x || !f)
+        return 1;
+    count = make_dvbt(x, max, fs, &sig);
+    for (i = 0; i < count; i++) {
+        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
+                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
+        if (fwrite(v, sizeof(v), 1, f) != 1)
+            return 1;
+    }
+    free(x);
+    return fclose(f) == 0 ? 0 : 1;
+}
+
+static int check_dvbt_report(const char *path)
+{
+    static char json[32768];
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f) {
+        printf("test_m2sdr_analysis: cannot open %s\n", path);
+        return 1;
+    }
+    n = fread(json, 1, sizeof(json) - 1, f);
+    fclose(f);
+    json[n] = '\0';
+    printf("DVB-T report of m2sdr_analyzer:\n");
+    CHECK("mode 8k, guard 1/8", strstr(json, "\"mode\": \"8k\"") && strstr(json, "\"guard_interval\": \"1/8\""));
+    CHECK("64QAM, code rate 3/4", strstr(json, "\"constellation\": \"64QAM\"") && strstr(json, "\"code_rate_hp\": \"3/4\""));
+    CHECK_NEAR("carrier offset (Hz)", json_number(json, "dvbt", "carrier_offset_hz"), 166667.0, 20.0);
+    CHECK("MER over 25 dB", json_number(json, "dvbt", "mer_db") > 25.0);
+    if (failures) {
+        printf("test_m2sdr_analysis: %d FAILED\n", failures);
+        return 1;
+    }
+    printf("test_m2sdr_analysis: DVB-T report checked\n");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     float complex *x;
@@ -944,6 +1174,10 @@ int main(int argc, char **argv)
         return write_lte(argv[2]);
     if (argc == 3 && strcmp(argv[1], "--check-lte") == 0)
         return check_lte_report(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--write-dvbt") == 0)
+        return write_dvbt(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-dvbt") == 0)
+        return check_dvbt_report(argv[2]);
 
     x = malloc(COUNT * sizeof(*x));
     if (!x)
@@ -956,6 +1190,7 @@ int main(int argc, char **argv)
     test_phase_noise();
     test_demod();
     test_lte();
+    test_dvbt();
     if (failures) {
         printf("test_m2sdr_analysis: %d FAILED\n", failures);
         return 1;

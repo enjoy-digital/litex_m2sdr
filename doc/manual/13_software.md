@@ -785,6 +785,7 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | Phase noise | L(f) of the strongest carrier, its amplitude noise, the floor of the board |
 | Modulation | Constellation, eye diagrams and error of each symbol of a PSK or QAM signal |
 | LTE | Cell, resource grid, data blocks and constellations of an LTE downlink carrier |
+| DVB-T | MER and its trace, constellation, channel, MER per carrier and echoes of a DVB-T multiplex |
 
 The figures are next to the views, and `--report` prints the same ones for one capture:
 
@@ -947,6 +948,37 @@ report gives the blocks read in each way.
   reference signals and of the PBCH remain.
 
 Not supported: TDD, the extended cyclic prefix, a PBCH on four antenna ports, the uplink.
+
+#### DVB-T reception {#sw-analyzer-dvbt}
+
+The DVB-T view, and `--dvbt` with `--report`, check the reception of a DVB-T multiplex
+(EN 300 744), 2k or 8k, as a TV installer's meter does: the error correction and the
+transport stream are not looked at. The view is live: the MER trace follows the captures, to
+place an antenna.
+
+```sh
+m2sdr_analyzer --freq 650e6 --view dvbt
+m2sdr_analyzer --freq 650e6 --report --dvbt
+```
+
+The sample rate is the elementary rate of the channel, 8/7 of its bandwidth: 9.142857 MSPS for
+8 MHz (the default with `--dvbt`), 8 MSPS for 7 MHz, 6.857143 MSPS for 6 MHz. The view has a
+button for each, and a UHF channel number (21 to 69, centred at 306 + 8 n MHz). The multiplex
+may be off the centre of the capture, as with the 1/6 MHz offsets of some networks: it is found
+anyway, and a button centres the capture on it.
+
+| Figure | From |
+|---------------------------|---------------------------------------------------------------------|
+| Mode, guard interval | Correlation of the guard intervals, the best of 2k, 8k and 1/4 to 1/32 |
+| Carrier offset | Phase of that correlation, then the continual pilots for whole carriers |
+| Constellation, code rates, hierarchy, cell | TPS, from its sync word; the cell takes two frames |
+| Channel, echoes | Scattered pilots of four symbols, every third carrier; the echoes from its impulse response |
+| MER | Equalised data carriers against the constellation of the TPS, over all of them and per group of carriers |
+
+The MER needed is the C/N of EN 300 744 (annex A) for the constellation and code rate of the
+TPS in a Gaussian channel: 18.0 dB for 64QAM 3/4. A real receiver needs a few dB more. An
+echo inside the guard interval does no harm by itself, but the notches it leaves in the
+channel lower the MER of their carriers.
 
 #### Phase noise {#sw-analyzer-pn}
 

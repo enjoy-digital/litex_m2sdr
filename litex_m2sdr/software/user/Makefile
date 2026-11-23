@@ -143,6 +143,7 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_analysis_demod.o \
 	libm2sdr/m2sdr_lte_seq.o \
 	libm2sdr/m2sdr_analysis_lte.o \
+	libm2sdr/m2sdr_analysis_dvbt.o \
 	libm2sdr/m2sdr_hal_litepcie.o \
 	libm2sdr/m2sdr_hal_liteeth.o \
 	liblitepcie/litepcie_dma.o \
@@ -211,6 +212,10 @@ test-analyzer: m2sdr_analyzer tests/test_m2sdr_analysis
 	./m2sdr_analyzer --report --json --lte --file tests/analysis_capture_lte.sc16 --sample-rate 7.68e6 \
 		> tests/analysis_capture_lte.json
 	./tests/test_m2sdr_analysis --check-lte tests/analysis_capture_lte.json
+	./tests/test_m2sdr_analysis --write-dvbt tests/analysis_capture_dvbt.sc16
+	./m2sdr_analyzer --report --json --dvbt --file tests/analysis_capture_dvbt.sc16 \
+		> tests/analysis_capture_dvbt.json
+	./tests/test_m2sdr_analysis --check-dvbt tests/analysis_capture_dvbt.json
 
 test-sigmf: tests/test_m2sdr_sigmf
 	./tests/test_m2sdr_sigmf
