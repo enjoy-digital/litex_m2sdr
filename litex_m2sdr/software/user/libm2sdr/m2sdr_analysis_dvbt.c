@@ -347,7 +347,8 @@ static float qam_scale(int m)
 /* Analysis */
 /*----------*/
 
-int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate, struct m2sdr_dvbt_result *res)
+int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate, const struct m2sdr_dvbt_config *cfg,
+                       struct m2sdr_dvbt_result *res)
 {
     static const double rates[3] = { 64e6 / 7.0, 8e6, 48e6 / 7.0 };
     struct dvbt_dims d;
@@ -372,12 +373,15 @@ int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate,
         power += crealf(x[j] * conjf(x[j]));
     res->power_dbfs = 10.0 * log10(power / (double)count + 1e-30);
 
-    /* Mode and guard interval: the best correlation of the eight. */
+    /* Mode and guard interval: the best correlation of the eight, or the one given. */
     for (i = 0; i < 8; i++) {
         const int n = i < 4 ? 8192 : 2048, g = 4 << (i % 4);
         const size_t span = (size_t)SYNC_SYMBOLS * (8192 + 2048) + 8192;
-        const double q = guard_search(x, count < span ? count : span, n, g, &t0, &eps);
+        double q;
 
+        if (cfg && cfg->fft_len && cfg->guard && (cfg->fft_len != n || cfg->guard != g))
+            continue;
+        q = guard_search(x, count < span ? count : span, n, g, &t0, &eps);
         if (q < 0)
             return -1;
         if (q > best_q) {
@@ -493,7 +497,7 @@ int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate,
     {
         double mer_try[MOD_TRIED] = { 0, 0, 0 };
         double try_err[MOD_TRIED] = { 0, 0, 0 }, try_ref[MOD_TRIED] = { 0, 0, 0 };
-        enum m2sdr_modulation mod = res->tps ? res->tps_modulation : M2SDR_MOD_AUTO;
+        enum m2sdr_modulation mod = res->tps ? res->tps_modulation : cfg ? cfg->modulation : M2SDR_MOD_AUTO;
         int side = 0, pass, stride = 1, taken = 0, nused = 0;
         float scale = 0;
         size_t ndata = 0;

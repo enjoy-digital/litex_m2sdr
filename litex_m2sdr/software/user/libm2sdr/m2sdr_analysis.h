@@ -411,10 +411,19 @@ struct m2sdr_dvbt_result {
     float complex points[M2SDR_DVBT_MAX_POINTS];
 };
 
+/* What is already known of a multiplex, from an earlier capture with its TPS: shorter
+ * captures then give the MER, the channel and the echoes. A field at 0 is found. */
+struct m2sdr_dvbt_config {
+    int    fft_len;             /* 2048 or 8192, with guard. */
+    int    guard;
+    enum m2sdr_modulation modulation;   /* Of the MER when the capture has no TPS. */
+};
+
 /* Returns 0, or -1 on a bad argument (sample rate, less than the time of eight 8k symbols)
  * or an allocation failure. Without a multiplex, found = false. 150 ms of samples carry the
- * TPS of a frame wherever it starts. */
-int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate, struct m2sdr_dvbt_result *res);
+ * TPS of a frame wherever it starts; with cfg (may be NULL), 40 ms give the rest. */
+int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate, const struct m2sdr_dvbt_config *cfg,
+                       struct m2sdr_dvbt_result *res);
 
 #ifdef __cplusplus
 }

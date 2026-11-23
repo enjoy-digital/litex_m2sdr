@@ -954,7 +954,8 @@ Not supported: TDD, the extended cyclic prefix, a PBCH on four antenna ports, th
 The DVB-T view, and `--dvbt` with `--report`, check the reception of a DVB-T multiplex
 (EN 300 744), 2k or 8k, as a TV installer's meter does: the error correction and the
 transport stream are not looked at. The view is live: the MER trace follows the captures, to
-place an antenna.
+place an antenna. Once a capture has read the TPS, the next ones are 40 ms long and one in
+eight reads it again: about ten results a second instead of three.
 
 ```sh
 m2sdr_analyzer --freq 650e6 --view dvbt

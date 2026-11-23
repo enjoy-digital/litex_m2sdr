@@ -1076,7 +1076,7 @@ static void test_dvbt(void)
 
         printf(" %dk, guard 1/%d, offset %.0f Hz, SNR %.0f dB%s\n", sig->n / 1024, sig->g, sig->freq_hz, sig->snr_db,
                sig->echo_db > -99.0 ? ", echo" : "");
-        CHECK("analyse", m2sdr_dvbt_analyse(x, count, fs, res) == 0);
+        CHECK("analyse", m2sdr_dvbt_analyse(x, count, fs, NULL, res) == 0);
         CHECK("found, pilots, TPS", res->found && res->pilots && res->tps);
         CHECK_NEAR("FFT length", res->fft_len, sig->n, 0);
         CHECK_NEAR("guard interval", res->guard, sig->g, 0);
@@ -1102,14 +1102,26 @@ static void test_dvbt(void)
         const size_t count = make_dvbt(x, max, fs, &sig);
 
         printf(" no TPS (too short a capture)\n");
-        CHECK("analyse", m2sdr_dvbt_analyse(x, count / 4, fs, res) == 0 && res->pilots && !res->tps);
+        CHECK("analyse", m2sdr_dvbt_analyse(x, count / 4, fs, NULL, res) == 0 && res->pilots && !res->tps);
         CHECK("16QAM found", res->modulation == M2SDR_MOD_16QAM);
+    }
+    /* 40 ms with what an earlier capture found: the MER without the TPS. */
+    {
+        const struct dvbt_signal sig = { 8192, 8, 2, 2, 30, 0.0, 22.0, 0.0, -99.0 };
+        const struct m2sdr_dvbt_config cfg = { 8192, 8, M2SDR_MOD_64QAM };
+        const size_t count = make_dvbt(x, max, fs, &sig);
+
+        (void)count;
+        printf(" 40 ms, mode and constellation given\n");
+        CHECK("analyse", m2sdr_dvbt_analyse(x, (size_t)(0.04 * fs), fs, &cfg, res) == 0 && res->pilots);
+        CHECK("64QAM", res->modulation == M2SDR_MOD_64QAM);
+        CHECK_NEAR("MER (dB)", res->mer_db, 21.0, 1.5);
     }
     memset(x, 0, max * sizeof(*x));
     add_noise(x, max, 0.01);
-    CHECK("noise", m2sdr_dvbt_analyse(x, max, fs, res) == 0 && !res->found);
-    CHECK("bad sample rate", m2sdr_dvbt_analyse(x, max, 10e6, res) != 0);
-    CHECK("too short", m2sdr_dvbt_analyse(x, 50000, fs, res) != 0);
+    CHECK("noise", m2sdr_dvbt_analyse(x, max, fs, NULL, res) == 0 && !res->found);
+    CHECK("bad sample rate", m2sdr_dvbt_analyse(x, max, 10e6, NULL, res) != 0);
+    CHECK("too short", m2sdr_dvbt_analyse(x, 50000, fs, NULL, res) != 0);
     free(x);
     free(res);
 }

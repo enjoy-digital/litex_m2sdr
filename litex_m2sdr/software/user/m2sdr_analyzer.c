@@ -67,6 +67,8 @@
 #define AN_DEMOD_MAX_LOG2       22
 #define AN_LTE_SECONDS          0.045         /* Capture of an LTE analysis: a whole frame wherever it starts. */
 #define AN_DVBT_SECONDS         0.15          /* Capture of a DVB-T analysis: a TPS frame wherever it starts. */
+#define AN_DVBT_FAST_SECONDS    0.04          /* Once the TPS is read: the MER and the channel. */
+#define AN_DVBT_FULL_EVERY      8             /* Live, one capture in this many reads the TPS again. */
 #define AN_DVBT_RATE            (64e6 / 7.0)  /* Elementary rate of an 8 MHz DVB-T channel. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
@@ -97,6 +99,9 @@ struct an_settings {
     struct m2sdr_demod_config demod;
     bool   lte_on;                 /* LTE downlink carrier. */
     bool   dvbt_on;                /* DVB-T multiplex. */
+    /* Set by the worker for a live multiplex whose TPS it read: short captures. */
+    bool   dvbt_fast;
+    struct m2sdr_dvbt_config dvbt_hint;
 };
 
 static const char *const window_names[] = { "Hann", "Flat-top", "Blackman-Harris", "Rectangular" };
@@ -582,17 +587,20 @@ static size_t capture_samples(const struct an_settings *set)
         count = (size_t)1 << set->demod_log2;
     if (set->lte_on && count < (size_t)(AN_LTE_SECONDS * set->sample_rate))
         count = (size_t)(AN_LTE_SECONDS * set->sample_rate);
-    if (set->dvbt_on && count < (size_t)(AN_DVBT_SECONDS * set->sample_rate))
-        count = (size_t)(AN_DVBT_SECONDS * set->sample_rate);
+    if (set->dvbt_on && count < (size_t)((set->dvbt_fast ? AN_DVBT_FAST_SECONDS : AN_DVBT_SECONDS) * set->sample_rate))
+        count = (size_t)((set->dvbt_fast ? AN_DVBT_FAST_SECONDS : AN_DVBT_SECONDS) * set->sample_rate);
     return count < AN_TIME_POINTS ? AN_TIME_POINTS : count;
 }
 
 static int analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res)
 {
     const double half = 0.5 * set->sample_rate;
+    /* The DVB-T capture is long: the spectrum keeps its own averages, for speed. */
+    const size_t spectrum = (size_t)set->fft_len * ((size_t)set->averages + 1) / 2;
+    const size_t psd_count = set->dvbt_on && spectrum >= (size_t)set->fft_len && spectrum < count ? spectrum : count;
 
     res->set = *set;
-    if (m2sdr_psd_compute(x, count, set->sample_rate, (size_t)set->fft_len, (enum m2sdr_window)set->window, &res->psd) != 0)
+    if (m2sdr_psd_compute(x, psd_count, set->sample_rate, (size_t)set->fft_len, (enum m2sdr_window)set->window, &res->psd) != 0)
         return -1;
     (void)m2sdr_iq_stats(x, count, 0.999, &res->stats);
     res->noise_db_hz = m2sdr_psd_noise_density_db(&res->psd, -half, half);
@@ -616,7 +624,7 @@ static int analyse(const float complex *x, size_t count, const struct an_setting
 
             if (set->window != M2SDR_WINDOW_BLACKMAN_HARRIS) {
                 psd = &res->tone_psd;
-                if (m2sdr_psd_compute(x, count, set->sample_rate, (size_t)set->fft_len,
+                if (m2sdr_psd_compute(x, psd_count, set->sample_rate, (size_t)set->fft_len,
                                       M2SDR_WINDOW_BLACKMAN_HARRIS, &res->tone_psd) != 0)
                     psd = NULL;
             }
@@ -667,7 +675,8 @@ static int analyse(const float complex *x, size_t count, const struct an_setting
     if (set->dvbt_on) {
         const size_t n = (size_t)(AN_DVBT_SECONDS * set->sample_rate);
 
-        res->dvbt_valid = m2sdr_dvbt_analyse(x, count < n ? count : n, set->sample_rate, &res->dvbt) == 0;
+        res->dvbt_valid = m2sdr_dvbt_analyse(x, count < n ? count : n, set->sample_rate,
+                                             set->dvbt_fast ? &set->dvbt_hint : NULL, &res->dvbt) == 0;
     }
     res->time_count = count < AN_TIME_POINTS ? count : AN_TIME_POINTS;
     memcpy(res->time, x, res->time_count * sizeof(*x));
@@ -1364,6 +1373,8 @@ struct an_ui {
     /* DVB-T: MER of the last captures, oldest first, for as long as the tuning stays. */
     float  dvbt_mer[AN_DVBT_HISTORY];
     int    dvbt_nmer;
+    /* Last capture whose TPS was read: the short ones between carry none. */
+    struct m2sdr_dvbt_result *dvbt_tps;
     double dvbt_freq_hz, dvbt_rate;
     int    dvbt_channel;
     float  wf_floor_db, wf_ceil_db;
@@ -1404,6 +1415,10 @@ static void *worker_main(void *arg)
     struct an_result *res = calloc(1, sizeof(*res));
     float complex *x = NULL;
     size_t x_count = 0;
+    /* DVB-T: the multiplex of the last TPS read, and the captures since. */
+    struct an_settings dvbt_known = { 0 };
+    bool dvbt_ok = false;
+    unsigned dvbt_since = 0;
 
     while (res) {
         struct an_settings set;
@@ -1425,6 +1440,13 @@ static void *worker_main(void *arg)
             continue;
         }
 
+        set.dvbt_fast = false;
+        if (set.dvbt_on && dvbt_ok && sh->src->live && set.freq_hz == dvbt_known.freq_hz &&
+            set.sample_rate == dvbt_known.sample_rate && set.channel == dvbt_known.channel &&
+            ++dvbt_since % AN_DVBT_FULL_EVERY != 0) {
+            set.dvbt_fast = true;
+            set.dvbt_hint = dvbt_known.dvbt_hint;
+        }
         count = capture_samples(&set);
         if (count > x_count) {
             float complex *grown = realloc(x, count * sizeof(*x));
@@ -1450,6 +1472,20 @@ static void *worker_main(void *arg)
         }
         res->lost = rc > 0;
         t2 = now_ms();
+        if (set.dvbt_on && res->dvbt_valid) {
+            const struct m2sdr_dvbt_result *t = &res->dvbt;
+
+            if (t->tps) {
+                dvbt_known = set;
+                dvbt_known.dvbt_hint.fft_len    = t->fft_len;
+                dvbt_known.dvbt_hint.guard      = t->guard;
+                dvbt_known.dvbt_hint.modulation = t->tps_modulation;
+                dvbt_ok    = true;
+                dvbt_since = 0;
+            } else if (!t->found || !t->pilots) {
+                dvbt_ok = false;
+            }
+        }
 
         /* A file is read faster than it can be looked at. */
         if (t2 - t0 < AN_MIN_PERIOD_MS)
@@ -2723,12 +2759,28 @@ static void dvbt_keep(struct an_ui *ui)
         ui->dvbt_rate    = res->set.sample_rate;
         ui->dvbt_channel = res->set.channel;
         ui->dvbt_nmer    = 0;
+        if (ui->dvbt_tps)
+            ui->dvbt_tps->tps = false;
+    }
+    if (res->dvbt.tps) {
+        if (!ui->dvbt_tps)
+            ui->dvbt_tps = malloc(sizeof(*ui->dvbt_tps));
+        if (ui->dvbt_tps)
+            *ui->dvbt_tps = res->dvbt;
     }
     if (ui->dvbt_nmer == AN_DVBT_HISTORY) {
         memmove(ui->dvbt_mer, ui->dvbt_mer + 1, (AN_DVBT_HISTORY - 1) * sizeof(ui->dvbt_mer[0]));
         ui->dvbt_nmer--;
     }
     ui->dvbt_mer[ui->dvbt_nmer++] = res->dvbt.found && res->dvbt.pilots ? (float)res->dvbt.mer_db : 0.0f;
+}
+
+/* Result whose TPS fields are shown: this one, or the last one that read it. */
+static const struct m2sdr_dvbt_result *dvbt_tps_of(const struct an_ui *ui)
+{
+    const struct m2sdr_dvbt_result *t = &ui->res.dvbt;
+
+    return t->tps || !ui->dvbt_tps || !ui->dvbt_tps->tps ? t : ui->dvbt_tps;
 }
 
 static void dvbt_retune(struct an_ui *ui, double freq_hz, bool *changed)
@@ -2749,6 +2801,7 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
     struct m2sdr_plot plot;
     ImVec2 avail, sq;
     float side, left_w, h, y0;
+    const struct m2sdr_dvbt_result *tp;
     double needed, half_hz;
     char text[160];
     int i, nref;
@@ -2796,7 +2849,8 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
         igText("No DVB-T multiplex (guard interval correlation %.3f): tune near the centre of one.", t->sync_quality);
         igPopTextWrapPos();
     }
-    needed = dvbt_needed_db(t);
+    tp     = dvbt_tps_of(ui);
+    needed = dvbt_needed_db(tp);
 
     igGetContentRegionAvail(&avail);
     side   = 0.55f * avail.y < 0.42f * avail.x ? 0.55f * avail.y : 0.42f * avail.x;
@@ -2814,8 +2868,8 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
         igTextColored((ImVec4){ 1.0f, 0.45f, 0.35f, 1.0f }, "MER --");
     igPopFont();
     if (isfinite(needed))
-        igText("Needed for %s %s: %.1f dB (Gaussian channel), margin %+.1f dB", m2sdr_modulation_name(t->tps_modulation),
-               t->code_rate_hp, needed, t->found && t->pilots ? t->mer_db - needed : -needed);
+        igText("Needed for %s %s: %.1f dB (Gaussian channel), margin %+.1f dB", m2sdr_modulation_name(tp->tps_modulation),
+               tp->code_rate_hp, needed, t->found && t->pilots ? t->mer_db - needed : -needed);
     else
         igTextUnformatted(t->found && t->pilots ? "TPS not read: no reference for the MER needed." : " ", NULL);
     h = sq.y - (igGetCursorPosY() - y0);
@@ -2902,8 +2956,8 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
 static void draw_dvbt_results(struct an_ui *ui)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_dvbt_result *t = &res->dvbt;
-    const double needed = dvbt_needed_db(t);
+    const struct m2sdr_dvbt_result *t = &res->dvbt, *tp = dvbt_tps_of(ui);
+    const double needed = dvbt_needed_db(tp);
 
     igSeparatorText("DVB-T");
     if (!res->dvbt_valid || !t->found) {
@@ -2918,12 +2972,12 @@ static void draw_dvbt_results(struct an_ui *ui)
         if (t->pilots) {
             label_value("Multiplex", "%.6f MHz", (res->set.freq_hz + t->freq_error_hz) / 1e6);
             label_value("Offset", "%+.1f Hz", t->freq_error_hz);
-            if (t->tps) {
-                label_value("Constellation", "%s", m2sdr_modulation_name(t->tps_modulation));
-                label_value("Code rate", t->tps_hierarchy ? "HP %s, LP %s" : "%s", t->code_rate_hp, t->code_rate_lp);
-                label_value("Hierarchy", t->tps_hierarchy ? "alpha %d" : "none", t->tps_hierarchy);
-                if (t->cell_id >= 0)
-                    label_value("Cell", "%d", t->cell_id);
+            if (tp->tps) {
+                label_value("Constellation", "%s", m2sdr_modulation_name(tp->tps_modulation));
+                label_value("Code rate", tp->tps_hierarchy ? "HP %s, LP %s" : "%s", tp->code_rate_hp, tp->code_rate_lp);
+                label_value("Hierarchy", tp->tps_hierarchy ? "alpha %d" : "none", tp->tps_hierarchy);
+                if (tp->cell_id >= 0)
+                    label_value("Cell", "%d", tp->cell_id);
             } else {
                 label_value("TPS", "not read");
             }
@@ -2932,7 +2986,7 @@ static void draw_dvbt_results(struct an_ui *ui)
                 label_value("Margin", "%+.1f dB", t->mer_db - needed);
             if (t->echo_level_db > -99.0)
                 label_value("Strongest echo", "%+.2f us, %.1f dB", t->echo_delay_us, t->echo_level_db);
-            label_value("Symbols", "%d", t->symbols);
+            label_value("Symbols", "%d%s", t->symbols, t->tps ? "" : " (TPS of an earlier capture)");
         } else {
             label_value("Pilots", "not found (%.2f)", t->pilot_quality);
         }
