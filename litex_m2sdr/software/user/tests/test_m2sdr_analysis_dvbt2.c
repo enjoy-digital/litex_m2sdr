@@ -366,8 +366,112 @@ static void test_dvbt2(void)
     free(res);
 }
 
-int main(void)
+/* Report of m2sdr_analyzer */
+/*--------------------------*/
+
+/* Synthetic captures for make test-analyzer, SC16 on two channels at 64/7 MSPS: 0 a 32k extended
+ * multiplex of rotated 256QAM (as UK and France), 1 an 8k one of 64QAM with an echo. */
+static const struct dvbt2_signal report_signals[2] = {
+    { 32768, true,  0, 7, 16, true,   60, false, 200000,      0.0, 35.0,  0.0, -99.0 },
+    {  8192, false, 4, 2,  8, false, 100, true,  300000, 166667.0, 28.0, 15.0, -10.0 },
+};
+
+static int write_capture(const char *path, int which)
 {
+    const double fs = 64e6 / 7.0;
+    const size_t max = (size_t)(0.26 * fs);
+    float complex *x = malloc(max * sizeof(*x));
+    FILE *f = fopen(path, "wb");
+    size_t count, i;
+
+    if (!x || !f)
+        return 1;
+    count = make_dvbt2(x, max, fs, &report_signals[which]);
+    for (i = 0; i < count; i++) {
+        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
+                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
+        if (fwrite(v, sizeof(v), 1, f) != 1)
+            return 1;
+    }
+    free(x);
+    return fclose(f) == 0 ? 0 : 1;
+}
+
+static double json_number(const char *json, const char *name)
+{
+    char key[64];
+    const char *p = strstr(json, "\"dvbt2\"");
+
+    if (!p)
+        return NAN;
+    snprintf(key, sizeof(key), "\"%s\":", name);
+    p = strstr(p, key);
+    return p ? strtod(p + strlen(key), NULL) : NAN;
+}
+
+static int check_report(const char *path, int which)
+{
+    static char json[32768];
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f) {
+        printf("test_m2sdr_analysis_dvbt2: cannot open %s\n", path);
+        return 1;
+    }
+    n = fread(json, 1, sizeof(json) - 1, f);
+    fclose(f);
+    json[n] = '\0';
+    printf("DVB-T2 report of m2sdr_analyzer (%s):\n", which ? "8k, 64QAM, echo" : "32k extended, rotated 256QAM");
+    CHECK("found, pilots", strstr(json, "\"found\": true") && strstr(json, "\"pilots\": true"));
+    CHECK("not decoded: S1/S2, L1", strstr(json, "\"s1s2_decoded\": false") && strstr(json, "\"l1_decoded\": false"));
+    {
+        /* The analyzer looks at 0.25 s of the file. */
+        const struct dvbt2_signal *sig = &report_signals[which];
+        const size_t frame = t2_frame_len(sig), span = (size_t)(0.25 * 64e6 / 7.0);
+        int np1 = 0;
+
+        while ((size_t)sig->lead + (size_t)np1 * frame + 2048 <= span)
+            np1++;
+        CHECK_NEAR("P1 count", json_number(json, "p1_count"), np1, 0);
+        if (np1 >= 2)
+            CHECK_NEAR("frame (ms)", json_number(json, "frame_ms"), frame / (64e6 / 7.0) * 1e3, 0.002);
+    }
+    if (which == 0) {
+        CHECK("32k extended, guard 1/128, PP7", strstr(json, "\"fft_size\": \"32k\"") && strstr(json, "\"extended\": true") &&
+                                               strstr(json, "\"guard_interval\": \"1/128\"") && strstr(json, "\"pattern\": \"PP7\""));
+        CHECK("rotated, no data MER", strstr(json, "\"rotated\": true") && strstr(json, "\"mer_db\": null"));
+        /* 35 dB, less the quantisation of SC16 (a level of 0.1 full scale: 205 steps, -58 dB). */
+        CHECK_NEAR("pilot MER (dB)", json_number(json, "pilot_mer_db"), 35.0, 1.0);
+        CHECK_NEAR("carrier offset (Hz)", json_number(json, "carrier_offset_hz"), 0.0, 20.0);
+    } else {
+        /* An echo of amplitude a leaves (1 - a^2) / (1 + a^2) of the power: -0.9 dB at -10 dB. */
+        const double echo_db = 10.0 * log10((1.0 - 0.1) / (1.0 + 0.1));
+
+        CHECK("8k, guard 1/8, PP2", strstr(json, "\"fft_size\": \"8k\"") && strstr(json, "\"extended\": false") &&
+                                    strstr(json, "\"guard_interval\": \"1/8\"") && strstr(json, "\"pattern\": \"PP2\""));
+        CHECK("64QAM, not rotated", strstr(json, "\"constellation\": \"64QAM\"") && strstr(json, "\"rotated\": false"));
+        CHECK_NEAR("pilot MER (dB)", json_number(json, "pilot_mer_db"), 28.0 + echo_db, 1.0);
+        /* The data cells: the noise of the channel estimate on top, 10 log(1 + 0.7 / (4/3)^2). */
+        CHECK_NEAR("MER (dB)", json_number(json, "mer_db"), 28.0 + echo_db - 1.5, 1.0);
+        CHECK_NEAR("carrier offset (Hz)", json_number(json, "carrier_offset_hz"), 166667.0, 20.0);
+        CHECK_NEAR("echo delay (us)", json_number(json, "echo_delay_us"), 15.0, 0.5);
+        CHECK_NEAR("echo level (dB)", json_number(json, "echo_level_db"), -10.0, 1.5);
+    }
+    if (failures) {
+        printf("test_m2sdr_analysis_dvbt2: %d FAILED\n", failures);
+        return 1;
+    }
+    printf("test_m2sdr_analysis_dvbt2: report checked\n");
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc == 4 && strcmp(argv[1], "--write") == 0)
+        return write_capture(argv[3], atoi(argv[2]) != 0);
+    if (argc == 4 && strcmp(argv[1], "--check") == 0)
+        return check_report(argv[3], atoi(argv[2]) != 0);
     test_dvbt2();
     if (failures) {
         printf("test_m2sdr_analysis_dvbt2: %d FAILED\n", failures);
