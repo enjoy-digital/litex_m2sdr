@@ -361,9 +361,15 @@ struct an_ui {
 };
 
 /* Widgets of the views. */
+uint32_t palette_color(int palette, float t);
+void legend_item(ImU32 color, const char *name, float right);
 void label_value(const char *label, const char *fmt, ...);
 bool input_scaled(const char *label, double *value, double scale, const char *fmt);
 void same_line_or_wrap(float spacing, float width);
+
+/* Span and traces. */
+void view_full(struct an_ui *ui);
+void traces_reset(struct an_ui *ui);
 
 #endif /* M2SDR_ANALYZER_GUI */
 
