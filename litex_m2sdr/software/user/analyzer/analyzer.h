@@ -370,6 +370,8 @@ void same_line_or_wrap(float spacing, float width);
 /* Span and traces. */
 void view_full(struct an_ui *ui);
 void traces_reset(struct an_ui *ui);
+void view_retune(struct an_ui *ui, double freq_hz, bool *changed);
+void view_rate(struct an_ui *ui, double rate, bool *changed);
 
 /* OFDM views: an_trend.c. */
 bool   trend_add(struct an_trend *tr, const struct an_settings *set, bool ok, double mer, const float *mer_bin,
