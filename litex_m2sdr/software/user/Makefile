@@ -208,6 +208,7 @@ TEST_PROGS += tests/test_m2sdr_analysis_dvbt2
 TEST_PROGS += tests/test_m2sdr_analysis_fm
 TEST_PROGS += tests/test_m2sdr_analysis_cellular
 TEST_PROGS += tests/test_m2sdr_analysis_wireless
+TEST_PROGS += tests/test_m2sdr_analysis_dual
 
 core-tools: $(CORE_BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp test-analyzer test-fm
@@ -227,6 +228,7 @@ test-libm2sdr: $(TEST_PROGS)
 	./tests/test_m2sdr_analysis_cellular
 	./tests/test_m2sdr_analysis_wireless
 	./tests/test_m2sdr_analysis_timing
+	./tests/test_m2sdr_analysis_dual
 
 # Report mode of m2sdr_analyzer on capture files of known content: the spectrum here, and one
 # target per mode in its analyzer/mode_xxx.mk, declared there with its own recipe as
@@ -409,6 +411,8 @@ tests/test_m2sdr_analysis_wireless: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_wireless.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 tests/test_m2sdr_analysis_timing: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_timing.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_timing.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+tests/test_m2sdr_analysis_dual: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_dual.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_dual.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_cal.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
