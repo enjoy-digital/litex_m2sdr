@@ -1105,6 +1105,23 @@ static void test_wifi(void)
         free(q);
     }
 
+    /* The pad bits after the tail are scrambled: the code ends off state 0. Lengths of every
+     * pad at 54 Mbps (216 bits a symbol), all decoded. */
+    printf(" 54 Mbps, PSDU lengths of every pad\n");
+    {
+        int body, bad = 0;
+
+        for (body = 300; body < 327; body++) {
+            n   = wifi_data_frame(f, wifi_bssid, wifi_sta, body);
+            len = wifi_packet(&wifi_rates[7], f, n, 0x2b, pk);
+            memset(x, 0, count * sizeof(*x));
+            wifi_add(x, count, pk, len, 300, &flat, 1, 0.1, 0.0);
+            add_noise(x, count, 0.01 / pow(10.0, 35.0 / 10.0));
+            bad += !(m2sdr_wifi_analyse(x, count, WIFI_FS, NULL, res) == 0 && res->fcs_ok == 1);
+        }
+        CHECK("27 lengths, FCS right", bad == 0);
+    }
+
     /* HT mixed format: the HT-SIG read; VHT: told apart. */
     printf(" HT-SIG, MCS 7, 1500 bytes, short GI\n");
     memset(x, 0, count * sizeof(*x));
