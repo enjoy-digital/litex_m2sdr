@@ -91,6 +91,8 @@ struct an_settings {
     struct m2sdr_dvbt_config dvbt_hint;
 };
 
+extern const char *const window_names[];  /* enum m2sdr_window. */
+
 /* Source */
 /*--------*/
 
@@ -166,6 +168,9 @@ struct an_result {
     bool   lost;                   /* Samples were lost in the capture. */
 };
 
+size_t capture_samples(const struct an_settings *set);
+int    analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);
+
 /* Phase noise floor */
 /*-------------------*/
 
@@ -179,6 +184,8 @@ struct an_floor {
     char   path[1024];
 };
 
+int  floor_default_path(uint64_t dna, char *path, size_t len);
+int  floor_load(struct an_floor *fl, const char *path);
 int  floor_save(struct an_floor *fl, const char *path, const struct an_result *res);
 
 /* Modes */
@@ -266,7 +273,15 @@ static inline bool an_mode_on(const struct an_mode *m, const struct an_settings 
 /* Reports */
 /*---------*/
 
-void print_json_number(const char *name, double value, bool last);
+void   print_json_number(const char *name, double value, bool last);
+int    export_csv(const char *path, const struct an_result *res);
+int    run_report(struct an_source *src, const struct an_settings *set, bool json, const char *csv_path,
+                  struct an_floor *fl, const char *floor_save_path);
+
+/* --watch */
+double now_ms(void);
+int    watch_modes(const struct an_settings *set, const struct an_mode **mode);
+int    run_watch(struct an_source *src, const struct an_settings *base, bool json);
 
 /* GUI */
 /*-----*/
