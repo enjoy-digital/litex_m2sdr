@@ -62,6 +62,11 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added the coherence of RX1 and RX2 to `m2sdr_analyzer` (`--coherence`): coherence, gain, phase and delay between them over frequency, and their ripple, a check of the board, cables and antennas on one source.
 - Added direction finding with two antennas to `m2sdr_analyzer` (`--df`): angle of arrival from the phase between RX1 and RX2, every candidate beyond lambda/2, beamscan and MUSIC pseudo-spectra, and a calibration from a source at broadside stored per board and frequency.
 - Added the 2x2 channel of an LTE cell of two antenna ports to `m2sdr_analyzer` (`--mimo`): channel matrix per resource block from the reference signals of ports 0 and 1 on RX1 and RX2, singular values, condition number, rank estimate and path powers.
+- Added the lab modes to `m2sdr_analyzer` (Lab tab, the board transmits a stimulus to a device between TX and RX, through cables and attenuators): a generic TX path that loops a periodic stimulus while capturing, and `--lab-stimulus-out` to write it.
+- Added the sweep to `m2sdr_analyzer`: |S21|, phase and group delay of a device over a span (stepped tones or chirp), with a thru calibration kept per board (`--sweep`, `--sweep-thru-save`).
+- Added the compression to `m2sdr_analyzer`: gain against the input level from a staircase of tone levels in one capture, small-signal gain, P1dB and P3dB (`--compression`).
+- Added the two-tone IMD to `m2sdr_analyzer`: IM3 and IM5, OIP3, IIP3, IP5 and spurs (`--imd`).
+- Added the AM/AM to `m2sdr_analyzer`: AM/AM and AM/PM curves and scatter, EVM and ACLR of a device driven by OFDM-like noise or QAM (`--amam`). The lab measurements are in libm2sdr (`m2sdr_analysis_lab.h`).
 - Added `m2sdr_gen --signal qam`: random PSK or QAM symbols under a root raised cosine, as a test source. `m2sdr_gen` now sends at the sample rate over Ethernet, where it used to send as fast as the host could and the board dropped most of the datagrams, and reports the TX underflows counted by the FPGA.
 
 **FM Utilities**
