@@ -71,7 +71,7 @@ CXX     = $(CROSS_COMPILE)g++
 AR      = ar
 .DEFAULT_GOAL := all
 FORCE:
-.PHONY: FORCE all core-tools core-tests examples test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-analyzer test-fm clean install install_dev check analyze-libm2sdr
+.PHONY: FORCE all core-tools core-tests examples test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-analyzer test-analyzer-spectrum test-fm clean install install_dev check analyze-libm2sdr
 
 ALL_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata \
                 m2sdr_gen m2sdr_fm_tx m2sdr_fm_rx m2sdr_check m2sdr_scan m2sdr_cal m2sdr_analyzer
@@ -202,25 +202,20 @@ test-libm2sdr: $(TEST_PROGS)
 	./tests/test_m2sdr_fm
 	./tests/test_m2sdr_analysis
 
-# Report mode of m2sdr_analyzer on a capture file of known content.
-test-analyzer: m2sdr_analyzer tests/test_m2sdr_analysis
+# Report mode of m2sdr_analyzer on capture files of known content: the spectrum here, and one
+# target per mode in its analyzer/mode_xxx.mk, declared there with its own recipe as
+#   test-analyzer: test-analyzer-xxx
+#   test-analyzer-xxx: m2sdr_analyzer tests/test_m2sdr_analysis
+# (see analyzer/mode_lte.mk), so that adding a mode does not edit a shared recipe.
+test-analyzer: test-analyzer-spectrum
+test-analyzer-spectrum: m2sdr_analyzer tests/test_m2sdr_analysis
 	./tests/test_m2sdr_analysis --write tests/analysis_capture.sc16
 	./m2sdr_analyzer --report --json --file tests/analysis_capture.sc16 --nchannels 1 --sample-rate 1e6 \
 		--freq 100e6 --fft-len 4096 --window flattop --channel-bw 100e3 --channel-offset -200e3 \
 		> tests/analysis_capture.json
 	./tests/test_m2sdr_analysis --check tests/analysis_capture.json
-	./tests/test_m2sdr_analysis --write-lte tests/analysis_capture_lte.sc16
-	./m2sdr_analyzer --report --json --lte --file tests/analysis_capture_lte.sc16 --sample-rate 7.68e6 \
-		> tests/analysis_capture_lte.json
-	./tests/test_m2sdr_analysis --check-lte tests/analysis_capture_lte.json
-	./tests/test_m2sdr_analysis --write-dvbt tests/analysis_capture_dvbt.sc16
-	./m2sdr_analyzer --report --json --dvbt --file tests/analysis_capture_dvbt.sc16 \
-		> tests/analysis_capture_dvbt.json
-	./tests/test_m2sdr_analysis --check-dvbt tests/analysis_capture_dvbt.json
-	./tests/test_m2sdr_analysis --write-dab tests/analysis_capture_dab.sc16
-	./m2sdr_analyzer --report --json --dab --file tests/analysis_capture_dab.sc16 \
-		> tests/analysis_capture_dab.json
-	./tests/test_m2sdr_analysis --check-dab tests/analysis_capture_dab.json
+
+include $(sort $(wildcard analyzer/*.mk))
 
 test-sigmf: tests/test_m2sdr_sigmf
 	./tests/test_m2sdr_sigmf
@@ -351,7 +346,9 @@ m2sdr_cal: $(LIBM2SDR_STATIC) m2sdr_cal.o
 
 # m2sdr_analyzer always has its report mode; its window needs SDL2 and cimgui. Its code is in
 # analyzer/, besides main and the command line.
-M2SDR_ANALYZER_CORE_OBJS := m2sdr_analyzer.o analyzer/an_source.o analyzer/an_core.o analyzer/mode_pn.o analyzer/mode_demod.o analyzer/mode_lte.o analyzer/mode_dvbt.o analyzer/mode_dab.o
+# analyzer/mode_*.c: one file per mode, all built.
+M2SDR_ANALYZER_CORE_OBJS := m2sdr_analyzer.o analyzer/an_source.o analyzer/an_core.o \
+                            $(patsubst %.c,%.o,$(sort $(wildcard analyzer/mode_*.c)))
 ifeq ($(and $(filter 1,$(HAVE_SDL2)),$(filter 1,$(HAVE_CIMGUI))),1)
 M2SDR_ANALYZER_CFLAGS := -DM2SDR_ANALYZER_GUI -I. $(SDL2_CFLAGS)
 M2SDR_ANALYZER_OBJS   := analyzer/an_gui.o analyzer/an_trend.o $(SCAN_UI_DIR)/m2sdr_plot.o $(M2SDR_IMGUI_OBJS)
