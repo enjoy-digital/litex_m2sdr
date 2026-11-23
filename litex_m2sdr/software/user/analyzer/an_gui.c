@@ -65,6 +65,9 @@ struct an_job {
     bool   busy;
     float complex *x;
     size_t x_count;                /* Room in x. */
+    float complex *x2;             /* The other channel, for the modes of two; NULL: not captured. */
+    size_t x2_count;
+    bool   two;
     size_t count;
     struct an_settings set;
     struct an_result *res;
@@ -79,7 +82,7 @@ static void *job_main(void *arg)
     struct an_job *j = arg;
     const double t = now_ms();
 
-    j->rc = analyse(j->x, j->count, &j->set, j->res);
+    j->rc = analyse_two(j->x, j->two ? j->x2 : NULL, j->count, &j->set, j->res);
     j->res->lost   = j->capture_rc > 0;
     j->analysis_ms = now_ms() - t;
     return NULL;
@@ -128,6 +131,7 @@ static void job_free(struct an_job *j)
     }
     free(j->res);
     free(j->x);
+    free(j->x2);
 }
 
 static void *worker_main(void *arg)
@@ -182,6 +186,17 @@ static void *worker_main(void *arg)
             j->x       = grown;
             j->x_count = j->count;
         }
+        j->two = capture_two_channels(&set);
+        if (j->two && j->count > j->x2_count) {
+            float complex *grown = realloc(j->x2, j->count * sizeof(*j->x2));
+
+            if (!grown) {
+                j->two = false;    /* The modes of two say they have one channel. */
+            } else {
+                j->x2       = grown;
+                j->x2_count = j->count;
+            }
+        }
 
         /* A file is read faster than it can be looked at. */
         if (now_ms() - last < AN_MIN_PERIOD_MS)
@@ -189,7 +204,7 @@ static void *worker_main(void *arg)
         last = now_ms();
 
         t0 = now_ms();
-        j->capture_rc = source_capture(sh->src, &set, j->x, j->count, j->err, sizeof(j->err));
+        j->capture_rc = source_capture_two(sh->src, &set, j->x, j->two ? j->x2 : NULL, j->count, j->err, sizeof(j->err));
         j->capture_ms = now_ms() - t0;
         j->res->capture = sh->src->capture;
         /* The analysis of the capture before, then this one in the background. */

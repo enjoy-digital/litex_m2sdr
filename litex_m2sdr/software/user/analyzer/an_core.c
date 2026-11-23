@@ -60,14 +60,33 @@ static bool psd_short(const struct an_settings *set)
     return false;
 }
 
+/* A mode of two channels is on: both are captured. */
+bool capture_two_channels(const struct an_settings *set)
+{
+    int m;
+
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->two_channels && an_mode_on(an_modes[m], set))
+            return true;
+    }
+    return false;
+}
+
 int analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res)
+{
+    return analyse_two(x, NULL, count, set, res);
+}
+
+int analyse_two(const float complex *x, const float complex *x2, size_t count, const struct an_settings *set,
+                struct an_result *res)
 {
     const double half = 0.5 * set->sample_rate;
     const size_t spectrum = (size_t)set->fft_len * ((size_t)set->averages + 1) / 2;
     const size_t psd_count = psd_short(set) && spectrum >= (size_t)set->fft_len && spectrum < count ? spectrum : count;
     int m;
 
-    res->set = *set;
+    res->set          = *set;
+    res->two_channels = x2 != NULL;
     if (m2sdr_psd_compute(x, psd_count, set->sample_rate, (size_t)set->fft_len, (enum m2sdr_window)set->window, &res->psd) != 0)
         return -1;
     (void)m2sdr_iq_stats(x, count, 0.999, &res->stats);
@@ -121,11 +140,16 @@ int analyse(const float complex *x, size_t count, const struct an_settings *set,
     for (m = 0; an_modes[m]; m++) {
         const struct an_mode *mode = an_modes[m];
 
-        if (!mode->analyse)
+        if (!mode->analyse && !mode->analyse_two)
             continue;
         *(bool *)((char *)res + mode->valid) = false;
-        if (an_mode_on(mode, set))
+        if (!an_mode_on(mode, set))
+            continue;
+        if (mode->analyse)
             mode->analyse(x, count, set, res);
+        /* RX1 and RX2, whichever the spectrum shows. */
+        if (mode->analyse_two && x2)
+            mode->analyse_two(set->channel ? x2 : x, set->channel ? x : x2, count, set, res);
     }
     res->time_count = count < AN_TIME_POINTS ? count : AN_TIME_POINTS;
     memcpy(res->time, x, res->time_count * sizeof(*x));
@@ -397,23 +421,24 @@ int run_report(struct an_source *src, const struct an_settings *set, bool json, 
                struct an_floor *fl, const char *floor_save_path)
 {
     const size_t count = capture_samples(set);
-    float complex *x = malloc(count * sizeof(*x));
+    const bool two = capture_two_channels(set);
+    float complex *x = malloc(count * sizeof(*x)), *x2 = two ? malloc(count * sizeof(*x2)) : NULL;
     struct an_result *res = calloc(1, sizeof(*res));
     char err[256];
     int rc, status = 1;
 
-    if (!x || !res) {
+    if (!x || !res || (two && !x2)) {
         fprintf(stderr, "Out of memory\n");
         goto out;
     }
-    rc = source_capture(src, set, x, count, err, sizeof(err));
+    rc = source_capture_two(src, set, x, x2, count, err, sizeof(err));
     if (rc < 0) {
         fprintf(stderr, "Capture failed: %s\n", err);
         goto out;
     }
     res->lost    = rc > 0;
     res->capture = src->capture;
-    if (analyse(x, count, set, res) != 0) {
+    if (analyse_two(x, x2, count, set, res) != 0) {
         fprintf(stderr, "Analysis failed\n");
         goto out;
     }
@@ -445,6 +470,7 @@ out:
     }
     free(res);
     free(x);
+    free(x2);
     return status;
 }
 /* Watch */
@@ -488,7 +514,7 @@ int run_watch(struct an_source *src, const struct an_settings *base, bool json)
     const struct an_mode *mode = NULL;
     struct an_settings set = *base;
     struct an_result *res = calloc(1, sizeof(*res));
-    float complex *x = NULL;
+    float complex *x = NULL, *x2 = NULL;
     size_t x_count = 0;
     const double start = now_ms();
     int status = 1;
@@ -515,10 +541,18 @@ int run_watch(struct an_source *src, const struct an_settings *base, bool json)
                 fprintf(stderr, "Out of memory\n");
                 goto out;
             }
-            x       = grown;
+            x = grown;
+            if (capture_two_channels(&set)) {
+                grown = realloc(x2, count * sizeof(*x2));
+                if (!grown) {
+                    fprintf(stderr, "Out of memory\n");
+                    goto out;
+                }
+                x2 = grown;
+            }
             x_count = count;
         }
-        rc = source_capture(src, &set, x, count, err, sizeof(err));
+        rc = source_capture_two(src, &set, x, capture_two_channels(&set) ? x2 : NULL, count, err, sizeof(err));
         if (rc < 0 && watch_stop)
             break;                 /* Ctrl-C during the capture. */
         if (rc < 0) {
@@ -526,7 +560,7 @@ int run_watch(struct an_source *src, const struct an_settings *base, bool json)
             goto out;
         }
         res->capture = src->capture;
-        if (analyse(x, count, &set, res) != 0) {
+        if (analyse_two(x, capture_two_channels(&set) ? x2 : NULL, count, &set, res) != 0) {
             fprintf(stderr, "Analysis failed\n");
             goto out;
         }
@@ -543,5 +577,6 @@ out:
     }
     free(res);
     free(x);
+    free(x2);
     return status;
 }

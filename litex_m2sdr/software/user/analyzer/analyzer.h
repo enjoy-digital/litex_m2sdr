@@ -16,7 +16,8 @@
  * 1. analyzer/mode_xxx.c, everything of the mode: its hooks, static, and its entry
  *    `const struct an_mode an_mode_xxx` (--view key, tab title, category, flag, result flag,
  *    report rank, options and their parser, defaults, help block...): see mode_dab.c. A mode
- *    that --watch follows has a watch_line hook and an option named as its key (--dab).
+ *    that --watch follows has a watch_line hook and an option named as its key (--dab). A mode
+ *    of RX1 and RX2 together sets .two_channels and .analyse_two: see mode_coherence.c.
  * 2. analyzer/modes.h: one line, AN_MODE(xxx), at its place in the tabs.
  * 3. Here: its flag and settings in struct an_settings, its result and result flag in
  *    struct an_result, and the state of its view in struct an_ui if it keeps one.
@@ -229,6 +230,9 @@ struct an_source {
 int  file_open(struct an_source *src, const char *path, int capture_index, char *err, size_t err_len);
 int  source_capture(struct an_source *src, const struct an_settings *set, float complex *x,
                     size_t count, char *err, size_t err_len);
+/* The same, the other channel in x2 too (NULL: only x), from the same sample periods. */
+int  source_capture_two(struct an_source *src, const struct an_settings *set, float complex *x, float complex *x2,
+                        size_t count, char *err, size_t err_len);
 void source_close(struct an_source *src);
 
 /* Analysis */
@@ -295,6 +299,7 @@ struct an_result {
     float  adev_t_s[AN_ADEV_HISTORY], adev_ppb[AN_ADEV_HISTORY];
     struct m2sdr_gnss_result gnss;
     bool   gnss_valid;             /* Measured: the sample rate was 2.048 or 4.096 MSPS. */
+    bool   two_channels;           /* The capture had both channels: the modes of two are measured. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
@@ -304,6 +309,11 @@ struct an_result {
 
 size_t capture_samples(const struct an_settings *set);
 int    analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);
+/* Two channels: a mode of two is on. x holds the channel of the settings, x2 the other one
+ * (NULL: not captured, the modes of two are not measured). */
+bool   capture_two_channels(const struct an_settings *set);
+int    analyse_two(const float complex *x, const float complex *x2, size_t count, const struct an_settings *set,
+                   struct an_result *res);
 
 /* Phase noise floor */
 /*-------------------*/
@@ -386,6 +396,11 @@ struct an_mode {
     /* Capture and analysis. */
     size_t (*samples)(const struct an_settings *set);             /* Samples it needs. */
     void   (*analyse)(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);
+    /* A mode of two channels: RX1 and RX2 of one capture, sample for sample. The core captures
+     * both while it is on, and only calls it with both. */
+    bool   two_channels;
+    void   (*analyse_two)(const float complex *x1, const float complex *x2, size_t count, const struct an_settings *set,
+                          struct an_result *res);
     /* Its section of the reports, after the ones of the spectrum. JSON: its "key": {...} block,
      * from its first line to its closing brace, with no comma nor newline after it. */
     void   (*report_text)(const struct an_result *res, const struct an_report *rep);
