@@ -179,6 +179,88 @@ struct an_floor {
     char   path[1024];
 };
 
+/* Modes */
+/*-------*/
+
+/* Groups of the views, in the order of their tabs. */
+enum an_category {
+    AN_CAT_SPECTRUM,
+    AN_CAT_SIGNAL,
+    AN_CAT_CELLULAR,
+    AN_CAT_BROADCAST,
+    AN_CAT_WIRELESS,
+    AN_CAT_LAB,
+    AN_CAT_TWO_CHANNEL,
+    AN_CAT_TIMING,
+    AN_CAT_MONITORING,
+    AN_CAT_COUNT
+};
+
+#define AN_NONE      ((size_t)-1)  /* Offset of a flag a mode does not have. */
+#define AN_MODES_MAX 64            /* Views and modes. */
+
+/* What the reports of the modes get besides the result. */
+struct an_report {
+    double off;                    /* Added to the levels: dBFS to dBm. */
+    const char *unit;              /* Of the levels: "dBm" with an offset, "dBFS" without. */
+    const struct an_floor *fl;     /* Phase noise floor of the board; NULL or empty: none. */
+};
+
+struct an_ui;
+
+/* A view of the window, and the measurement behind it. The views of the spectrum are measured
+ * with every capture and only have their view; a mode has its flag in the settings, is measured
+ * while it is on, and has its section in the reports. A hook left NULL is not called. */
+struct an_mode {
+    const char *key;               /* --view name: "dvbt". */
+    const char *title;             /* Its tab: "DVB-T". */
+    enum an_category category;
+    size_t on;                     /* offsetof(struct an_settings, <flag>); AN_NONE: always measured. */
+    size_t valid;                  /* offsetof(struct an_result, <flag>): cleared before each analysis. */
+    int    report_rank;            /* Place of its section in the reports: lower first. */
+    double default_rate;           /* Sample rate when it is on and none is given; 0: none. */
+    bool   psd_short;              /* Its capture is long: the spectrum only takes its own averages of it. */
+    /* Capture and analysis. */
+    size_t (*samples)(const struct an_settings *set);             /* Samples it needs. */
+    void   (*analyse)(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);
+    /* Its section of the reports, after the ones of the spectrum. JSON: its "key": {...} block,
+     * from its first line to its closing brace, with no comma nor newline after it. */
+    void   (*report_text)(const struct an_result *res, const struct an_report *rep);
+    void   (*report_json)(const struct an_result *res, const struct an_report *rep);
+    /* --watch on a board: before each capture, then one line per result (now: seconds since the
+     * start); < 0: stop on an error. */
+    void   (*watch_prepare)(struct an_settings *set);
+    int    (*watch_line)(const struct an_settings *set, const struct an_result *res, double now, bool json);
+#ifdef M2SDR_ANALYZER_GUI
+    /* Worker: settings of a capture from the results before, and each result. */
+    void   (*worker_prepare)(struct an_settings *set, bool live);
+    void   (*worker_result)(const struct an_settings *set, const struct an_result *res);
+    /* Window: its view (live: the RFIC can be tuned from it), its figures (NULL: the ones of the
+     * spectrum), each new result, and the end. */
+    void   (*draw)(struct an_ui *ui, bool live, bool *changed);
+    void   (*results)(struct an_ui *ui);
+    void   (*keep)(struct an_ui *ui);
+    void   (*close)(struct an_ui *ui);
+#endif
+};
+
+/* The views and modes, in the order of their tabs, NULL terminated. */
+extern const struct an_mode *const an_modes[];
+
+extern const struct an_mode an_mode_spectrum, an_mode_time, an_mode_statistics;
+extern const struct an_mode an_mode_pn, an_mode_demod, an_mode_lte, an_mode_dvbt, an_mode_dab;
+
+/* The flag of a mode in settings; NULL for a view of the spectrum. */
+static inline bool *an_mode_flag(const struct an_mode *m, struct an_settings *set)
+{
+    return m->on == AN_NONE ? NULL : (bool *)((char *)set + m->on);
+}
+
+static inline bool an_mode_on(const struct an_mode *m, const struct an_settings *set)
+{
+    return m->on != AN_NONE && *(const bool *)((const char *)set + m->on);
+}
+
 /* GUI */
 /*-----*/
 

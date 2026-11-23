@@ -55,27 +55,36 @@ static size_t capture_samples(const struct an_settings *set)
 {
     size_t count = (size_t)set->fft_len * ((size_t)set->averages + 1) / 2;
 
+    int m;
+
     if (count < (size_t)set->fft_len)
         count = (size_t)set->fft_len;
-    if (set->pn_on && count < ((size_t)1 << set->pn_log2))
-        count = (size_t)1 << set->pn_log2;
-    if (set->demod_on && count < ((size_t)1 << set->demod_log2))
-        count = (size_t)1 << set->demod_log2;
-    if (set->lte_on && count < (size_t)(AN_LTE_SECONDS * set->sample_rate))
-        count = (size_t)(AN_LTE_SECONDS * set->sample_rate);
-    if (set->dab_on && count < (size_t)(AN_DAB_SECONDS * set->sample_rate))
-        count = (size_t)(AN_DAB_SECONDS * set->sample_rate);
-    if (set->dvbt_on && count < (size_t)((set->dvbt_fast ? AN_DVBT_FAST_SECONDS : AN_DVBT_SECONDS) * set->sample_rate))
-        count = (size_t)((set->dvbt_fast ? AN_DVBT_FAST_SECONDS : AN_DVBT_SECONDS) * set->sample_rate);
+    /* The longest capture of the modes on. */
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->samples && an_mode_on(an_modes[m], set) && count < an_modes[m]->samples(set))
+            count = an_modes[m]->samples(set);
+    }
     return count < AN_TIME_POINTS ? AN_TIME_POINTS : count;
+}
+
+/* A mode on has a long capture: the spectrum keeps its own averages of it, for speed. */
+static bool psd_short(const struct an_settings *set)
+{
+    int m;
+
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->psd_short && an_mode_on(an_modes[m], set))
+            return true;
+    }
+    return false;
 }
 
 static int analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res)
 {
     const double half = 0.5 * set->sample_rate;
-    /* The DVB-T capture is long: the spectrum keeps its own averages, for speed. */
     const size_t spectrum = (size_t)set->fft_len * ((size_t)set->averages + 1) / 2;
-    const size_t psd_count = (set->dvbt_on || set->dab_on) && spectrum >= (size_t)set->fft_len && spectrum < count ? spectrum : count;
+    const size_t psd_count = psd_short(set) && spectrum >= (size_t)set->fft_len && spectrum < count ? spectrum : count;
+    int m;
 
     res->set = *set;
     if (m2sdr_psd_compute(x, psd_count, set->sample_rate, (size_t)set->fft_len, (enum m2sdr_window)set->window, &res->psd) != 0)
@@ -127,40 +136,15 @@ static int analyse(const float complex *x, size_t count, const struct an_setting
     } else {
         res->obw_valid = m2sdr_psd_obw(&res->psd, -half, half, 0.99, &res->obw_lo_hz, &res->obw_hi_hz) == 0;
     }
-    res->pn_valid = false;
-    if (set->pn_on) {
-        const size_t n = count < ((size_t)1 << set->pn_log2) ? count : (size_t)1 << set->pn_log2;
+    /* The modes on. */
+    for (m = 0; an_modes[m]; m++) {
+        const struct an_mode *mode = an_modes[m];
 
-        res->pn_valid = m2sdr_phase_noise(x, n, set->sample_rate, set->freq_hz, set->pn_lo_hz, set->pn_hi_hz,
-                                          &res->pn) == 0 && res->pn.found;
-        /* The jitter needs the RF frequency of the carrier, known once it is found. */
-        if (res->pn_valid && set->freq_hz + res->pn.carrier_hz > 0)
-            res->pn.jitter_s = res->pn.rms_rad / (2.0 * M_PI * (set->freq_hz + res->pn.carrier_hz));
-    }
-    res->demod_valid = false;
-    if (set->demod_on) {
-        const size_t n = count < ((size_t)1 << set->demod_log2) ? count : (size_t)1 << set->demod_log2;
-
-        res->demod_valid = m2sdr_demod(x, n, set->sample_rate, &set->demod, &res->demod) == 0;
-    }
-    res->lte_valid = false;
-    if (set->lte_on) {
-        const size_t n = (size_t)(AN_LTE_SECONDS * set->sample_rate);
-
-        res->lte_valid = m2sdr_lte_analyse(x, count < n ? count : n, set->sample_rate, &res->lte) == 0;
-    }
-    res->dab_valid = false;
-    if (set->dab_on) {
-        const size_t n = (size_t)(AN_DAB_SECONDS * set->sample_rate);
-
-        res->dab_valid = m2sdr_dab_analyse(x, count < n ? count : n, set->sample_rate, &res->dab) == 0;
-    }
-    res->dvbt_valid = false;
-    if (set->dvbt_on) {
-        const size_t n = (size_t)(AN_DVBT_SECONDS * set->sample_rate);
-
-        res->dvbt_valid = m2sdr_dvbt_analyse(x, count < n ? count : n, set->sample_rate,
-                                             set->dvbt_hint.fft_len ? &set->dvbt_hint : NULL, &res->dvbt) == 0;
+        if (!mode->analyse)
+            continue;
+        *(bool *)((char *)res + mode->valid) = false;
+        if (an_mode_on(mode, set))
+            mode->analyse(x, count, set, res);
     }
     res->time_count = count < AN_TIME_POINTS ? count : AN_TIME_POINTS;
     memcpy(res->time, x, res->time_count * sizeof(*x));
@@ -279,6 +263,19 @@ static double dvbt_needed_db(const struct m2sdr_dvbt_result *t)
     return NAN;
 }
 
+/* The modes in the order of their sections in the reports. */
+static int report_modes(const struct an_mode **order)
+{
+    int m, n = 0, k;
+
+    for (m = 0; an_modes[m] && n < AN_MODES_MAX; m++, n++) {
+        for (k = n; k > 0 && order[k - 1]->report_rank > an_modes[m]->report_rank; k--)
+            order[k] = order[k - 1];
+        order[k] = an_modes[m];
+    }
+    return n;
+}
+
 static void print_json_number(const char *name, double value, bool last)
 {
     if (isfinite(value))
@@ -291,7 +288,9 @@ static void report_json(const struct an_source *src, const struct an_result *res
 {
     const struct an_settings *set = &res->set;
     const double off = set->ref_offset_db;
-    int i;
+    const struct an_report rep = { off, off != 0.0 ? "dBm" : "dBFS", fl };
+    const struct an_mode *order[AN_MODES_MAX];
+    int i, k, n;
 
     printf("{\n");
     printf("  \"source\": {\n");
@@ -359,170 +358,16 @@ static void report_json(const struct an_source *src, const struct an_result *res
     print_json_number("gain_imbalance_db", res->stats.gain_imbalance_db, false);
     print_json_number("quadrature_deg", res->stats.quadrature_deg, false);
     print_json_number("clipped", res->stats.clipped, true);
-    printf("  }%s\n", set->pn_on || set->demod_on || set->lte_on || set->dvbt_on || set->dab_on ? "," : "");
-    if (set->lte_on) {
-        const struct m2sdr_lte_result *l = &res->lte;
-        static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
-
-        printf("  \"lte\": {\n");
-        printf("    \"found\": %s%s\n", res->lte_valid && l->found ? "true" : "false", res->lte_valid && l->found ? "," : "");
-        if (res->lte_valid && l->found) {
-            printf("    \"cell_id\": %d,\n", l->cell_id);
-            print_json_number("carrier_hz", set->freq_hz + l->freq_error_hz, false);
-            print_json_number("carrier_offset_hz", l->freq_error_hz, false);
-            printf("    \"mib\": %s,\n", l->mib ? "true" : "false");
-            if (l->mib) {
-                printf("    \"ports\": %d,\n", l->ports);
-                printf("    \"n_rb\": %d,\n", l->n_rb);
-                printf("    \"sfn\": %d,\n", l->sfn);
-                printf("    \"phich_duration\": \"%s\",\n", l->phich_duration ? "extended" : "normal");
-                printf("    \"phich_resource\": \"%s\",\n", phich[l->phich_resource & 3]);
-            }
-            printf("    \"analysed_rb\": %d,\n", l->analysed_rb);
-            print_json_number("rsrp_db", l->rsrp_db + off, false);
-            print_json_number("rssi_db", l->rssi_db + off, false);
-            print_json_number("pss_db", l->pss_db + off, false);
-            print_json_number("sss_db", l->sss_db + off, false);
-            print_json_number("rs_evm_percent", 100.0 * l->rs_evm, false);
-            if (l->mib)
-                print_json_number("pbch_evm_percent", 100.0 * l->pbch_evm, false);
-            printf("    \"data_analysed\": %s", l->data ? "true" : "false");
-            if (l->data) {
-                printf(",\n    \"data_blocks\": %d,\n", l->data_blocks);
-                if (l->ports > 1) {
-                    printf("    \"data_blocks_diversity\": %d,\n", l->data_diversity);
-                    printf("    \"data_blocks_precoded\": %d,\n", l->data_precoded);
-                    printf("    \"data_blocks_not_read\": %d,\n", l->data_unknown);
-                }
-                printf("    \"data_modulation\": \"%s\",\n", m2sdr_modulation_name(l->data_modulation));
-                print_json_number("data_evm_percent", 100.0 * l->data_evm, true);
-            } else {
-                printf("\n");
-            }
+    printf("  }");
+    /* The sections of the modes on, each after a comma. */
+    n = report_modes(order);
+    for (k = 0; k < n; k++) {
+        if (order[k]->report_json && an_mode_on(order[k], set)) {
+            printf(",\n");
+            order[k]->report_json(res, &rep);
         }
-        printf("  }%s\n", set->pn_on || set->demod_on || set->dvbt_on || set->dab_on ? "," : "");
     }
-    if (set->dvbt_on) {
-        const struct m2sdr_dvbt_result *t = &res->dvbt;
-        const bool ok = res->dvbt_valid && t->found;
-
-        printf("  \"dvbt\": {\n");
-        print_json_number("sync_quality", res->dvbt_valid ? t->sync_quality : 0.0, false);
-        printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
-        if (ok) {
-            printf("    \"mode\": \"%dk\",\n", t->fft_len / 1024);
-            printf("    \"guard_interval\": \"1/%d\",\n", t->guard);
-            print_json_number("power_db", t->power_dbfs + off, false);
-            printf("    \"pilots\": %s%s\n", t->pilots ? "true" : "false", t->pilots ? "," : "");
-            if (t->pilots) {
-                print_json_number("carrier_hz", set->freq_hz + t->freq_error_hz, false);
-                print_json_number("carrier_offset_hz", t->freq_error_hz, false);
-                printf("    \"tps\": %s,\n", t->tps ? "true" : "false");
-                if (t->tps) {
-                    printf("    \"constellation\": \"%s\",\n", m2sdr_modulation_name(t->tps_modulation));
-                    printf("    \"hierarchy\": %d,\n", t->tps_hierarchy);
-                    printf("    \"code_rate_hp\": \"%s\",\n", t->code_rate_hp);
-                    printf("    \"code_rate_lp\": \"%s\",\n", t->code_rate_lp);
-                    if (t->cell_id >= 0)
-                        printf("    \"cell_id\": %d,\n", t->cell_id);
-                }
-                printf("    \"mer_against\": \"%s\",\n", m2sdr_modulation_name(t->modulation));
-                print_json_number("mer_needed_db", dvbt_needed_db(t), false);
-                print_json_number("echo_delay_us", t->echo_delay_us, false);
-                print_json_number("echo_level_db", t->echo_level_db, false);
-                print_json_number("mer_db", t->mer_db, true);
-            }
-        }
-        printf("  }%s\n", set->pn_on || set->demod_on || set->dab_on ? "," : "");
-    }
-    if (set->dab_on) {
-        const struct m2sdr_dab_result *t = &res->dab;
-        const bool ok = res->dab_valid && t->found;
-
-        printf("  \"dab\": {\n");
-        print_json_number("sync_quality", res->dab_valid ? t->sync_quality : 0.0, false);
-        printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
-        if (ok) {
-            print_json_number("power_db", t->power_dbfs + off, false);
-            print_json_number("null_depth_db", t->null_depth_db, false);
-            printf("    \"phase_reference\": %s%s\n", t->prs ? "true" : "false", t->prs ? "," : "");
-            if (t->prs) {
-                print_json_number("carrier_hz", set->freq_hz + t->freq_error_hz, false);
-                print_json_number("carrier_offset_hz", t->freq_error_hz, false);
-                printf("    \"frames\": %d,\n", t->frames);
-                print_json_number("snr_db", t->null_snr_db, false);
-                print_json_number("echo_delay_us", t->echo_delay_us, false);
-                print_json_number("echo_level_db", t->echo_level_db, false);
-                print_json_number("mer_db", t->mer_db, true);
-            }
-        }
-        printf("  }%s\n", set->pn_on || set->demod_on ? "," : "");
-    }
-    if (set->demod_on) {
-        const struct m2sdr_demod_result *d = &res->demod;
-
-        printf("  \"modulation\": {\n");
-        printf("    \"signal\": %s,\n", res->demod_valid && d->signal ? "true" : "false");
-        printf("    \"locked\": %s%s\n", res->demod_valid && d->locked ? "true" : "false",
-               res->demod_valid && d->signal ? "," : "");
-        if (res->demod_valid && d->signal) {
-            printf("    \"type\": \"%s\",\n", m2sdr_modulation_name(d->modulation));
-            print_json_number("symbol_rate", d->symbol_rate, false);
-            print_json_number("rolloff", d->rolloff, false);
-            print_json_number("carrier_hz", set->freq_hz + d->freq_offset_hz, false);
-            print_json_number("carrier_offset_hz", d->freq_offset_hz, false);
-            print_json_number("power_db", d->power_db + off, false);
-            printf("    \"symbols\": %zu,\n", d->symbols);
-            print_json_number("evm_rms_percent", 100.0 * d->evm_rms, false);
-            print_json_number("evm_peak_percent", 100.0 * d->evm_peak, false);
-            print_json_number("mer_db", d->mer_db, false);
-            print_json_number("magnitude_error_percent", 100.0 * d->mag_err_rms, false);
-            print_json_number("phase_error_deg", d->phase_err_deg, false);
-            print_json_number("origin_offset_db", d->iq_offset_db, false);
-            print_json_number("gain_imbalance_db", d->gain_imbalance_db, false);
-            print_json_number("quadrature_deg", d->quadrature_deg, true);
-        }
-        printf("  }%s\n", set->pn_on ? "," : "");
-    }
-    if (set->pn_on) {
-        const struct m2sdr_phase_noise *pn = &res->pn;
-
-        printf("  \"phase_noise\": {\n");
-        printf("    \"found\": %s,\n", res->pn_valid ? "true" : "false");
-        if (res->pn_valid) {
-            print_json_number("carrier_hz", set->freq_hz + pn->carrier_hz, false);
-            print_json_number("carrier_db", pn->carrier_db + off, false);
-            print_json_number("integrated_from_hz", pn->lo_hz, false);
-            print_json_number("integrated_to_hz", pn->hi_hz, false);
-            print_json_number("rms_deg", pn->rms_deg, false);
-            print_json_number("jitter_s", pn->jitter_s, false);
-            print_json_number("residual_fm_hz", pn->residual_fm_hz, false);
-            printf("    \"offsets_hz\": [");
-            for (i = 0; i < pn->points; i++)
-                printf("%s%.3f", i ? ", " : "", pn->offset_hz[i]);
-            printf("],\n    \"l_dbc_hz\": [");
-            for (i = 0; i < pn->points; i++)
-                printf("%s%.3f", i ? ", " : "", pn->l_dbc_hz[i]);
-            printf("],\n    \"am_dbc_hz\": [");
-            for (i = 0; i < pn->points; i++)
-                printf("%s%.3f", i ? ", " : "", pn->am_dbc_hz[i]);
-            printf("],\n    \"floor_dbc_hz\": [");
-            for (i = 0; fl && fl->points && i < pn->points; i++) {
-                const double v = pn_interp(fl->offset_hz, fl->l_dbc_hz, fl->points, pn->offset_hz[i]);
-                if (isfinite(v))
-                    printf("%s%.3f", i ? ", " : "", v);
-                else
-                    printf("%snull", i ? ", " : "");
-            }
-            printf("],\n    \"spurs\": [");
-            for (i = 0; i < pn->nspurs; i++)
-                printf("%s{\"offset_hz\": %.3f, \"level_dbc\": %.3f}", i ? ", " : "", pn->spur_hz[i], pn->spur_dbc[i]);
-            printf("]\n");
-        } else {
-            printf("    \"carrier_hz\": null\n");
-        }
-        printf("  }\n");
-    }
+    printf("\n");
     printf("}\n");
 }
 
@@ -531,7 +376,9 @@ static void report_text(const struct an_source *src, const struct an_result *res
     const struct an_settings *set = &res->set;
     const double off = set->ref_offset_db;
     const char *unit = off != 0.0 ? "dBm" : "dBFS";
-    int i;
+    const struct an_report rep = { off, unit, fl };
+    const struct an_mode *order[AN_MODES_MAX];
+    int i, k, n;
 
     printf("Source     : %s, centre %.6f MHz, %.3f MSPS, RX%d\n", src->live ? "board" : src->name,
            set->freq_hz / 1e6, set->sample_rate / 1e6, set->channel + 1);
@@ -583,177 +430,11 @@ static void report_text(const struct an_source *src, const struct an_result *res
            res->stats.gain_imbalance_db, res->stats.quadrature_deg);
     printf("  Clipping   : %.4f %% of the samples\n", 100.0 * res->stats.clipped);
 
-    if (set->lte_on) {
-        const struct m2sdr_lte_result *l = &res->lte;
-        static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
-
-        printf("\nLTE downlink:\n");
-        if (!res->lte_valid) {
-            printf("  The sample rate must be 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS.\n");
-        } else if (!l->found) {
-            printf("  No cell found (PSS quality %.1f): the capture is tuned on the centre of an FDD carrier\n"
-                   "  with a normal cyclic prefix.\n", l->sync_quality);
-        } else {
-            printf("  Cell       : identity %d (group %d, sector %d)\n", l->cell_id, l->n_id_1, l->n_id_2);
-            printf("  Carrier    : %.6f MHz (%+.1f Hz from the centre)\n", (set->freq_hz + l->freq_error_hz) / 1e6, l->freq_error_hz);
-            if (l->mib)
-                printf("  MIB        : %d resource blocks, %d antenna port%s, frame %d, PHICH %s, %s\n", l->n_rb, l->ports,
-                       l->ports == 1 ? "" : "s", l->sfn, l->phich_duration ? "extended" : "normal", phich[l->phich_resource & 3]);
-            else
-                printf("  MIB        : not decoded (the PBCH of one and of two antenna ports was tried)\n");
-            printf("  Analysed   : %d resource blocks around the centre\n", l->analysed_rb);
-            printf("  Levels     : RSRP %.1f %s, RSSI %.1f %s, PSS %.1f, SSS %.1f %s per element\n", l->rsrp_db + off, unit,
-                   l->rssi_db + off, unit, l->pss_db + off, l->sss_db + off, unit);
-            printf("  EVM        : reference signals %.2f %%", 100.0 * l->rs_evm);
-            if (l->mib)
-                printf(", PBCH %.2f %%", 100.0 * l->pbch_evm);
-            printf("\n");
-            if (l->data) {
-                int used[M2SDR_MOD_COUNT] = { 0 }, ns, rb, m;
-
-                printf("  Data       : %d blocks read, mostly %s, EVM %.2f %% against the nearest points\n", l->data_blocks,
-                       l->data_blocks ? m2sdr_modulation_name(l->data_modulation) : "none", 100.0 * l->data_evm);
-                for (ns = 0; ns < M2SDR_LTE_FRAME_SLOTS; ns++) {
-                    for (rb = 0; rb < M2SDR_LTE_MAX_ANALYSED_RB; rb++)
-                        used[l->rb_modulation[ns][rb] % M2SDR_MOD_COUNT]++;
-                }
-                printf("  Blocks     :");
-                for (m = 0; m < M2SDR_MOD_COUNT; m++) {
-                    if (m != M2SDR_MOD_AUTO && used[m])
-                        printf(" %s %d", m2sdr_modulation_name((enum m2sdr_modulation)m), used[m]);
-                }
-                printf("\n");
-                if (l->ports > 1)
-                    printf("  Two ports  : %d blocks in transmit diversity, %d as one precoded layer, %d in use and not read\n"
-                           "               (two layers, that one receiver does not separate)\n",
-                           l->data_diversity, l->data_precoded, l->data_unknown);
-            } else if (l->mib)
-                printf("  Data       : not analysed, the cell has %d antenna ports\n", l->ports);
-        }
-    }
-
-    if (set->dvbt_on) {
-        const struct m2sdr_dvbt_result *t = &res->dvbt;
-
-        printf("\nDVB-T:\n");
-        if (!res->dvbt_valid) {
-            printf("  The sample rate must be the one of the channel: 9.142857 MSPS (8 MHz), 8 MSPS (7 MHz)\n"
-                   "  or 6.857143 MSPS (6 MHz).\n");
-        } else if (!t->found) {
-            printf("  No multiplex found (guard interval correlation %.3f).\n", t->sync_quality);
-        } else {
-            printf("  Mode       : %dk, guard interval 1/%d (%.0f us), %.1f %s\n", t->fft_len / 1024, t->guard, t->guard_us,
-                   t->power_dbfs + off, unit);
-            printf("  Sync       : guard correlation %.2f (about %.1f dB S/N)\n", t->sync_quality, t->sync_snr_db);
-            if (!t->pilots) {
-                printf("  Pilots     : not found (coherence %.2f): too much noise for the figures below.\n", t->pilot_quality);
-            } else {
-                printf("  Multiplex  : %.6f MHz (%+.1f Hz from the centre)\n", (set->freq_hz + t->freq_error_hz) / 1e6, t->freq_error_hz);
-                if (t->tps) {
-                    printf("  TPS        : %s, hierarchy %s, code rate %s", m2sdr_modulation_name(t->tps_modulation),
-                           t->tps_hierarchy ? "yes" : "none", t->code_rate_hp);
-                    if (t->tps_hierarchy)
-                        printf(" (LP %s, alpha %d)", t->code_rate_lp, t->tps_hierarchy);
-                    if (t->cell_id >= 0)
-                        printf(", cell %d", t->cell_id);
-                    printf("\n");
-                } else {
-                    printf("  TPS        : not read\n");
-                }
-                printf("  MER        : %.1f dB against %s, over %d symbols", t->mer_db, m2sdr_modulation_name(t->modulation), t->symbols);
-                if (isfinite(dvbt_needed_db(t)))
-                    printf(" (%.1f dB needed, margin %+.1f dB)", dvbt_needed_db(t), t->mer_db - dvbt_needed_db(t));
-                printf("\n");
-                if (t->echo_level_db > -99.0)
-                    printf("  Echo       : strongest at %+.2f us, %.1f dB (guard interval %.0f us)\n", t->echo_delay_us,
-                           t->echo_level_db, t->guard_us);
-            }
-        }
-    }
-
-    if (set->dab_on) {
-        const struct m2sdr_dab_result *t = &res->dab;
-
-        printf("\nDAB:\n");
-        if (!res->dab_valid) {
-            printf("  The sample rate must be 2.048 MSPS, with at least 110 ms of samples.\n");
-        } else if (!t->found) {
-            printf("  No ensemble found (null symbol %.1f dB, guard interval correlation %.3f).\n", t->null_depth_db,
-                   t->sync_quality);
-        } else {
-            printf("  Sync       : null symbol %.1f dB, guard correlation %.2f, %.1f %s\n", t->null_depth_db, t->sync_quality,
-                   t->power_dbfs + off, unit);
-            if (!t->prs) {
-                printf("  Reference  : phase reference symbol not found (%.2f): too much noise for the figures below.\n",
-                       t->prs_quality);
-            } else {
-                printf("  Ensemble   : %.6f MHz (%+.1f Hz from the centre), %d frame%s\n", (set->freq_hz + t->freq_error_hz) / 1e6,
-                       t->freq_error_hz, t->frames, t->frames == 1 ? "" : "s");
-                printf("  MER        : %.1f dB over %d symbols, SNR on the carriers %.1f dB\n", t->mer_db, t->symbols, t->null_snr_db);
-                if (t->echo_level_db > -99.0)
-                    printf("  Echo       : strongest at %+.2f us, %.1f dB (guard interval %.0f us)\n", t->echo_delay_us,
-                           t->echo_level_db, t->guard_us);
-            }
-        }
-    }
-
-    if (set->demod_on) {
-        const struct m2sdr_demod_result *d = &res->demod;
-
-        printf("\nModulation:\n");
-        if (!res->demod_valid || !d->signal) {
-            printf("  No signal with a symbol rate was found: tune on it, with a sample rate of a few\n"
-                   "  times its bandwidth, or give --symbol-rate.\n");
-        } else {
-            printf("  Type       : %s%s\n", m2sdr_modulation_name(d->modulation),
-                   d->locked ? "" : " (NOT LOCKED: the figures below are not valid)");
-            printf("  Symbol rate: %.3f symbols/s, roll-off %.2f\n", d->symbol_rate, d->rolloff);
-            printf("  Carrier    : %.6f MHz (%+.1f Hz from the centre), %.2f %s\n",
-                   (set->freq_hz + d->freq_offset_hz) / 1e6, d->freq_offset_hz, d->power_db + off, unit);
-            printf("  EVM        : %.2f %% RMS, %.2f %% peak, over %zu symbols\n", 100.0 * d->evm_rms, 100.0 * d->evm_peak, d->symbols);
-            printf("  MER        : %.1f dB\n", d->mer_db);
-            printf("  Errors     : magnitude %.2f %% RMS, phase %.2f degrees RMS\n", 100.0 * d->mag_err_rms, d->phase_err_deg);
-            printf("  I/Q        : origin offset %.1f dB, gain imbalance %+.3f dB, quadrature error %+.3f degrees\n",
-                   d->iq_offset_db, d->gain_imbalance_db, d->quadrature_deg);
-        }
-    }
-
-    if (set->pn_on) {
-        const struct m2sdr_phase_noise *pn = &res->pn;
-
-        printf("\nPhase noise:\n");
-        if (!res->pn_valid) {
-            printf("  No carrier stands %.0f dB above the rest of the capture.\n", 10.0);
-            return;
-        }
-        printf("  Carrier    : %.6f MHz, %.2f %s, %zu samples\n", (set->freq_hz + pn->carrier_hz) / 1e6,
-               pn->carrier_db + off, unit, (size_t)1 << set->pn_log2);
-        for (i = 0; i < PN_SPOTS; i++) {
-            const double l = pn_interp(pn->offset_hz, pn->l_dbc_hz, pn->points, pn_spots[i]);
-            const double am = pn_interp(pn->offset_hz, pn->am_dbc_hz, pn->points, pn_spots[i]);
-            const double floor = fl && fl->points ? pn_interp(fl->offset_hz, fl->l_dbc_hz, fl->points, pn_spots[i]) : NAN;
-            char freq[32];
-
-            if (!isfinite(l))
-                continue;
-            if (pn_spots[i] >= 1e6)
-                snprintf(freq, sizeof(freq), "%.0f MHz", pn_spots[i] / 1e6);
-            else if (pn_spots[i] >= 1e3)
-                snprintf(freq, sizeof(freq), "%.0f kHz", pn_spots[i] / 1e3);
-            else
-                snprintf(freq, sizeof(freq), "%.0f Hz", pn_spots[i]);
-            printf("  %-10s : %7.1f dBc/Hz (AM %7.1f)", freq, l, am);
-            if (isfinite(floor))
-                printf(", floor %7.1f%s", floor, l - floor < AN_PN_FLOOR_MARGIN_DB ? ": the reading is the floor of the board" : "");
-            printf("\n");
-        }
-        printf("  Integrated : %.4f degrees RMS from %.0f Hz to %.0f Hz\n", pn->rms_deg, pn->lo_hz, pn->hi_hz);
-        printf("  Jitter     : %.3f ps RMS\n", pn->jitter_s * 1e12);
-        printf("  Residual FM: %.2f Hz RMS\n", pn->residual_fm_hz);
-        for (i = 0; i < pn->nspurs && i < 8; i++)
-            printf("  Spur       : %12.1f Hz  %7.1f dBc\n", pn->spur_hz[i], pn->spur_dbc[i]);
-        if (!fl || !fl->points)
-            printf("  No floor of the board is stored: the reading includes its own phase noise.\n");
+    /* The sections of the modes on. */
+    n = report_modes(order);
+    for (k = 0; k < n; k++) {
+        if (order[k]->report_text && an_mode_on(order[k], set))
+            order[k]->report_text(res, &rep);
     }
 }
 
@@ -771,8 +452,598 @@ static int export_csv(const char *path, const struct an_result *res)
     return fclose(f) == 0 ? 0 : -1;
 }
 
-/* DVB-T watch */
+/* Phase noise */
 /*-------------*/
+
+static size_t pn_samples(const struct an_settings *set)
+{
+    return (size_t)1 << set->pn_log2;
+}
+
+static void pn_analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res)
+{
+    const size_t n = count < ((size_t)1 << set->pn_log2) ? count : (size_t)1 << set->pn_log2;
+
+    res->pn_valid = m2sdr_phase_noise(x, n, set->sample_rate, set->freq_hz, set->pn_lo_hz, set->pn_hi_hz,
+                                      &res->pn) == 0 && res->pn.found;
+    /* The jitter needs the RF frequency of the carrier, known once it is found. */
+    if (res->pn_valid && set->freq_hz + res->pn.carrier_hz > 0)
+        res->pn.jitter_s = res->pn.rms_rad / (2.0 * M_PI * (set->freq_hz + res->pn.carrier_hz));
+}
+
+static void pn_report_text(const struct an_result *res, const struct an_report *rep)
+{
+    const struct an_settings *set = &res->set;
+    const double off = rep->off;
+    const char *unit = rep->unit;
+    const struct an_floor *fl = rep->fl;
+    const struct m2sdr_phase_noise *pn = &res->pn;
+    int i;
+
+    printf("\nPhase noise:\n");
+    if (!res->pn_valid) {
+        printf("  No carrier stands %.0f dB above the rest of the capture.\n", 10.0);
+        return;
+    }
+    printf("  Carrier    : %.6f MHz, %.2f %s, %zu samples\n", (set->freq_hz + pn->carrier_hz) / 1e6,
+           pn->carrier_db + off, unit, (size_t)1 << set->pn_log2);
+    for (i = 0; i < PN_SPOTS; i++) {
+        const double l = pn_interp(pn->offset_hz, pn->l_dbc_hz, pn->points, pn_spots[i]);
+        const double am = pn_interp(pn->offset_hz, pn->am_dbc_hz, pn->points, pn_spots[i]);
+        const double floor = fl && fl->points ? pn_interp(fl->offset_hz, fl->l_dbc_hz, fl->points, pn_spots[i]) : NAN;
+        char freq[32];
+
+        if (!isfinite(l))
+            continue;
+        if (pn_spots[i] >= 1e6)
+            snprintf(freq, sizeof(freq), "%.0f MHz", pn_spots[i] / 1e6);
+        else if (pn_spots[i] >= 1e3)
+            snprintf(freq, sizeof(freq), "%.0f kHz", pn_spots[i] / 1e3);
+        else
+            snprintf(freq, sizeof(freq), "%.0f Hz", pn_spots[i]);
+        printf("  %-10s : %7.1f dBc/Hz (AM %7.1f)", freq, l, am);
+        if (isfinite(floor))
+            printf(", floor %7.1f%s", floor, l - floor < AN_PN_FLOOR_MARGIN_DB ? ": the reading is the floor of the board" : "");
+        printf("\n");
+    }
+    printf("  Integrated : %.4f degrees RMS from %.0f Hz to %.0f Hz\n", pn->rms_deg, pn->lo_hz, pn->hi_hz);
+    printf("  Jitter     : %.3f ps RMS\n", pn->jitter_s * 1e12);
+    printf("  Residual FM: %.2f Hz RMS\n", pn->residual_fm_hz);
+    for (i = 0; i < pn->nspurs && i < 8; i++)
+        printf("  Spur       : %12.1f Hz  %7.1f dBc\n", pn->spur_hz[i], pn->spur_dbc[i]);
+    if (!fl || !fl->points)
+        printf("  No floor of the board is stored: the reading includes its own phase noise.\n");
+}
+
+static void pn_report_json(const struct an_result *res, const struct an_report *rep)
+{
+    const struct an_settings *set = &res->set;
+    const double off = rep->off;
+    const struct an_floor *fl = rep->fl;
+    const struct m2sdr_phase_noise *pn = &res->pn;
+    int i;
+
+    printf("  \"phase_noise\": {\n");
+    printf("    \"found\": %s,\n", res->pn_valid ? "true" : "false");
+    if (res->pn_valid) {
+        print_json_number("carrier_hz", set->freq_hz + pn->carrier_hz, false);
+        print_json_number("carrier_db", pn->carrier_db + off, false);
+        print_json_number("integrated_from_hz", pn->lo_hz, false);
+        print_json_number("integrated_to_hz", pn->hi_hz, false);
+        print_json_number("rms_deg", pn->rms_deg, false);
+        print_json_number("jitter_s", pn->jitter_s, false);
+        print_json_number("residual_fm_hz", pn->residual_fm_hz, false);
+        printf("    \"offsets_hz\": [");
+        for (i = 0; i < pn->points; i++)
+            printf("%s%.3f", i ? ", " : "", pn->offset_hz[i]);
+        printf("],\n    \"l_dbc_hz\": [");
+        for (i = 0; i < pn->points; i++)
+            printf("%s%.3f", i ? ", " : "", pn->l_dbc_hz[i]);
+        printf("],\n    \"am_dbc_hz\": [");
+        for (i = 0; i < pn->points; i++)
+            printf("%s%.3f", i ? ", " : "", pn->am_dbc_hz[i]);
+        printf("],\n    \"floor_dbc_hz\": [");
+        for (i = 0; fl && fl->points && i < pn->points; i++) {
+            const double v = pn_interp(fl->offset_hz, fl->l_dbc_hz, fl->points, pn->offset_hz[i]);
+            if (isfinite(v))
+                printf("%s%.3f", i ? ", " : "", v);
+            else
+                printf("%snull", i ? ", " : "");
+        }
+        printf("],\n    \"spurs\": [");
+        for (i = 0; i < pn->nspurs; i++)
+            printf("%s{\"offset_hz\": %.3f, \"level_dbc\": %.3f}", i ? ", " : "", pn->spur_hz[i], pn->spur_dbc[i]);
+        printf("]\n");
+    } else {
+        printf("    \"carrier_hz\": null\n");
+    }
+    printf("  }");
+}
+
+/* Modulation */
+/*------------*/
+
+static size_t demod_samples(const struct an_settings *set)
+{
+    return (size_t)1 << set->demod_log2;
+}
+
+static void demod_analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res)
+{
+    const size_t n = count < ((size_t)1 << set->demod_log2) ? count : (size_t)1 << set->demod_log2;
+
+    res->demod_valid = m2sdr_demod(x, n, set->sample_rate, &set->demod, &res->demod) == 0;
+}
+
+static void demod_report_text(const struct an_result *res, const struct an_report *rep)
+{
+    const struct an_settings *set = &res->set;
+    const double off = rep->off;
+    const char *unit = rep->unit;
+    const struct m2sdr_demod_result *d = &res->demod;
+
+    printf("\nModulation:\n");
+    if (!res->demod_valid || !d->signal) {
+        printf("  No signal with a symbol rate was found: tune on it, with a sample rate of a few\n"
+               "  times its bandwidth, or give --symbol-rate.\n");
+    } else {
+        printf("  Type       : %s%s\n", m2sdr_modulation_name(d->modulation),
+               d->locked ? "" : " (NOT LOCKED: the figures below are not valid)");
+        printf("  Symbol rate: %.3f symbols/s, roll-off %.2f\n", d->symbol_rate, d->rolloff);
+        printf("  Carrier    : %.6f MHz (%+.1f Hz from the centre), %.2f %s\n",
+               (set->freq_hz + d->freq_offset_hz) / 1e6, d->freq_offset_hz, d->power_db + off, unit);
+        printf("  EVM        : %.2f %% RMS, %.2f %% peak, over %zu symbols\n", 100.0 * d->evm_rms, 100.0 * d->evm_peak, d->symbols);
+        printf("  MER        : %.1f dB\n", d->mer_db);
+        printf("  Errors     : magnitude %.2f %% RMS, phase %.2f degrees RMS\n", 100.0 * d->mag_err_rms, d->phase_err_deg);
+        printf("  I/Q        : origin offset %.1f dB, gain imbalance %+.3f dB, quadrature error %+.3f degrees\n",
+               d->iq_offset_db, d->gain_imbalance_db, d->quadrature_deg);
+    }
+}
+
+static void demod_report_json(const struct an_result *res, const struct an_report *rep)
+{
+    const struct an_settings *set = &res->set;
+    const double off = rep->off;
+    const struct m2sdr_demod_result *d = &res->demod;
+
+    printf("  \"modulation\": {\n");
+    printf("    \"signal\": %s,\n", res->demod_valid && d->signal ? "true" : "false");
+    printf("    \"locked\": %s%s\n", res->demod_valid && d->locked ? "true" : "false",
+           res->demod_valid && d->signal ? "," : "");
+    if (res->demod_valid && d->signal) {
+        printf("    \"type\": \"%s\",\n", m2sdr_modulation_name(d->modulation));
+        print_json_number("symbol_rate", d->symbol_rate, false);
+        print_json_number("rolloff", d->rolloff, false);
+        print_json_number("carrier_hz", set->freq_hz + d->freq_offset_hz, false);
+        print_json_number("carrier_offset_hz", d->freq_offset_hz, false);
+        print_json_number("power_db", d->power_db + off, false);
+        printf("    \"symbols\": %zu,\n", d->symbols);
+        print_json_number("evm_rms_percent", 100.0 * d->evm_rms, false);
+        print_json_number("evm_peak_percent", 100.0 * d->evm_peak, false);
+        print_json_number("mer_db", d->mer_db, false);
+        print_json_number("magnitude_error_percent", 100.0 * d->mag_err_rms, false);
+        print_json_number("phase_error_deg", d->phase_err_deg, false);
+        print_json_number("origin_offset_db", d->iq_offset_db, false);
+        print_json_number("gain_imbalance_db", d->gain_imbalance_db, false);
+        print_json_number("quadrature_deg", d->quadrature_deg, true);
+    }
+    printf("  }");
+}
+
+/* LTE */
+/*-----*/
+
+static size_t lte_samples(const struct an_settings *set)
+{
+    return (size_t)(AN_LTE_SECONDS * set->sample_rate);
+}
+
+static void lte_analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res)
+{
+    const size_t n = (size_t)(AN_LTE_SECONDS * set->sample_rate);
+
+    res->lte_valid = m2sdr_lte_analyse(x, count < n ? count : n, set->sample_rate, &res->lte) == 0;
+}
+
+static void lte_report_text(const struct an_result *res, const struct an_report *rep)
+{
+    const struct an_settings *set = &res->set;
+    const double off = rep->off;
+    const char *unit = rep->unit;
+    const struct m2sdr_lte_result *l = &res->lte;
+    static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
+
+    printf("\nLTE downlink:\n");
+    if (!res->lte_valid) {
+        printf("  The sample rate must be 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS.\n");
+    } else if (!l->found) {
+        printf("  No cell found (PSS quality %.1f): the capture is tuned on the centre of an FDD carrier\n"
+               "  with a normal cyclic prefix.\n", l->sync_quality);
+    } else {
+        printf("  Cell       : identity %d (group %d, sector %d)\n", l->cell_id, l->n_id_1, l->n_id_2);
+        printf("  Carrier    : %.6f MHz (%+.1f Hz from the centre)\n", (set->freq_hz + l->freq_error_hz) / 1e6, l->freq_error_hz);
+        if (l->mib)
+            printf("  MIB        : %d resource blocks, %d antenna port%s, frame %d, PHICH %s, %s\n", l->n_rb, l->ports,
+                   l->ports == 1 ? "" : "s", l->sfn, l->phich_duration ? "extended" : "normal", phich[l->phich_resource & 3]);
+        else
+            printf("  MIB        : not decoded (the PBCH of one and of two antenna ports was tried)\n");
+        printf("  Analysed   : %d resource blocks around the centre\n", l->analysed_rb);
+        printf("  Levels     : RSRP %.1f %s, RSSI %.1f %s, PSS %.1f, SSS %.1f %s per element\n", l->rsrp_db + off, unit,
+               l->rssi_db + off, unit, l->pss_db + off, l->sss_db + off, unit);
+        printf("  EVM        : reference signals %.2f %%", 100.0 * l->rs_evm);
+        if (l->mib)
+            printf(", PBCH %.2f %%", 100.0 * l->pbch_evm);
+        printf("\n");
+        if (l->data) {
+            int used[M2SDR_MOD_COUNT] = { 0 }, ns, rb, m;
+
+            printf("  Data       : %d blocks read, mostly %s, EVM %.2f %% against the nearest points\n", l->data_blocks,
+                   l->data_blocks ? m2sdr_modulation_name(l->data_modulation) : "none", 100.0 * l->data_evm);
+            for (ns = 0; ns < M2SDR_LTE_FRAME_SLOTS; ns++) {
+                for (rb = 0; rb < M2SDR_LTE_MAX_ANALYSED_RB; rb++)
+                    used[l->rb_modulation[ns][rb] % M2SDR_MOD_COUNT]++;
+            }
+            printf("  Blocks     :");
+            for (m = 0; m < M2SDR_MOD_COUNT; m++) {
+                if (m != M2SDR_MOD_AUTO && used[m])
+                    printf(" %s %d", m2sdr_modulation_name((enum m2sdr_modulation)m), used[m]);
+            }
+            printf("\n");
+            if (l->ports > 1)
+                printf("  Two ports  : %d blocks in transmit diversity, %d as one precoded layer, %d in use and not read\n"
+                       "               (two layers, that one receiver does not separate)\n",
+                       l->data_diversity, l->data_precoded, l->data_unknown);
+        } else if (l->mib)
+            printf("  Data       : not analysed, the cell has %d antenna ports\n", l->ports);
+    }
+}
+
+static void lte_report_json(const struct an_result *res, const struct an_report *rep)
+{
+    const struct an_settings *set = &res->set;
+    const double off = rep->off;
+    const struct m2sdr_lte_result *l = &res->lte;
+    static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
+
+    printf("  \"lte\": {\n");
+    printf("    \"found\": %s%s\n", res->lte_valid && l->found ? "true" : "false", res->lte_valid && l->found ? "," : "");
+    if (res->lte_valid && l->found) {
+        printf("    \"cell_id\": %d,\n", l->cell_id);
+        print_json_number("carrier_hz", set->freq_hz + l->freq_error_hz, false);
+        print_json_number("carrier_offset_hz", l->freq_error_hz, false);
+        printf("    \"mib\": %s,\n", l->mib ? "true" : "false");
+        if (l->mib) {
+            printf("    \"ports\": %d,\n", l->ports);
+            printf("    \"n_rb\": %d,\n", l->n_rb);
+            printf("    \"sfn\": %d,\n", l->sfn);
+            printf("    \"phich_duration\": \"%s\",\n", l->phich_duration ? "extended" : "normal");
+            printf("    \"phich_resource\": \"%s\",\n", phich[l->phich_resource & 3]);
+        }
+        printf("    \"analysed_rb\": %d,\n", l->analysed_rb);
+        print_json_number("rsrp_db", l->rsrp_db + off, false);
+        print_json_number("rssi_db", l->rssi_db + off, false);
+        print_json_number("pss_db", l->pss_db + off, false);
+        print_json_number("sss_db", l->sss_db + off, false);
+        print_json_number("rs_evm_percent", 100.0 * l->rs_evm, false);
+        if (l->mib)
+            print_json_number("pbch_evm_percent", 100.0 * l->pbch_evm, false);
+        printf("    \"data_analysed\": %s", l->data ? "true" : "false");
+        if (l->data) {
+            printf(",\n    \"data_blocks\": %d,\n", l->data_blocks);
+            if (l->ports > 1) {
+                printf("    \"data_blocks_diversity\": %d,\n", l->data_diversity);
+                printf("    \"data_blocks_precoded\": %d,\n", l->data_precoded);
+                printf("    \"data_blocks_not_read\": %d,\n", l->data_unknown);
+            }
+            printf("    \"data_modulation\": \"%s\",\n", m2sdr_modulation_name(l->data_modulation));
+            print_json_number("data_evm_percent", 100.0 * l->data_evm, true);
+        } else {
+            printf("\n");
+        }
+    }
+    printf("  }");
+}
+
+/* DVB-T */
+/*-------*/
+
+static size_t dvbt_samples(const struct an_settings *set)
+{
+    return (size_t)((set->dvbt_fast ? AN_DVBT_FAST_SECONDS : AN_DVBT_SECONDS) * set->sample_rate);
+}
+
+static void dvbt_analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res)
+{
+    const size_t n = (size_t)(AN_DVBT_SECONDS * set->sample_rate);
+
+    res->dvbt_valid = m2sdr_dvbt_analyse(x, count < n ? count : n, set->sample_rate,
+                                         set->dvbt_hint.fft_len ? &set->dvbt_hint : NULL, &res->dvbt) == 0;
+}
+
+static void dvbt_report_text(const struct an_result *res, const struct an_report *rep)
+{
+    const struct an_settings *set = &res->set;
+    const double off = rep->off;
+    const char *unit = rep->unit;
+    const struct m2sdr_dvbt_result *t = &res->dvbt;
+
+    printf("\nDVB-T:\n");
+    if (!res->dvbt_valid) {
+        printf("  The sample rate must be the one of the channel: 9.142857 MSPS (8 MHz), 8 MSPS (7 MHz)\n"
+               "  or 6.857143 MSPS (6 MHz).\n");
+    } else if (!t->found) {
+        printf("  No multiplex found (guard interval correlation %.3f).\n", t->sync_quality);
+    } else {
+        printf("  Mode       : %dk, guard interval 1/%d (%.0f us), %.1f %s\n", t->fft_len / 1024, t->guard, t->guard_us,
+               t->power_dbfs + off, unit);
+        printf("  Sync       : guard correlation %.2f (about %.1f dB S/N)\n", t->sync_quality, t->sync_snr_db);
+        if (!t->pilots) {
+            printf("  Pilots     : not found (coherence %.2f): too much noise for the figures below.\n", t->pilot_quality);
+        } else {
+            printf("  Multiplex  : %.6f MHz (%+.1f Hz from the centre)\n", (set->freq_hz + t->freq_error_hz) / 1e6, t->freq_error_hz);
+            if (t->tps) {
+                printf("  TPS        : %s, hierarchy %s, code rate %s", m2sdr_modulation_name(t->tps_modulation),
+                       t->tps_hierarchy ? "yes" : "none", t->code_rate_hp);
+                if (t->tps_hierarchy)
+                    printf(" (LP %s, alpha %d)", t->code_rate_lp, t->tps_hierarchy);
+                if (t->cell_id >= 0)
+                    printf(", cell %d", t->cell_id);
+                printf("\n");
+            } else {
+                printf("  TPS        : not read\n");
+            }
+            printf("  MER        : %.1f dB against %s, over %d symbols", t->mer_db, m2sdr_modulation_name(t->modulation), t->symbols);
+            if (isfinite(dvbt_needed_db(t)))
+                printf(" (%.1f dB needed, margin %+.1f dB)", dvbt_needed_db(t), t->mer_db - dvbt_needed_db(t));
+            printf("\n");
+            if (t->echo_level_db > -99.0)
+                printf("  Echo       : strongest at %+.2f us, %.1f dB (guard interval %.0f us)\n", t->echo_delay_us,
+                       t->echo_level_db, t->guard_us);
+        }
+    }
+}
+
+static void dvbt_report_json(const struct an_result *res, const struct an_report *rep)
+{
+    const struct an_settings *set = &res->set;
+    const double off = rep->off;
+    const struct m2sdr_dvbt_result *t = &res->dvbt;
+    const bool ok = res->dvbt_valid && t->found;
+
+    printf("  \"dvbt\": {\n");
+    print_json_number("sync_quality", res->dvbt_valid ? t->sync_quality : 0.0, false);
+    printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
+    if (ok) {
+        printf("    \"mode\": \"%dk\",\n", t->fft_len / 1024);
+        printf("    \"guard_interval\": \"1/%d\",\n", t->guard);
+        print_json_number("power_db", t->power_dbfs + off, false);
+        printf("    \"pilots\": %s%s\n", t->pilots ? "true" : "false", t->pilots ? "," : "");
+        if (t->pilots) {
+            print_json_number("carrier_hz", set->freq_hz + t->freq_error_hz, false);
+            print_json_number("carrier_offset_hz", t->freq_error_hz, false);
+            printf("    \"tps\": %s,\n", t->tps ? "true" : "false");
+            if (t->tps) {
+                printf("    \"constellation\": \"%s\",\n", m2sdr_modulation_name(t->tps_modulation));
+                printf("    \"hierarchy\": %d,\n", t->tps_hierarchy);
+                printf("    \"code_rate_hp\": \"%s\",\n", t->code_rate_hp);
+                printf("    \"code_rate_lp\": \"%s\",\n", t->code_rate_lp);
+                if (t->cell_id >= 0)
+                    printf("    \"cell_id\": %d,\n", t->cell_id);
+            }
+            printf("    \"mer_against\": \"%s\",\n", m2sdr_modulation_name(t->modulation));
+            print_json_number("mer_needed_db", dvbt_needed_db(t), false);
+            print_json_number("echo_delay_us", t->echo_delay_us, false);
+            print_json_number("echo_level_db", t->echo_level_db, false);
+            print_json_number("mer_db", t->mer_db, true);
+        }
+    }
+    printf("  }");
+}
+
+/* --watch: the multiplex of the last TPS read and the captures since, for short captures once
+ * it is read, as in the view. */
+static struct {
+    struct m2sdr_dvbt_result tps;
+    struct m2sdr_dvbt_config known;
+    unsigned since, lines;
+    bool   ok;
+} dvbt_watch;
+
+static void dvbt_watch_prepare(struct an_settings *set)
+{
+    set->dvbt_fast = dvbt_watch.ok && ++dvbt_watch.since % AN_DVBT_FULL_EVERY != 0;
+    memset(&set->dvbt_hint, 0, sizeof(set->dvbt_hint));
+    if (dvbt_watch.ok)
+        set->dvbt_hint = dvbt_watch.known;
+}
+
+static int dvbt_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
+{
+    const struct m2sdr_dvbt_result *t = &res->dvbt;
+    const struct m2sdr_dvbt_result *tps = &dvbt_watch.tps;
+    double needed;
+
+    if (!res->dvbt_valid) {
+        fprintf(stderr, "The sample rate is not one of DVB-T.\n");
+        return -1;
+    }
+    if (t->tps) {
+        /* The multiplex, each time its TPS is read: the reference of the lines. */
+        if (!json && (!tps->tps || tps->tps_modulation != t->tps_modulation || strcmp(tps->code_rate_hp, t->code_rate_hp) ||
+                      tps->fft_len != t->fft_len || tps->guard != t->guard || dvbt_watch.since >= AN_DVBT_FULL_EVERY - 1)) {
+            printf("Multiplex %.3f MHz: %dk, guard 1/%d, %s, code rate %s", (set->freq_hz + t->freq_error_hz) / 1e6,
+                   t->fft_len / 1024, t->guard, m2sdr_modulation_name(t->tps_modulation), t->code_rate_hp);
+            if (t->cell_id >= 0)
+                printf(", cell %d", t->cell_id);
+            if (isfinite(dvbt_needed_db(t)))
+                printf(": MER needed %.1f dB", dvbt_needed_db(t));
+            printf("\n");
+            dvbt_watch.lines = 0;
+        }
+        dvbt_watch.tps = *t;
+        dvbt_watch.known.fft_len    = t->fft_len;
+        dvbt_watch.known.guard      = t->guard;
+        dvbt_watch.known.modulation = t->tps_modulation;
+        dvbt_watch.ok    = true;
+        dvbt_watch.since = 0;
+    } else if (!t->found || !t->pilots) {
+        dvbt_watch.ok = false;
+    }
+    if (dvbt_watch.ok && t->found && t->pilots) {
+        dvbt_watch.known.offset_known   = true;
+        dvbt_watch.known.carrier_offset = t->carrier_offset;
+    }
+    needed = dvbt_needed_db(tps);
+    if (json) {
+        printf("{\"time_s\": %.3f, \"found\": %s", now, t->found && t->pilots ? "true" : "false");
+        if (t->found && t->pilots) {
+            printf(", \"mer_db\": %.2f", t->mer_db);
+            if (isfinite(needed))
+                printf(", \"margin_db\": %.2f", t->mer_db - needed);
+            printf(", \"power_db\": %.2f, \"sync_quality\": %.3f, \"carrier_offset_hz\": %.1f",
+                   t->power_dbfs + set->ref_offset_db, t->sync_quality, t->freq_error_hz);
+            if (t->echo_level_db > -99.0)
+                printf(", \"echo_delay_us\": %.2f, \"echo_level_db\": %.1f", t->echo_delay_us, t->echo_level_db);
+        }
+        printf("}\n");
+    } else {
+        /* The names of the columns now and then, the numbers between. */
+        if (dvbt_watch.lines++ % AN_WATCH_HEADER_EVERY == 0)
+            printf("%8s %7s %7s %8s %6s %10s %8s %6s\n%8s %7s %7s %8s %6s %10s %8s %6s\n",
+                   "time", "MER", "margin", "level", "guard", "offset", "echo", "echo",
+                   "s", "dB", "dB", set->ref_offset_db != 0.0 ? "dBm" : "dBFS", "corr", "Hz", "us", "dB");
+        if (t->found && t->pilots) {
+            printf("%8.2f %7.1f ", now, t->mer_db);
+            if (isfinite(needed))
+                printf("%+7.1f", t->mer_db - needed);
+            else
+                printf("%7s", "--");
+            printf(" %8.1f %6.2f %+10.1f", t->power_dbfs + set->ref_offset_db, t->sync_quality, t->freq_error_hz);
+            if (t->echo_level_db > -99.0)
+                printf(" %+8.2f %6.1f", t->echo_delay_us, t->echo_level_db);
+            printf("\n");
+        } else {
+            printf("%8.2f  no multiplex (guard correlation %.3f)\n", now, t->sync_quality);
+        }
+    }
+    return 0;
+}
+
+/* DAB */
+/*-----*/
+
+static size_t dab_samples(const struct an_settings *set)
+{
+    return (size_t)(AN_DAB_SECONDS * set->sample_rate);
+}
+
+static void dab_analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res)
+{
+    const size_t n = (size_t)(AN_DAB_SECONDS * set->sample_rate);
+
+    res->dab_valid = m2sdr_dab_analyse(x, count < n ? count : n, set->sample_rate, &res->dab) == 0;
+}
+
+static void dab_report_text(const struct an_result *res, const struct an_report *rep)
+{
+    const struct an_settings *set = &res->set;
+    const double off = rep->off;
+    const char *unit = rep->unit;
+    const struct m2sdr_dab_result *t = &res->dab;
+
+    printf("\nDAB:\n");
+    if (!res->dab_valid) {
+        printf("  The sample rate must be 2.048 MSPS, with at least 110 ms of samples.\n");
+    } else if (!t->found) {
+        printf("  No ensemble found (null symbol %.1f dB, guard interval correlation %.3f).\n", t->null_depth_db,
+               t->sync_quality);
+    } else {
+        printf("  Sync       : null symbol %.1f dB, guard correlation %.2f, %.1f %s\n", t->null_depth_db, t->sync_quality,
+               t->power_dbfs + off, unit);
+        if (!t->prs) {
+            printf("  Reference  : phase reference symbol not found (%.2f): too much noise for the figures below.\n",
+                   t->prs_quality);
+        } else {
+            printf("  Ensemble   : %.6f MHz (%+.1f Hz from the centre), %d frame%s\n", (set->freq_hz + t->freq_error_hz) / 1e6,
+                   t->freq_error_hz, t->frames, t->frames == 1 ? "" : "s");
+            printf("  MER        : %.1f dB over %d symbols, SNR on the carriers %.1f dB\n", t->mer_db, t->symbols, t->null_snr_db);
+            if (t->echo_level_db > -99.0)
+                printf("  Echo       : strongest at %+.2f us, %.1f dB (guard interval %.0f us)\n", t->echo_delay_us,
+                       t->echo_level_db, t->guard_us);
+        }
+    }
+}
+
+static void dab_report_json(const struct an_result *res, const struct an_report *rep)
+{
+    const struct an_settings *set = &res->set;
+    const double off = rep->off;
+    const struct m2sdr_dab_result *t = &res->dab;
+    const bool ok = res->dab_valid && t->found;
+
+    printf("  \"dab\": {\n");
+    print_json_number("sync_quality", res->dab_valid ? t->sync_quality : 0.0, false);
+    printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
+    if (ok) {
+        print_json_number("power_db", t->power_dbfs + off, false);
+        print_json_number("null_depth_db", t->null_depth_db, false);
+        printf("    \"phase_reference\": %s%s\n", t->prs ? "true" : "false", t->prs ? "," : "");
+        if (t->prs) {
+            print_json_number("carrier_hz", set->freq_hz + t->freq_error_hz, false);
+            print_json_number("carrier_offset_hz", t->freq_error_hz, false);
+            printf("    \"frames\": %d,\n", t->frames);
+            print_json_number("snr_db", t->null_snr_db, false);
+            print_json_number("echo_delay_us", t->echo_delay_us, false);
+            print_json_number("echo_level_db", t->echo_level_db, false);
+            print_json_number("mer_db", t->mer_db, true);
+        }
+    }
+    printf("  }");
+}
+
+/* --watch: one line per capture. */
+static unsigned dab_watch_lines;
+
+static int dab_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
+{
+    const struct m2sdr_dab_result *d = &res->dab;
+    const bool dok = res->dab_valid && d->found && d->prs;
+
+    if (!res->dab_valid) {
+        fprintf(stderr, "The sample rate is not the one of DAB (2.048 MSPS).\n");
+        return -1;
+    }
+    if (json) {
+        printf("{\"time_s\": %.3f, \"found\": %s", now, dok ? "true" : "false");
+        if (dok) {
+            printf(", \"mer_db\": %.2f, \"snr_db\": %.2f, \"power_db\": %.2f, \"null_depth_db\": %.1f, "
+                   "\"carrier_offset_hz\": %.1f", d->mer_db, d->null_snr_db, d->power_dbfs + set->ref_offset_db,
+                   d->null_depth_db, d->freq_error_hz);
+            if (d->echo_level_db > -99.0)
+                printf(", \"echo_delay_us\": %.2f, \"echo_level_db\": %.1f", d->echo_delay_us, d->echo_level_db);
+        }
+        printf("}\n");
+    } else {
+        if (dab_watch_lines++ % AN_WATCH_HEADER_EVERY == 0)
+            printf("%8s %7s %7s %8s %6s %10s %8s %6s\n%8s %7s %7s %8s %6s %10s %8s %6s\n",
+                   "time", "MER", "SNR", "level", "null", "offset", "echo", "echo",
+                   "s", "dB", "dB", set->ref_offset_db != 0.0 ? "dBm" : "dBFS", "dB", "Hz", "us", "dB");
+        if (dok) {
+            printf("%8.2f %7.1f %7.1f %8.1f %6.1f %+10.1f", now, d->mer_db, d->null_snr_db, d->power_dbfs + set->ref_offset_db,
+                   d->null_depth_db, d->freq_error_hz);
+            if (d->echo_level_db > -99.0)
+                printf(" %+8.2f %6.1f", d->echo_delay_us, d->echo_level_db);
+            printf("\n");
+        } else {
+            printf("%8.2f  no ensemble (null symbol %.1f dB, guard correlation %.3f)\n", now, d->null_depth_db,
+                   d->sync_quality);
+        }
+    }
+    return 0;
+}
+
+/* Watch */
+/*-------*/
 
 static double now_ms(void)
 {
@@ -790,40 +1061,47 @@ static void watch_signal(int sig)
     watch_stop = 1;
 }
 
-/* DVB-T or DAB from a board, one line per capture until Ctrl-C: the figures to follow when
- * placing an antenna, without a display. DVB-T: short captures once the TPS is read, as in the
- * view. */
+/* The modes on that can be watched: the one of --watch, of which main checks there is one. */
+static int watch_modes(const struct an_settings *set, const struct an_mode **mode)
+{
+    int m, n = 0;
+
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->watch_line && an_mode_on(an_modes[m], set)) {
+            if (mode)
+                *mode = an_modes[m];
+            n++;
+        }
+    }
+    return n;
+}
+
+/* A mode from a board, one line per capture until Ctrl-C (DVB-T, DAB): the figures to follow
+ * when placing an antenna, without a display. */
 static int run_watch(struct an_source *src, const struct an_settings *base, bool json)
 {
+    const struct an_mode *mode = NULL;
     struct an_settings set = *base;
     struct an_result *res = calloc(1, sizeof(*res));
-    struct m2sdr_dvbt_result *tps = calloc(1, sizeof(*tps));
-    struct m2sdr_dvbt_config known;
     float complex *x = NULL;
     size_t x_count = 0;
-    unsigned since = 0, lines = 0;
-    bool ok = false;
     const double start = now_ms();
     int status = 1;
 
-    memset(&known, 0, sizeof(known));
-    if (!res || !tps) {
+    (void)watch_modes(&set, &mode);
+    if (!res || !mode) {
         fprintf(stderr, "Out of memory\n");
         goto out;
     }
     signal(SIGINT, watch_signal);
     while (!watch_stop) {
-        const struct m2sdr_dvbt_result *t = &res->dvbt;
         const double now = (now_ms() - start) / 1e3;
         char err[256];
         size_t count;
-        double needed;
         int rc;
 
-        set.dvbt_fast = ok && ++since % AN_DVBT_FULL_EVERY != 0;
-        memset(&set.dvbt_hint, 0, sizeof(set.dvbt_hint));
-        if (ok)
-            set.dvbt_hint = known;
+        if (mode->watch_prepare)
+            mode->watch_prepare(&set);
         count = capture_samples(&set);
         if (count > x_count) {
             float complex *grown = realloc(x, count * sizeof(*x));
@@ -846,106 +1124,8 @@ static int run_watch(struct an_source *src, const struct an_settings *base, bool
             fprintf(stderr, "Analysis failed\n");
             goto out;
         }
-        if (set.dab_on) {
-            const struct m2sdr_dab_result *d = &res->dab;
-            const bool dok = res->dab_valid && d->found && d->prs;
-
-            if (!res->dab_valid) {
-                fprintf(stderr, "The sample rate is not the one of DAB (2.048 MSPS).\n");
-                goto out;
-            }
-            if (json) {
-                printf("{\"time_s\": %.3f, \"found\": %s", now, dok ? "true" : "false");
-                if (dok) {
-                    printf(", \"mer_db\": %.2f, \"snr_db\": %.2f, \"power_db\": %.2f, \"null_depth_db\": %.1f, "
-                           "\"carrier_offset_hz\": %.1f", d->mer_db, d->null_snr_db, d->power_dbfs + set.ref_offset_db,
-                           d->null_depth_db, d->freq_error_hz);
-                    if (d->echo_level_db > -99.0)
-                        printf(", \"echo_delay_us\": %.2f, \"echo_level_db\": %.1f", d->echo_delay_us, d->echo_level_db);
-                }
-                printf("}\n");
-            } else {
-                if (lines++ % AN_WATCH_HEADER_EVERY == 0)
-                    printf("%8s %7s %7s %8s %6s %10s %8s %6s\n%8s %7s %7s %8s %6s %10s %8s %6s\n",
-                           "time", "MER", "SNR", "level", "null", "offset", "echo", "echo",
-                           "s", "dB", "dB", set.ref_offset_db != 0.0 ? "dBm" : "dBFS", "dB", "Hz", "us", "dB");
-                if (dok) {
-                    printf("%8.2f %7.1f %7.1f %8.1f %6.1f %+10.1f", now, d->mer_db, d->null_snr_db, d->power_dbfs + set.ref_offset_db,
-                           d->null_depth_db, d->freq_error_hz);
-                    if (d->echo_level_db > -99.0)
-                        printf(" %+8.2f %6.1f", d->echo_delay_us, d->echo_level_db);
-                    printf("\n");
-                } else {
-                    printf("%8.2f  no ensemble (null symbol %.1f dB, guard correlation %.3f)\n", now, d->null_depth_db,
-                           d->sync_quality);
-                }
-            }
-            fflush(stdout);
-            continue;
-        }
-        if (!res->dvbt_valid) {
-            fprintf(stderr, "The sample rate is not one of DVB-T.\n");
+        if (mode->watch_line(&set, res, now, json) != 0)
             goto out;
-        }
-        if (t->tps) {
-            /* The multiplex, each time its TPS is read: the reference of the lines. */
-            if (!json && (!tps->tps || tps->tps_modulation != t->tps_modulation || strcmp(tps->code_rate_hp, t->code_rate_hp) ||
-                          tps->fft_len != t->fft_len || tps->guard != t->guard || since >= AN_DVBT_FULL_EVERY - 1)) {
-                printf("Multiplex %.3f MHz: %dk, guard 1/%d, %s, code rate %s", (set.freq_hz + t->freq_error_hz) / 1e6,
-                       t->fft_len / 1024, t->guard, m2sdr_modulation_name(t->tps_modulation), t->code_rate_hp);
-                if (t->cell_id >= 0)
-                    printf(", cell %d", t->cell_id);
-                if (isfinite(dvbt_needed_db(t)))
-                    printf(": MER needed %.1f dB", dvbt_needed_db(t));
-                printf("\n");
-                lines = 0;
-            }
-            *tps = *t;
-            known.fft_len    = t->fft_len;
-            known.guard      = t->guard;
-            known.modulation = t->tps_modulation;
-            ok    = true;
-            since = 0;
-        } else if (!t->found || !t->pilots) {
-            ok = false;
-        }
-        if (ok && t->found && t->pilots) {
-            known.offset_known   = true;
-            known.carrier_offset = t->carrier_offset;
-        }
-        needed = dvbt_needed_db(tps);
-        if (json) {
-            printf("{\"time_s\": %.3f, \"found\": %s", now, t->found && t->pilots ? "true" : "false");
-            if (t->found && t->pilots) {
-                printf(", \"mer_db\": %.2f", t->mer_db);
-                if (isfinite(needed))
-                    printf(", \"margin_db\": %.2f", t->mer_db - needed);
-                printf(", \"power_db\": %.2f, \"sync_quality\": %.3f, \"carrier_offset_hz\": %.1f",
-                       t->power_dbfs + set.ref_offset_db, t->sync_quality, t->freq_error_hz);
-                if (t->echo_level_db > -99.0)
-                    printf(", \"echo_delay_us\": %.2f, \"echo_level_db\": %.1f", t->echo_delay_us, t->echo_level_db);
-            }
-            printf("}\n");
-        } else {
-            /* The names of the columns now and then, the numbers between. */
-            if (lines++ % AN_WATCH_HEADER_EVERY == 0)
-                printf("%8s %7s %7s %8s %6s %10s %8s %6s\n%8s %7s %7s %8s %6s %10s %8s %6s\n",
-                       "time", "MER", "margin", "level", "guard", "offset", "echo", "echo",
-                       "s", "dB", "dB", set.ref_offset_db != 0.0 ? "dBm" : "dBFS", "corr", "Hz", "us", "dB");
-            if (t->found && t->pilots) {
-                printf("%8.2f %7.1f ", now, t->mer_db);
-                if (isfinite(needed))
-                    printf("%+7.1f", t->mer_db - needed);
-                else
-                    printf("%7s", "--");
-                printf(" %8.1f %6.2f %+10.1f", t->power_dbfs + set.ref_offset_db, t->sync_quality, t->freq_error_hz);
-                if (t->echo_level_db > -99.0)
-                    printf(" %+8.2f %6.1f", t->echo_delay_us, t->echo_level_db);
-                printf("\n");
-            } else {
-                printf("%8.2f  no multiplex (guard correlation %.3f)\n", now, t->sync_quality);
-            }
-        }
         fflush(stdout);
     }
     status = 0;
@@ -956,7 +1136,6 @@ out:
         m2sdr_psd_free(&res->tone_psd);
     }
     free(res);
-    free(tps);
     free(x);
     return status;
 }
@@ -1080,13 +1259,6 @@ struct an_job {
     int    rc;
 };
 
-/* DVB-T: the multiplex of the last TPS read, and the captures since. */
-struct an_dvbt_track {
-    struct an_settings known;
-    bool   ok;
-    unsigned since;
-};
-
 static void *job_main(void *arg)
 {
     struct an_job *j = arg;
@@ -1098,9 +1270,11 @@ static void *job_main(void *arg)
     return NULL;
 }
 
-/* The result of an analysed job to the UI, and the DVB-T state from it. */
-static void job_publish(struct an_shared *sh, struct an_job *j, struct an_dvbt_track *dv)
+/* The result of an analysed job to the modes, then to the UI. */
+static void job_publish(struct an_shared *sh, struct an_job *j)
 {
+    int m;
+
     if (j->rc != 0) {
         pthread_mutex_lock(&sh->lock);
         snprintf(sh->status, sizeof(sh->status), "analysis failed");
@@ -1108,24 +1282,9 @@ static void job_publish(struct an_shared *sh, struct an_job *j, struct an_dvbt_t
         pthread_mutex_unlock(&sh->lock);
         return;
     }
-    if (j->set.dvbt_on && j->res->dvbt_valid) {
-        const struct m2sdr_dvbt_result *t = &j->res->dvbt;
-
-        if (t->tps) {
-            dv->known = j->set;
-            dv->known.dvbt_hint.fft_len    = t->fft_len;
-            dv->known.dvbt_hint.guard      = t->guard;
-            dv->known.dvbt_hint.modulation = t->tps_modulation;
-            dv->ok    = true;
-            dv->since = 0;
-        } else if (!t->found || !t->pilots) {
-            dv->ok = false;
-        }
-        /* The offset follows every result of the same tuning. */
-        if (dv->ok && t->found && t->pilots && j->set.freq_hz == dv->known.freq_hz) {
-            dv->known.dvbt_hint.offset_known   = true;
-            dv->known.dvbt_hint.carrier_offset = t->carrier_offset;
-        }
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->worker_result)
+            an_modes[m]->worker_result(&j->set, j->res);
     }
     pthread_mutex_lock(&sh->lock);
     if (result_copy(&sh->res, j->res) == 0)
@@ -1137,13 +1296,13 @@ static void job_publish(struct an_shared *sh, struct an_job *j, struct an_dvbt_t
 }
 
 /* Wait for the analysis of a job, if one runs, and publish it. */
-static void job_finish(struct an_shared *sh, struct an_job *j, struct an_dvbt_track *dv)
+static void job_finish(struct an_shared *sh, struct an_job *j)
 {
     if (!j->busy)
         return;
     pthread_join(j->thread, NULL);
     j->busy = false;
-    job_publish(sh, j, dv);
+    job_publish(sh, j);
 }
 
 static void job_free(struct an_job *j)
@@ -1160,12 +1319,10 @@ static void *worker_main(void *arg)
 {
     struct an_shared *sh = arg;
     struct an_job jobs[2];
-    struct an_dvbt_track dv;
     double last = 0;
-    int cur = 0;
+    int cur = 0, m;
 
     memset(jobs, 0, sizeof(jobs));
-    memset(&dv, 0, sizeof(dv));
     jobs[0].res = calloc(1, sizeof(*jobs[0].res));
     jobs[1].res = calloc(1, sizeof(*jobs[1].res));
     while (jobs[0].res && jobs[1].res) {
@@ -1182,20 +1339,17 @@ static void *worker_main(void *arg)
         sh->single = false;
         pthread_mutex_unlock(&sh->lock);
         if (quit || !run) {
-            job_finish(sh, &jobs[cur ^ 1], &dv);
+            job_finish(sh, &jobs[cur ^ 1]);
             if (quit)
                 break;
             usleep(20000);
             continue;
         }
 
-        /* A known multiplex: the TPS read again now and then, with its mode given. */
-        set.dvbt_fast = false;
-        memset(&set.dvbt_hint, 0, sizeof(set.dvbt_hint));
-        if (set.dvbt_on && dv.ok && sh->src->live && set.freq_hz == dv.known.freq_hz &&
-            set.sample_rate == dv.known.sample_rate && set.channel == dv.known.channel) {
-            set.dvbt_fast = ++dv.since % AN_DVBT_FULL_EVERY != 0;
-            set.dvbt_hint = dv.known.dvbt_hint;
+        /* What the modes know from the results before (DVB-T: a known multiplex). */
+        for (m = 0; an_modes[m]; m++) {
+            if (an_modes[m]->worker_prepare)
+                an_modes[m]->worker_prepare(&set, sh->src->live);
         }
         j->set   = set;
         j->count = capture_samples(&set);
@@ -1203,7 +1357,7 @@ static void *worker_main(void *arg)
             float complex *grown = realloc(j->x, j->count * sizeof(*j->x));
 
             if (!grown) {
-                job_finish(sh, &jobs[cur ^ 1], &dv);
+                job_finish(sh, &jobs[cur ^ 1]);
                 pthread_mutex_lock(&sh->lock);
                 snprintf(sh->status, sizeof(sh->status), "out of memory for %zu samples", j->count);
                 sh->run = false;
@@ -1223,7 +1377,7 @@ static void *worker_main(void *arg)
         j->capture_rc = source_capture(sh->src, &set, j->x, j->count, j->err, sizeof(j->err));
         j->capture_ms = now_ms() - t0;
         /* The analysis of the capture before, then this one in the background. */
-        job_finish(sh, &jobs[cur ^ 1], &dv);
+        job_finish(sh, &jobs[cur ^ 1]);
         if (j->capture_rc < 0) {
             pthread_mutex_lock(&sh->lock);
             snprintf(sh->status, sizeof(sh->status), "%s", j->err);
@@ -1233,14 +1387,14 @@ static void *worker_main(void *arg)
         }
         if (pthread_create(&j->thread, NULL, job_main, j) != 0) {
             job_main(j);           /* No thread: analysed here, in turn. */
-            job_publish(sh, j, &dv);
+            job_publish(sh, j);
             continue;
         }
         j->busy = true;
         cur ^= 1;
     }
-    job_finish(sh, &jobs[0], &dv);
-    job_finish(sh, &jobs[1], &dv);
+    job_finish(sh, &jobs[0]);
+    job_finish(sh, &jobs[1]);
     job_free(&jobs[0]);
     job_free(&jobs[1]);
     return NULL;
@@ -1660,7 +1814,7 @@ static void draw_controls(struct an_ui *ui, struct an_shared *sh, bool *changed)
     igDragFloat("Ceiling (dB)", &ui->wf_ceil_db, 0.5f, -200.0f, 100.0f, "%.0f", 0);
 }
 
-static void draw_spectrum(struct an_ui *ui, bool *changed)
+static void draw_spectrum(struct an_ui *ui, bool live, bool *changed)
 {
     const struct m2sdr_psd *psd = &ui->res.psd;
     const double half = 0.5 * ui->res.set.sample_rate;
@@ -1755,10 +1909,11 @@ static void draw_spectrum(struct an_ui *ui, bool *changed)
                             (ImVec2){ u0, 0.0f }, (ImVec2){ u1, 1.0f }, 0xffffffffu);
         igDummy((ImVec2){ avail.x, avail.y - 4.0f });
     }
+    (void)live;
     (void)changed;
 }
 
-static void draw_time(struct an_ui *ui)
+static void draw_time(struct an_ui *ui, bool live, bool *changed)
 {
     static float re[AN_TIME_POINTS], im[AN_TIME_POINTS], mag[AN_TIME_POINTS];
     static int points = 1024;
@@ -1769,6 +1924,8 @@ static void draw_time(struct an_ui *ui)
     float peak = 1e-6f;
     size_t i;
 
+    (void)live;
+    (void)changed;
     igSetNextItemWidth(200.0f);
     igSliderInt("Samples shown", &points, 64, AN_TIME_POINTS, "%d", ImGuiSliderFlags_Logarithmic);
     if (n < 2)
@@ -1800,7 +1957,7 @@ static void draw_time(struct an_ui *ui)
     }
 }
 
-static void draw_statistics(struct an_ui *ui)
+static void draw_statistics(struct an_ui *ui, bool live, bool *changed)
 {
     static float x[M2SDR_CCDF_POINTS], y[M2SDR_CCDF_POINTS], g[M2SDR_CCDF_POINTS];
     static float cx[AN_TIME_POINTS], cy[AN_TIME_POINTS];
@@ -1810,6 +1967,8 @@ static void draw_statistics(struct an_ui *ui)
     size_t i;
     int k;
 
+    (void)live;
+    (void)changed;
     /* CCDF on a log scale, with the one of Gaussian noise as a reference. */
     for (k = 0; k < M2SDR_CCDF_POINTS; k++) {
         const double db = k * M2SDR_CCDF_STEP_DB;
@@ -1844,7 +2003,7 @@ static void draw_statistics(struct an_ui *ui)
     }
 }
 
-static void draw_phase_noise(struct an_ui *ui, bool *changed)
+static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
 {
     static const char *const sizes[] = { "65536", "131072", "262144", "524288", "1048576", "2097152", "4194304", "8388608" };
     static float lx[M2SDR_PN_MAX_POINTS], l[M2SDR_PN_MAX_POINTS], am[M2SDR_PN_MAX_POINTS];
@@ -1856,6 +2015,7 @@ static void draw_phase_noise(struct an_ui *ui, bool *changed)
     int idx = ui->set.pn_log2 - AN_PN_MIN_LOG2, i, nf = 0;
     char text[160];
 
+    (void)live;
     igSetNextItemWidth(110.0f);
     if (igCombo_Str_arr("Samples", &idx, sizes, AN_PN_MAX_LOG2 - AN_PN_MIN_LOG2 + 1, -1)) {
         ui->set.pn_log2 = idx + AN_PN_MIN_LOG2;
@@ -1945,7 +2105,7 @@ static void draw_phase_noise(struct an_ui *ui, bool *changed)
     m2sdr_plot_end(&plot);
 }
 
-static void draw_modulation(struct an_ui *ui, bool *changed)
+static void draw_modulation(struct an_ui *ui, bool live, bool *changed)
 {
     static const char *const mods[] = { "Auto", "BPSK", "QPSK", "8PSK", "16QAM", "32QAM", "64QAM", "128QAM", "256QAM" };
     static const char *const pulses[] = { "Root raised cosine", "Raised cosine", "Rectangular" };
@@ -1962,6 +2122,7 @@ static void draw_modulation(struct an_ui *ui, bool *changed)
     float evm_top = 1.0f;
     size_t k;
 
+    (void)live;
     igSetNextItemWidth(90.0f);
     if (igCombo_Str_arr("Type", &mod, mods, M2SDR_MOD_COUNT, -1)) {
         ui->set.demod.modulation = (enum m2sdr_modulation)mod;
@@ -2189,6 +2350,12 @@ static void lte_keep(struct an_ui *ui)
         ui->lte_points_sfn = l->sfn;
         ui->lte_points_seq = ui->seq;
     }
+}
+
+static void lte_close(struct an_ui *ui)
+{
+    free(ui->lte_rgba);
+    free(ui->lte_last);
 }
 
 /* The frame shown: the one of the last capture, or the last one with a cell for a few captures. */
@@ -2641,6 +2808,53 @@ static void view_rate(struct an_ui *ui, double rate, bool *changed)
 /* DVB-T */
 /*-------*/
 
+/* Worker: the multiplex of the last TPS read, and the captures since. */
+struct an_dvbt_track {
+    struct an_settings known;
+    bool   ok;
+    unsigned since;
+};
+
+static struct an_dvbt_track dvbt_track;
+
+/* A known multiplex: the TPS read again now and then, with its mode given. */
+static void dvbt_worker_prepare(struct an_settings *set, bool live)
+{
+    struct an_dvbt_track *dv = &dvbt_track;
+
+    set->dvbt_fast = false;
+    memset(&set->dvbt_hint, 0, sizeof(set->dvbt_hint));
+    if (set->dvbt_on && dv->ok && live && set->freq_hz == dv->known.freq_hz &&
+        set->sample_rate == dv->known.sample_rate && set->channel == dv->known.channel) {
+        set->dvbt_fast = ++dv->since % AN_DVBT_FULL_EVERY != 0;
+        set->dvbt_hint = dv->known.dvbt_hint;
+    }
+}
+
+static void dvbt_worker_result(const struct an_settings *set, const struct an_result *res)
+{
+    struct an_dvbt_track *dv = &dvbt_track;
+    const struct m2sdr_dvbt_result *t = &res->dvbt;
+
+    if (!set->dvbt_on || !res->dvbt_valid)
+        return;
+    if (t->tps) {
+        dv->known = *set;
+        dv->known.dvbt_hint.fft_len    = t->fft_len;
+        dv->known.dvbt_hint.guard      = t->guard;
+        dv->known.dvbt_hint.modulation = t->tps_modulation;
+        dv->ok    = true;
+        dv->since = 0;
+    } else if (!t->found || !t->pilots) {
+        dv->ok = false;
+    }
+    /* The offset follows every result of the same tuning. */
+    if (dv->ok && t->found && t->pilots && set->freq_hz == dv->known.freq_hz) {
+        dv->known.dvbt_hint.offset_known   = true;
+        dv->known.dvbt_hint.carrier_offset = t->carrier_offset;
+    }
+}
+
 static void dvbt_keep(struct an_ui *ui)
 {
     const struct an_result *res = &ui->res;
@@ -2657,6 +2871,11 @@ static void dvbt_keep(struct an_ui *ui)
         if (ui->dvbt_tps)
             *ui->dvbt_tps = *t;
     }
+}
+
+static void dvbt_close(struct an_ui *ui)
+{
+    free(ui->dvbt_tps);
 }
 
 /* Result whose TPS fields are shown: this one, or the last one that read it. */
@@ -3057,24 +3276,9 @@ static void draw_results(struct an_ui *ui, struct an_shared *sh, bool *changed)
     char text[64];
     int m, i;
 
-    if (ui->tab == 3) {
-        draw_pn_results(ui);
-        goto status;
-    }
-    if (ui->tab == 4) {
-        draw_modulation_results(ui);
-        goto status;
-    }
-    if (ui->tab == 5) {
-        draw_lte_results(ui);
-        goto status;
-    }
-    if (ui->tab == 6) {
-        draw_dvbt_results(ui);
-        goto status;
-    }
-    if (ui->tab == 7) {
-        draw_dab_results(ui);
+    /* The figures of the mode shown, or the ones of the spectrum. */
+    if (an_modes[ui->tab]->results) {
+        an_modes[ui->tab]->results(ui);
         goto status;
     }
 
@@ -3230,7 +3434,7 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
     pthread_t worker;
     bool quit = false;
     char title[1100];
-    int t;
+    int t, m;
 
     memset(&sh, 0, sizeof(sh));
     memset(&ui, 0, sizeof(ui));
@@ -3326,9 +3530,10 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
             pthread_mutex_unlock(&sh.lock);
             if (traces_update(&ui) == 0)
                 waterfall_push(&ui);
-            lte_keep(&ui);
-            dvbt_keep(&ui);
-            dab_keep(&ui);
+            for (m = 0; an_modes[m]; m++) {
+                if (an_modes[m]->keep)
+                    an_modes[m]->keep(&ui);
+            }
         } else {
             pthread_mutex_unlock(&sh.lock);
         }
@@ -3358,67 +3563,22 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
                     first_view = -1;
                     int tab = ui.tab;
 
-                    if (igBeginTabItem("Spectrum", NULL, select == 0 ? ImGuiTabItemFlags_SetSelected : 0)) {
-                        tab = 0;
-                        draw_spectrum(&ui, &changed);
-                        igEndTabItem();
+                    for (m = 0; an_modes[m]; m++) {
+                        if (igBeginTabItem(an_modes[m]->title, NULL, select == m ? ImGuiTabItemFlags_SetSelected : 0)) {
+                            tab = m;
+                            an_modes[m]->draw(&ui, src->live && !src->no_rf_init, &changed);
+                            igEndTabItem();
+                        }
                     }
-                    if (igBeginTabItem("Time", NULL, select == 1 ? ImGuiTabItemFlags_SetSelected : 0)) {
-                        tab = 1;
-                        draw_time(&ui);
-                        igEndTabItem();
-                    }
-                    if (igBeginTabItem("Statistics", NULL, select == 2 ? ImGuiTabItemFlags_SetSelected : 0)) {
-                        tab = 2;
-                        draw_statistics(&ui);
-                        igEndTabItem();
-                    }
-                    if (igBeginTabItem("Phase noise", NULL, select == 3 ? ImGuiTabItemFlags_SetSelected : 0)) {
-                        tab = 3;
-                        draw_phase_noise(&ui, &changed);
-                        igEndTabItem();
-                    }
-                    if (igBeginTabItem("Modulation", NULL, select == 4 ? ImGuiTabItemFlags_SetSelected : 0)) {
-                        tab = 4;
-                        draw_modulation(&ui, &changed);
-                        igEndTabItem();
-                    }
-                    if (igBeginTabItem("LTE", NULL, select == 5 ? ImGuiTabItemFlags_SetSelected : 0)) {
-                        tab = 5;
-                        draw_lte(&ui, src->live && !src->no_rf_init, &changed);
-                        igEndTabItem();
-                    }
-                    if (igBeginTabItem("DVB-T", NULL, select == 6 ? ImGuiTabItemFlags_SetSelected : 0)) {
-                        tab = 6;
-                        draw_dvbt(&ui, src->live && !src->no_rf_init, &changed);
-                        igEndTabItem();
-                    }
-                    if (igBeginTabItem("DAB", NULL, select == 7 ? ImGuiTabItemFlags_SetSelected : 0)) {
-                        tab = 7;
-                        draw_dab(&ui, src->live && !src->no_rf_init, &changed);
-                        igEndTabItem();
-                    }
-                    if (select < 0 && (tab == 7) != ui.set.dab_on) {
-                        ui.set.dab_on = tab == 7;
-                        changed = true;
-                    }
-                    if (select < 0 && (tab == 5) != ui.set.lte_on) {
-                        ui.set.lte_on = tab == 5;
-                        changed = true;
-                    }
-                    if (select < 0 && (tab == 6) != ui.set.dvbt_on) {
-                        ui.set.dvbt_on = tab == 6;
-                        changed = true;
-                    }
-                    /* The phase noise and the demodulation need their own captures: they are
-                     * measured while their view is shown. */
-                    if (select < 0 && (tab == 3) != ui.set.pn_on) {
-                        ui.set.pn_on = tab == 3;
-                        changed = true;
-                    }
-                    if (select < 0 && (tab == 4) != ui.set.demod_on) {
-                        ui.set.demod_on = tab == 4;
-                        changed = true;
+                    /* A mode is measured while its view is shown: some need their own
+                     * captures. */
+                    for (m = 0; select < 0 && an_modes[m]; m++) {
+                        bool *on = an_mode_flag(an_modes[m], &ui.set);
+
+                        if (on && *on != (tab == m)) {
+                            *on     = tab == m;
+                            changed = true;
+                        }
                     }
                     if (select < 0)
                         ui.tab = tab;
@@ -3466,8 +3626,10 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
         free(ui.trace[t]);
     free(ui.avg_lin);
     free(ui.wf_rgba);
-    free(ui.lte_rgba);
-    free(ui.lte_last);
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->close)
+            an_modes[m]->close(&ui);
+    }
     free(ui.res.psd.power);
     free(sh.res.psd.power);
     pthread_mutex_destroy(&sh.lock);
@@ -3476,8 +3638,189 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
 
 #endif /* M2SDR_ANALYZER_GUI */
 
+/* Modes */
+/*-------*/
+
+/* Views of the spectrum: measured with every capture. */
+const struct an_mode an_mode_spectrum = {
+    .key      = "spectrum",
+    .title    = "Spectrum",
+    .category = AN_CAT_SPECTRUM,
+    .on       = AN_NONE,
+    .valid    = AN_NONE,
+#ifdef M2SDR_ANALYZER_GUI
+    .draw     = draw_spectrum,
+#endif
+};
+
+const struct an_mode an_mode_time = {
+    .key      = "time",
+    .title    = "Time",
+    .category = AN_CAT_SPECTRUM,
+    .on       = AN_NONE,
+    .valid    = AN_NONE,
+#ifdef M2SDR_ANALYZER_GUI
+    .draw     = draw_time,
+#endif
+};
+
+const struct an_mode an_mode_statistics = {
+    .key      = "statistics",
+    .title    = "Statistics",
+    .category = AN_CAT_SPECTRUM,
+    .on       = AN_NONE,
+    .valid    = AN_NONE,
+#ifdef M2SDR_ANALYZER_GUI
+    .draw     = draw_statistics,
+#endif
+};
+
+const struct an_mode an_mode_pn = {
+    .key         = "phase-noise",
+    .title       = "Phase noise",
+    .category    = AN_CAT_SIGNAL,
+    .on          = offsetof(struct an_settings, pn_on),
+    .valid       = offsetof(struct an_result, pn_valid),
+    .report_rank = 50,
+    .samples     = pn_samples,
+    .analyse     = pn_analyse,
+    .report_text = pn_report_text,
+    .report_json = pn_report_json,
+#ifdef M2SDR_ANALYZER_GUI
+    .draw        = draw_phase_noise,
+    .results     = draw_pn_results,
+#endif
+};
+
+const struct an_mode an_mode_demod = {
+    .key         = "modulation",
+    .title       = "Modulation",
+    .category    = AN_CAT_SIGNAL,
+    .on          = offsetof(struct an_settings, demod_on),
+    .valid       = offsetof(struct an_result, demod_valid),
+    .report_rank = 40,
+    .samples     = demod_samples,
+    .analyse     = demod_analyse,
+    .report_text = demod_report_text,
+    .report_json = demod_report_json,
+#ifdef M2SDR_ANALYZER_GUI
+    .draw        = draw_modulation,
+    .results     = draw_modulation_results,
+#endif
+};
+
+const struct an_mode an_mode_lte = {
+    .key         = "lte",
+    .title       = "LTE",
+    .category    = AN_CAT_CELLULAR,
+    .on          = offsetof(struct an_settings, lte_on),
+    .valid       = offsetof(struct an_result, lte_valid),
+    .report_rank = 10,
+    .samples     = lte_samples,
+    .analyse     = lte_analyse,
+    .report_text = lte_report_text,
+    .report_json = lte_report_json,
+#ifdef M2SDR_ANALYZER_GUI
+    .draw        = draw_lte,
+    .results     = draw_lte_results,
+    .keep        = lte_keep,
+    .close       = lte_close,
+#endif
+};
+
+const struct an_mode an_mode_dvbt = {
+    .key            = "dvbt",
+    .title          = "DVB-T",
+    .category       = AN_CAT_BROADCAST,
+    .on             = offsetof(struct an_settings, dvbt_on),
+    .valid          = offsetof(struct an_result, dvbt_valid),
+    .report_rank    = 20,
+    .default_rate   = AN_DVBT_RATE,
+    .psd_short      = true,
+    .samples        = dvbt_samples,
+    .analyse        = dvbt_analyse,
+    .report_text    = dvbt_report_text,
+    .report_json    = dvbt_report_json,
+    .watch_prepare  = dvbt_watch_prepare,
+    .watch_line     = dvbt_watch_line,
+#ifdef M2SDR_ANALYZER_GUI
+    .worker_prepare = dvbt_worker_prepare,
+    .worker_result  = dvbt_worker_result,
+    .draw           = draw_dvbt,
+    .results        = draw_dvbt_results,
+    .keep           = dvbt_keep,
+    .close          = dvbt_close,
+#endif
+};
+
+const struct an_mode an_mode_dab = {
+    .key          = "dab",
+    .title        = "DAB",
+    .category     = AN_CAT_BROADCAST,
+    .on           = offsetof(struct an_settings, dab_on),
+    .valid        = offsetof(struct an_result, dab_valid),
+    .report_rank  = 30,
+    .default_rate = M2SDR_DAB_SAMPLE_RATE,
+    .psd_short    = true,
+    .samples      = dab_samples,
+    .analyse      = dab_analyse,
+    .report_text  = dab_report_text,
+    .report_json  = dab_report_json,
+    .watch_line   = dab_watch_line,
+#ifdef M2SDR_ANALYZER_GUI
+    .draw         = draw_dab,
+    .results      = draw_dab_results,
+    .keep         = dab_keep,
+#endif
+};
+
+/* Registry: the tabs, in their order. */
+const struct an_mode *const an_modes[] = {
+    &an_mode_spectrum,
+    &an_mode_time,
+    &an_mode_statistics,
+    &an_mode_pn,
+    &an_mode_demod,
+    &an_mode_lte,
+    &an_mode_dvbt,
+    &an_mode_dab,
+    NULL
+};
+
 /* Help */
 /*------*/
+
+#define AN_HELP_COLUMNS 94         /* The longest line of the help. */
+
+/* The names of the views, as "a, b or c". */
+static char *view_names(char *text, size_t len)
+{
+    size_t n = 0;
+    int m;
+
+    text[0] = '\0';
+    for (m = 0; an_modes[m] && n < len; m++)
+        n += (size_t)snprintf(text + n, len - n, "%s%s", m == 0 ? "" : an_modes[m + 1] ? ", " : " or ", an_modes[m]->key);
+    return text;
+}
+
+/* --view: the names of the views, on lines as long as the other ones of the help. */
+static void help_views(void)
+{
+    char names[512], *word;
+    int col;
+
+    view_names(names, sizeof(names) - 1);
+    strcat(names, ".");
+    col = printf("      --view NAME        View shown first:");
+    for (word = strtok(names, " "); word; word = strtok(NULL, " ")) {
+        if (col + 1 + (int)strlen(word) > AN_HELP_COLUMNS)
+            col = printf("\n%25s%s", "", word) - 1;
+        else
+            col += printf(" %s", word);
+    }
+    printf("\n");
+}
 
 static void help(void)
 {
@@ -3564,19 +3907,18 @@ static void help(void)
            "                         thirty-second of the sample rate. For a cable from TX to RX.\n"
            "      --tx-att DB        Attenuation of the test tone (default: %d).\n"
            "\n"
-           "Output options:\n"
-           "      --view NAME        View shown first: spectrum, time, statistics, phase-noise,\n"
-           "                         modulation, lte, dvbt or dab.\n"
-           "      --report           Measure one capture and print the result, without a display.\n"
+           "Output options:\n",
+           AN_DEFAULT_FREQ_HZ, AN_DEFAULT_SAMPLE_RATE, M2SDR_BUFFER_BYTES, AN_DEFAULT_FFT_LEN, AN_DEFAULT_AVERAGES,
+           1 << AN_DEMOD_DEFAULT_LOG2, 1 << AN_PN_DEFAULT_LOG2, AN_TX_TONE_ATT_DB);
+    help_views();
+    printf("      --report           Measure one capture and print the result, without a display.\n"
            "      --json             With --report: JSON.\n"
            "      --export-csv PATH  With --report: write the spectrum to a CSV file.\n"
            "  -h, --help             Show this help message.\n"
            "\n"
            "Window: left click places the selected marker, the wheel zooms, a right drag moves the\n"
            "span, a double click shows it all. Space: run or stop. P: marker to the peak. F: full\n"
-           "span. R: restart the traces.\n",
-           AN_DEFAULT_FREQ_HZ, AN_DEFAULT_SAMPLE_RATE, M2SDR_BUFFER_BYTES, AN_DEFAULT_FFT_LEN, AN_DEFAULT_AVERAGES,
-           1 << AN_DEMOD_DEFAULT_LOG2, 1 << AN_PN_DEFAULT_LOG2, AN_TX_TONE_ATT_DB);
+           "span. R: restart the traces.\n");
 }
 
 /* Main */
@@ -3646,7 +3988,7 @@ int main(int argc, char **argv)
     double offset_s = 0.0;
     int capture_index = 0, view = 0;
     char err[256];
-    int c, status;
+    int c, m, status;
 
     m2sdr_cli_handle_version(argc, argv);
     m2sdr_cli_device_init(&cli_dev);
@@ -3825,24 +4167,12 @@ int main(int argc, char **argv)
         case 25: json = true; break;
         case 26: csv_path = optarg; break;
         case 27:
-            if (strcmp(optarg, "spectrum") == 0) {
-                view = 0;
-            } else if (strcmp(optarg, "time") == 0) {
-                view = 1;
-            } else if (strcmp(optarg, "statistics") == 0) {
-                view = 2;
-            } else if (strcmp(optarg, "phase-noise") == 0) {
-                view = 3;
-            } else if (strcmp(optarg, "modulation") == 0) {
-                view = 4;
-            } else if (strcmp(optarg, "lte") == 0) {
-                view = 5;
-            } else if (strcmp(optarg, "dvbt") == 0) {
-                view = 6;
-            } else if (strcmp(optarg, "dab") == 0) {
-                view = 7;
-            } else {
-                m2sdr_cli_invalid_choice("view", optarg, "spectrum, time, statistics, phase-noise, modulation, lte, dvbt or dab");
+            for (view = 0; an_modes[view] && strcmp(optarg, an_modes[view]->key) != 0; view++)
+                ;
+            if (!an_modes[view]) {
+                char names[512];
+
+                m2sdr_cli_invalid_choice("view", optarg, view_names(names, sizeof(names)));
                 return 1;
             }
             break;
@@ -3937,7 +4267,7 @@ int main(int argc, char **argv)
         m2sdr_cli_error("unexpected argument '%s'", argv[optind]);
         return 1;
     }
-    if (watch && (!report || set.dvbt_on == set.dab_on || file || csv_path || floor_store)) {
+    if (watch && (!report || watch_modes(&set, NULL) != 1 || file || csv_path || floor_store)) {
         m2sdr_cli_error("--watch goes with --report and one of --dvbt and --dab, on a board");
         return 1;
     }
@@ -3947,21 +4277,14 @@ int main(int argc, char **argv)
     }
     if (floor_store)
         set.pn_on = true;
-    if (view == 3)
-        set.pn_on = true;
-    if (view == 4)
-        set.demod_on = true;
-    if (view == 5)
-        set.lte_on = true;
-    if (view == 6)
-        set.dvbt_on = true;
-    /* A file gives its own rate. */
-    if (view == 7)
-        set.dab_on = true;
-    if (set.dvbt_on && !rate_given)
-        set.sample_rate = AN_DVBT_RATE;
-    if (set.dab_on && !rate_given)
-        set.sample_rate = M2SDR_DAB_SAMPLE_RATE;
+    /* The mode of the view shown first is measured from the first capture. */
+    if (an_mode_flag(an_modes[view], &set))
+        *an_mode_flag(an_modes[view], &set) = true;
+    /* The sample rate of a mode, unless one is given; a file gives its own. */
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->default_rate > 0 && an_mode_on(an_modes[m], &set) && !rate_given)
+            set.sample_rate = an_modes[m]->default_rate;
+    }
     if (src.no_rf_init && (file || src.tx_tone)) {
         m2sdr_cli_error("--no-rf-init is for a board, without --tx-tone");
         return 1;
