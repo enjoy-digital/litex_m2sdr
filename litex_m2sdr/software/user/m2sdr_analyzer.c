@@ -1290,8 +1290,6 @@ static int run_watch(struct an_source *src, const struct an_settings *base, bool
         goto out;
     }
     signal(SIGINT, watch_signal);
-    if (!json)
-        printf("  time s   MER dB  margin   level dBFS  guard corr   offset Hz   echo\n");
     while (!watch_stop) {
         const struct m2sdr_dvbt_result *t = &res->dvbt;
         const double now = (now_ms() - start) / 1e3;
@@ -1316,6 +1314,8 @@ static int run_watch(struct an_source *src, const struct an_settings *base, bool
             x_count = count;
         }
         rc = source_capture(src, &set, x, count, err, sizeof(err));
+        if (rc < 0 && watch_stop)
+            break;                 /* Ctrl-C during the capture. */
         if (rc < 0) {
             fprintf(stderr, "Capture failed: %s\n", err);
             goto out;
@@ -1329,6 +1329,17 @@ static int run_watch(struct an_source *src, const struct an_settings *base, bool
             goto out;
         }
         if (t->tps) {
+            /* The multiplex, each time its TPS is read: the reference of the lines. */
+            if (!json && (!tps->tps || tps->tps_modulation != t->tps_modulation || strcmp(tps->code_rate_hp, t->code_rate_hp) ||
+                          tps->fft_len != t->fft_len || tps->guard != t->guard || since >= AN_DVBT_FULL_EVERY - 1)) {
+                printf("Multiplex %.3f MHz: %dk, guard 1/%d, %s, code rate %s", (set.freq_hz + t->freq_error_hz) / 1e6,
+                       t->fft_len / 1024, t->guard, m2sdr_modulation_name(t->tps_modulation), t->code_rate_hp);
+                if (t->cell_id >= 0)
+                    printf(", cell %d", t->cell_id);
+                if (isfinite(dvbt_needed_db(t)))
+                    printf(": MER needed %.1f dB", dvbt_needed_db(t));
+                printf("\n");
+            }
             *tps = *t;
             known.fft_len    = t->fft_len;
             known.guard      = t->guard;
@@ -1352,17 +1363,16 @@ static int run_watch(struct an_source *src, const struct an_settings *base, bool
             }
             printf("}\n");
         } else if (t->found && t->pilots) {
-            printf("%8.2f  %7.1f  ", now, t->mer_db);
+            printf("%7.2f s  MER %5.1f dB", now, t->mer_db);
             if (isfinite(needed))
-                printf("%+6.1f", t->mer_db - needed);
-            else
-                printf("%6s", "--");
-            printf("  %11.1f  %10.2f  %10.1f", t->power_dbfs + set.ref_offset_db, t->sync_quality, t->freq_error_hz);
+                printf(" (margin %+5.1f dB)", t->mer_db - needed);
+            printf("  level %6.1f %s  guard corr %.2f  offset %+9.1f Hz", t->power_dbfs + set.ref_offset_db,
+                   set.ref_offset_db != 0.0 ? "dBm" : "dBFS", t->sync_quality, t->freq_error_hz);
             if (t->echo_level_db > -99.0)
-                printf("   %+.2f us %.1f dB", t->echo_delay_us, t->echo_level_db);
+                printf("  echo %+.2f us %5.1f dB", t->echo_delay_us, t->echo_level_db);
             printf("\n");
         } else {
-            printf("%8.2f  no multiplex (guard correlation %.3f)\n", now, t->sync_quality);
+            printf("%7.2f s  no multiplex (guard correlation %.3f)\n", now, t->sync_quality);
         }
         fflush(stdout);
     }
