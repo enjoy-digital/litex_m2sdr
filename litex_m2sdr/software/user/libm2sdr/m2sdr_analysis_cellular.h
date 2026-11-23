@@ -4,6 +4,7 @@
  *
  * - 5G NR: synchronisation signal blocks (3GPP TS 38.211, 38.213, 38.215).
  * - GSM: frequency correction and synchronisation bursts (3GPP TS 45.002, 45.003, 45.004).
+ * - TETRA: continuous downlink (ETSI EN 300 392-2).
  *
  * As in m2sdr_analysis.h, the functions take a block of samples scaled to full scale 1.0 and
  * keep no state besides their arguments.
@@ -187,6 +188,78 @@ int m2sdr_gsm_analyse(const float complex *x, size_t count, double sample_rate, 
  * and the 148 bits of the burst: for the tests. */
 void m2sdr_gsm_sch_encode(int bsic, int fn, uint8_t *coded);
 void m2sdr_gsm_sch_burst(const uint8_t *coded, uint8_t *bits);
+
+/* TETRA */
+/*-------*/
+
+#define M2SDR_TETRA_SYMBOL_RATE 18000.0
+#define M2SDR_TETRA_SLOT_SYMBOLS 255
+#define M2SDR_TETRA_MAX_SLOTS   96
+#define M2SDR_TETRA_MAX_POINTS  4096
+
+enum m2sdr_tetra_burst {
+    M2SDR_TETRA_BURST_NONE   = 0,   /* No carrier in the slot. */
+    M2SDR_TETRA_BURST_OTHER  = 1,   /* Carrier, no training sequence recognised. */
+    M2SDR_TETRA_BURST_NORMAL = 2,   /* Normal downlink burst. */
+    M2SDR_TETRA_BURST_SYNC   = 3,   /* Synchronisation downlink burst. */
+};
+
+/* A TETRA base station carrier (continuous downlink), tuned near its centre.
+ *
+ * The sample rate is 144 kSPS to 4 MSPS. The capture is resampled to 8 samples a symbol, its
+ * carrier offset taken off, and through the root raised cosine (0.35). The slots come from
+ * the training sequence that spans every boundary between them (continuous downlink), the
+ * carrier offset from it, then from the fourth power of the symbol to symbol turns and the
+ * slope of the phase over each slot, the instant of the symbols from the square of the signal
+ * (Oerder and Meyr). Each slot is told a normal burst (training sequence 1 or 2) or a
+ * synchronisation burst (frequency correction and synchronisation training), and its
+ * symbols are compared with the pi/4-DQPSK points, a phase taken every 51 symbols. A capture
+ * of 1 s at 1 MSPS takes about 60 ms.
+ *
+ * The synchronisation block of a synchronisation burst (BSCH) is decoded: descrambled,
+ * deinterleaved, the rate 2/3 code of the rate 1/4 mother code, its CRC. The SYNC PDU gives
+ * the colour code, the timeslot, frame and multiframe numbers, and the MCC and MNC of the MLE.
+ * The BSCH is sent in frame 18, once a multiframe (1.02 s): a capture of 1.1 s holds one.
+ *
+ * Not measured: the AACH, the BNCH and the traffic are not decoded (their scrambling needs
+ * the colour code, which this gives), so the use of a slot is not known beyond its burst. */
+struct m2sdr_tetra_result {
+    bool   found;               /* Slot boundaries found. */
+    double sync_quality;        /* Correlation of their training, 0 to 1; given without a carrier too. */
+    double power_dbfs;          /* Of the capture. */
+    double freq_error_hz;       /* Carrier from the centre of the capture. */
+    double slot_start;          /* Sample of the start of the first whole slot (its first symbol). */
+    int    nslots;              /* Whole slots analysed. */
+    uint8_t slot_burst[M2SDR_TETRA_MAX_SLOTS];      /* enum m2sdr_tetra_burst. */
+    uint8_t slot_training[M2SDR_TETRA_MAX_SLOTS];   /* Normal: 1 or 2; 0 otherwise. */
+    float  slot_power_db[M2SDR_TETRA_MAX_SLOTS];    /* dBFS. */
+    float  slot_mer_db[M2SDR_TETRA_MAX_SLOTS];
+    int    normal_bursts, sync_bursts;
+    double mer_db;              /* Over the slots with a burst. */
+    double evm_rms, evm_peak;
+    /* SYNC PDU of the first BSCH decoded: sync = true and the fields valid. */
+    bool   sync;
+    int    sync_decoded;        /* BSCH with their CRC right. */
+    int    system_code, colour_code;
+    int    tn, fn, mn;          /* Of that burst: 1 to 4, 1 to 18, 1 to 60. */
+    int    sync_slot;           /* Its slot in the capture. */
+    int    mcc, mnc;
+    int    sharing_mode, ts_reserved_frames, u_plane_dtx, frame18_ext;
+    int    neighbour_broadcast, cell_load, late_entry;
+    /* Symbols turned onto the four points (+-1 +-j) / sqrt(2), mean power 1. */
+    int    npoints;
+    float complex points[M2SDR_TETRA_MAX_POINTS];
+};
+
+/* Returns 0, or -1 on a bad argument (sample rate, less than three slots of samples) or an
+ * allocation failure. Without slots, found = false. */
+int m2sdr_tetra_analyse(const float complex *x, size_t count, double sample_rate, struct m2sdr_tetra_result *res);
+
+/* SYNC PDU (60 bits, one per byte, first bit first) to the 120 bits of the synchronisation
+ * block of the burst; the training sequences of the downlink bursts (normal 1, 2 and 3 of 22
+ * bits, synchronisation of 38 bits) and the 80 bits of frequency correction: for the tests. */
+void m2sdr_tetra_bsch_encode(const uint8_t *pdu, uint8_t *sb);
+const uint8_t *m2sdr_tetra_training(int which);   /* 1, 2, 3: normal; 4: sync; 5: frequency correction. */
 
 #ifdef __cplusplus
 }
