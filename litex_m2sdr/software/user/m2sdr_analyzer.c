@@ -83,38 +83,46 @@ const struct an_mode *const an_modes[] = {
 
 #define AN_HELP_COLUMNS 94         /* The longest line of the help. */
 
-/* The names of the views, as "a, b or c". */
-static char *view_names(char *text, size_t len)
+/* The keys of the views, or of the modes --watch follows, as "a, b or c" (last: " or "). A mode
+ * that --watch follows is turned on by the option of its key. */
+static char *mode_keys(char *text, size_t len, bool watch, const char *prefix, const char *last)
 {
+    const struct an_mode *keys[AN_MODES_MAX];
     size_t n = 0;
-    int m;
+    int m, k = 0;
 
+    for (m = 0; an_modes[m] && k < AN_MODES_MAX; m++) {
+        if (!watch || an_modes[m]->watch_line)
+            keys[k++] = an_modes[m];
+    }
     text[0] = '\0';
-    for (m = 0; an_modes[m] && n < len; m++)
-        n += (size_t)snprintf(text + n, len - n, "%s%s", m == 0 ? "" : an_modes[m + 1] ? ", " : " or ", an_modes[m]->key);
+    for (m = 0; m < k && n < len; m++)
+        n += (size_t)snprintf(text + n, len - n, "%s%s%s", m == 0 ? "" : m + 1 < k ? ", " : last, prefix, keys[m]->key);
     return text;
 }
 
-/* --view: the names of the views, on lines as long as the other ones of the help. */
-static void help_views(void)
+/* An option and its text, on lines as long as the other ones of the help. */
+static void help_option(const char *option, const char *text)
 {
-    char names[512], *word;
+    char words[1024], *word;
     int col;
 
-    view_names(names, sizeof(names) - 1);
-    strcat(names, ".");
-    col = printf("      --view NAME        View shown first:");
-    for (word = strtok(names, " "); word; word = strtok(NULL, " ")) {
+    snprintf(words, sizeof(words), "%s", text);
+    col = printf("      %-19s", option);
+    for (word = strtok(words, " "); word; word = strtok(NULL, " ")) {
         if (col + 1 + (int)strlen(word) > AN_HELP_COLUMNS)
             col = printf("\n%25s%s", "", word) - 1;
         else
-            col += printf(" %s", word);
+            col += printf(col == 25 ? "%s" : " %s", word);
     }
     printf("\n");
 }
 
 static void help(void)
 {
+    char keys[512], text[1024];
+    int m;
+
     printf("M2SDR Signal Analyzer Utility.\n"
            "usage: m2sdr_analyzer [options]                  Board RX\n"
            "       m2sdr_analyzer [options] --file PATH      SigMF or raw capture\n"
@@ -134,6 +142,11 @@ static void help(void)
            "                         calibration record of the board when it has one, see m2sdr_cal).\n"
            "      --sync MODE        Clock source: internal, external or fpga (default: internal).\n"
            "      --refclk-freq HZ   Reference frequency in Hz (default: 38400000).\n"
+           "      --no-rf-init       Board: leave the RFIC as it is, set by m2sdr_rf, and only receive;\n"
+           "                         --freq and --sample-rate then only label the results.\n"
+           "      --tx-tone          Board: send the test tone of the RFIC on TX, at the centre plus a\n"
+           "                         thirty-second of the sample rate. For a cable from TX to RX.\n"
+           "      --tx-att DB        Attenuation of the test tone (default: %d).\n"
            "\n"
            "File options:\n"
            "      --file PATH        SigMF metadata or data file, or raw interleaved samples.\n"
@@ -155,57 +168,24 @@ static void help(void)
            "      --channel-spacing HZ  Spacing of the adjacent channels (default: the bandwidth).\n"
            "      --ref-offset DB    Added to the levels, to read dBm at the connector: the board\n"
            "                         has no absolute level calibration.\n"
-           "\n"
-           "Modulation options:\n"
-           "      --demod            With --report: demodulate the strongest signal, a single carrier\n"
-           "                         with PSK or QAM: constellation, EVM, MER, I/Q errors.\n"
-           "      --modulation NAME  auto, bpsk, qpsk, 8psk, 16qam, 32qam, 64qam, 128qam or 256qam\n"
-           "                         (default: auto).\n"
-           "      --symbol-rate HZ   Symbols per second (default: found from the signal).\n"
-           "      --rolloff A        Roll-off of the pulse (default: found from the signal).\n"
-           "      --pulse NAME       Transmit pulse: rrc, rc or rect (default: rrc).\n"
-           "      --demod-samples N  Samples of its capture (default: %d).\n"
-           "      --no-rf-init       Board: leave the RFIC as it is, set by m2sdr_rf, and only receive;\n"
-           "                         --freq and --sample-rate then only label the results.\n"
-           "\n"
-           "LTE options:\n"
-           "      --lte              With --report: analyse an LTE downlink carrier, FDD with a normal\n"
-           "                         cyclic prefix, tuned on its centre: cell, MIB, EVM, data blocks.\n"
-           "                         The sample rate is 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS, for\n"
-           "                         6, 15, 25, 50 or 100 resource blocks around the centre.\n"
-           "\n"
-           "DVB-T options:\n"
-           "      --dvbt             With --report: reception of a DVB-T multiplex tuned near its centre:\n"
-           "                         mode, TPS, MER, channel and echoes. The sample rate is the one of\n"
-           "                         the channel (default with --dvbt: 9.142857 MSPS, 8 MHz).\n"
-           "      --watch            With --report --dvbt or --dab, on a board: one line per capture until\n"
-           "                         Ctrl-C (MER, margin, level, offset, echo); with --json, one JSON\n"
-           "                         object per line.\n"
-           "\n"
-           "DAB options:\n"
-           "      --dab              With --report: reception of a DAB/DAB+ ensemble (mode I) tuned near\n"
-           "                         its centre: MER, SNR, carrier offset, channel and echoes. The sample\n"
-           "                         rate is 2.048 MSPS (the default with --dab). --watch works too.\n"
-           "\n"
-           "Phase noise options:\n"
-           "      --phase-noise      With --report: phase noise of the strongest carrier.\n"
-           "      --pn-samples N     Samples of its capture (default: %d): more reach lower offsets.\n"
-           "      --pn-from HZ, --pn-to HZ   Integration limits (default: the offsets measured).\n"
-           "      --pn-floor PATH    File of the floor of the board (default: one per board,\n"
-           "                         ~/.config/litex_m2sdr/pn_floor_<dna>.csv).\n"
-           "      --pn-floor-save    With --report: store the phase noise read as this floor.\n"
-           "      --tx-tone          Board: send the test tone of the RFIC on TX, at the centre plus a\n"
-           "                         thirty-second of the sample rate. For a cable from TX to RX.\n"
-           "      --tx-att DB        Attenuation of the test tone (default: %d).\n"
-           "\n"
-           "Output options:\n",
-           AN_DEFAULT_FREQ_HZ, AN_DEFAULT_SAMPLE_RATE, M2SDR_BUFFER_BYTES, AN_DEFAULT_FFT_LEN, AN_DEFAULT_AVERAGES,
-           1 << AN_DEMOD_DEFAULT_LOG2, 1 << AN_PN_DEFAULT_LOG2, AN_TX_TONE_ATT_DB);
-    help_views();
+           "\n",
+           AN_DEFAULT_FREQ_HZ, AN_DEFAULT_SAMPLE_RATE, AN_TX_TONE_ATT_DB, M2SDR_BUFFER_BYTES, AN_DEFAULT_FFT_LEN,
+           AN_DEFAULT_AVERAGES);
+    /* The blocks of the modes, in the order of the registry. */
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->help)
+            an_modes[m]->help();
+    }
+    printf("Output options:\n");
+    snprintf(text, sizeof(text), "View shown first: %s.", mode_keys(keys, sizeof(keys), false, "", " or "));
+    help_option("--view NAME", text);
     printf("      --report           Measure one capture and print the result, without a display.\n"
            "      --json             With --report: JSON.\n"
-           "      --export-csv PATH  With --report: write the spectrum to a CSV file.\n"
-           "  -h, --help             Show this help message.\n"
+           "      --export-csv PATH  With --report: write the spectrum to a CSV file.\n");
+    snprintf(text, sizeof(text), "With --report %s, on a board: one line per capture until Ctrl-C (MER, margin, "
+             "level, offset, echo); with --json, one JSON object per line.", mode_keys(keys, sizeof(keys), true, "--", " or "));
+    help_option("--watch", text);
+    printf("  -h, --help             Show this help message.\n"
            "\n"
            "Window: left click places the selected marker, the wheel zooms, a right drag moves the\n"
            "span, a double click shows it all. Space: run or stop. P: marker to the peak. F: full\n"
@@ -491,7 +471,7 @@ int main(int argc, char **argv)
             if (!an_modes[view]) {
                 char names[512];
 
-                m2sdr_cli_invalid_choice("view", optarg, view_names(names, sizeof(names)));
+                m2sdr_cli_invalid_choice("view", optarg, mode_keys(names, sizeof(names), false, "", " or "));
                 return 1;
             }
             break;
@@ -517,7 +497,9 @@ int main(int argc, char **argv)
         return 1;
     }
     if (watch && (!report || watch_modes(&set, NULL) != 1 || file || csv_path || cli.floor_store)) {
-        m2sdr_cli_error("--watch goes with --report and one of --dvbt and --dab, on a board");
+        char keys[512];
+
+        m2sdr_cli_error("--watch goes with --report and one of %s, on a board", mode_keys(keys, sizeof(keys), true, "--", " and "));
         return 1;
     }
     if ((json || csv_path || cli.floor_store) && !report) {

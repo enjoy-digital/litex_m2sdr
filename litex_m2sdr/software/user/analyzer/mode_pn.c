@@ -208,6 +208,18 @@ static int pn_option(int id, const char *arg, struct an_cli *cli)
     return 0;
 }
 
+static void pn_help(void)
+{
+    printf("Phase noise options:\n"
+           "      --phase-noise      With --report: phase noise of the strongest carrier.\n"
+           "      --pn-samples N     Samples of its capture (default: %d): more reach lower offsets.\n"
+           "      --pn-from HZ, --pn-to HZ   Integration limits (default: the offsets measured).\n"
+           "      --pn-floor PATH    File of the floor of the board (default: one per board,\n"
+           "                         ~/.config/litex_m2sdr/pn_floor_<dna>.csv).\n"
+           "      --pn-floor-save    With --report: store the phase noise read as this floor.\n"
+           "\n", 1 << AN_PN_DEFAULT_LOG2);
+}
+
 #ifdef M2SDR_ANALYZER_GUI
 
 /* View */
@@ -379,6 +391,7 @@ const struct an_mode an_mode_pn = {
     .defaults    = pn_defaults,
     .options     = pn_options,
     .option      = pn_option,
+    .help        = pn_help,
 #ifdef M2SDR_ANALYZER_GUI
     .draw        = draw_phase_noise,
     .results     = draw_pn_results,

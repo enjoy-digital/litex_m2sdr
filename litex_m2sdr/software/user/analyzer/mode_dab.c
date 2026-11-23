@@ -155,6 +155,15 @@ static int dab_option(int id, const char *arg, struct an_cli *cli)
     return 0;
 }
 
+static void dab_help(void)
+{
+    printf("DAB options:\n"
+           "      --dab              With --report: reception of a DAB/DAB+ ensemble (mode I) tuned near\n"
+           "                         its centre: MER, SNR, carrier offset, channel and echoes. The sample\n"
+           "                         rate is 2.048 MSPS (the default with --dab). --watch works too.\n"
+           "\n");
+}
+
 #ifdef M2SDR_ANALYZER_GUI
 
 /* View */
@@ -315,6 +324,7 @@ const struct an_mode an_mode_dab = {
     .watch_line   = dab_watch_line,
     .options      = dab_options,
     .option       = dab_option,
+    .help         = dab_help,
 #ifdef M2SDR_ANALYZER_GUI
     .draw         = draw_dab,
     .results      = draw_dab_results,

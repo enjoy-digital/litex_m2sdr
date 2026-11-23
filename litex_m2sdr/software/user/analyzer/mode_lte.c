@@ -155,6 +155,16 @@ static int lte_option(int id, const char *arg, struct an_cli *cli)
     return 0;
 }
 
+static void lte_help(void)
+{
+    printf("LTE options:\n"
+           "      --lte              With --report: analyse an LTE downlink carrier, FDD with a normal\n"
+           "                         cyclic prefix, tuned on its centre: cell, MIB, EVM, data blocks.\n"
+           "                         The sample rate is 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS, for\n"
+           "                         6, 15, 25, 50 or 100 resource blocks around the centre.\n"
+           "\n");
+}
+
 #ifdef M2SDR_ANALYZER_GUI
 
 /* View */
@@ -607,6 +617,7 @@ const struct an_mode an_mode_lte = {
     .report_json = lte_report_json,
     .options     = lte_options,
     .option      = lte_option,
+    .help        = lte_help,
 #ifdef M2SDR_ANALYZER_GUI
     .draw        = draw_lte,
     .results     = draw_lte_results,

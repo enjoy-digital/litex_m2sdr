@@ -171,6 +171,20 @@ static int demod_option(int id, const char *arg, struct an_cli *cli)
     return 0;
 }
 
+static void demod_help(void)
+{
+    printf("Modulation options:\n"
+           "      --demod            With --report: demodulate the strongest signal, a single carrier\n"
+           "                         with PSK or QAM: constellation, EVM, MER, I/Q errors.\n"
+           "      --modulation NAME  auto, bpsk, qpsk, 8psk, 16qam, 32qam, 64qam, 128qam or 256qam\n"
+           "                         (default: auto).\n"
+           "      --symbol-rate HZ   Symbols per second (default: found from the signal).\n"
+           "      --rolloff A        Roll-off of the pulse (default: found from the signal).\n"
+           "      --pulse NAME       Transmit pulse: rrc, rc or rect (default: rrc).\n"
+           "      --demod-samples N  Samples of its capture (default: %d).\n"
+           "\n", 1 << AN_DEMOD_DEFAULT_LOG2);
+}
+
 #ifdef M2SDR_ANALYZER_GUI
 
 /* View */
@@ -366,6 +380,7 @@ const struct an_mode an_mode_demod = {
     .defaults    = demod_defaults,
     .options     = demod_options,
     .option      = demod_option,
+    .help        = demod_help,
 #ifdef M2SDR_ANALYZER_GUI
     .draw        = draw_modulation,
     .results     = draw_modulation_results,

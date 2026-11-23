@@ -264,11 +264,12 @@ struct an_mode {
     double default_rate;           /* Sample rate when it is on and none is given; 0: none. */
     bool   psd_short;              /* Its capture is long: the spectrum only takes its own averages of it. */
     /* Command line: its defaults in the settings, set before the options are read; its long
-     * options, their .val its own ids, NULL-name terminated; and their parser, that returns 0, or
-     * -1 after its message. */
+     * options, their .val its own ids, NULL-name terminated; their parser, that returns 0, or -1
+     * after its message; and its block of the help. */
     void   (*defaults)(struct an_settings *set);
     const struct option *options;
     int    (*option)(int id, const char *arg, struct an_cli *cli);
+    void   (*help)(void);             /* Its block of the help, ending with an empty line. */
     /* Capture and analysis. */
     size_t (*samples)(const struct an_settings *set);             /* Samples it needs. */
     void   (*analyse)(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);
