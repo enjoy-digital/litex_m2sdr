@@ -440,6 +440,7 @@ subdirectories.
 | Path | Holds |
 |--------------------------|---------------------------------------------------------------------|
 | `m2sdr_*.c` | The utilities, one file each |
+| `analyzer/` | The rest of `m2sdr_analyzer`: sources, analysis and reports, window, one file per mode |
 | `libm2sdr/` | The host library, and the support code of the utilities: command line, host queue, SATA capture volumes |
 | `liblitepcie/`, `libliteeth/`, `libliteusb/` | Access to the board over PCIe, Ethernet and USB3 |
 | `ad9361/` | Driver of the RFIC |
@@ -787,6 +788,11 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | LTE | Cell, resource grid, data blocks and constellations of an LTE downlink carrier |
 | DVB-T | MER and its trace, constellation, channel, MER per carrier and echoes of a DVB-T multiplex |
 | DAB | MER and its trace, SNR, constellation, channel, MER per carrier and echoes of a DAB/DAB+ ensemble |
+
+The tabs of the window group the views by category: Spectrum (Spectrum, Time, Statistics),
+Signal (Phase noise, Modulation), Cellular (LTE) and Broadcast (DVB-T, DAB). `--view` selects
+one of them by its name: `spectrum`, `time`, `statistics`, `phase-noise`, `modulation`, `lte`,
+`dvbt` or `dab`.
 
 The figures are next to the views, and `--report` prints the same ones for one capture:
 
