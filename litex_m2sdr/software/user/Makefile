@@ -161,6 +161,7 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_analysis_coherence.o \
 	libm2sdr/m2sdr_analysis_df.o \
 	libm2sdr/m2sdr_analysis_mimo.o \
+	libm2sdr/m2sdr_analysis_lab.o libm2sdr/m2sdr_analysis_sweep.o libm2sdr/m2sdr_analysis_compression.o libm2sdr/m2sdr_analysis_imd.o \
 	libm2sdr/m2sdr_analysis_lab.o libm2sdr/m2sdr_analysis_sweep.o libm2sdr/m2sdr_analysis_compression.o \
 	libm2sdr/m2sdr_analysis_lab.o libm2sdr/m2sdr_analysis_sweep.o \
 	libm2sdr/m2sdr_analysis_lab.o \
@@ -566,6 +567,7 @@ install_dev: $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 	install -m 644 libm2sdr/m2sdr_analysis_cellular.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_analysis_timing.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_analysis_dual.h $(PREFIX)/include/litex_m2sdr/libm2sdr
+	install -m 644 libm2sdr/m2sdr_analysis_lab.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_analysis_lab.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_analysis_lab.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_analysis_lab.h $(PREFIX)/include/litex_m2sdr/libm2sdr
