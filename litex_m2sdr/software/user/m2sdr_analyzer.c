@@ -64,17 +64,15 @@ const struct an_mode an_mode_statistics = {
 #endif
 };
 
-/* Registry: the views and modes, in the order of the tabs (a mode: one line here, see
- * analyzer/analyzer.h). */
+/* Registry: the list of analyzer/modes.h. */
+#define AN_MODE(name) extern const struct an_mode an_mode_##name;
+#include "analyzer/modes.h"
+#undef AN_MODE
+
 const struct an_mode *const an_modes[] = {
-    &an_mode_spectrum,
-    &an_mode_time,
-    &an_mode_statistics,
-    &an_mode_pn,
-    &an_mode_demod,
-    &an_mode_lte,
-    &an_mode_dvbt,
-    &an_mode_dab,
+#define AN_MODE(name) &an_mode_##name,
+#include "analyzer/modes.h"
+#undef AN_MODE
     NULL
 };
 

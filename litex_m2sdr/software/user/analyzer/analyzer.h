@@ -297,9 +297,6 @@ struct an_mode {
 /* The views and modes, in the order of their tabs, NULL terminated. */
 extern const struct an_mode *const an_modes[];
 
-extern const struct an_mode an_mode_spectrum, an_mode_time, an_mode_statistics;
-extern const struct an_mode an_mode_pn, an_mode_demod, an_mode_lte, an_mode_dvbt, an_mode_dab;
-
 /* The flag of a mode in settings; NULL for a view of the spectrum. */
 static inline bool *an_mode_flag(const struct an_mode *m, struct an_settings *set)
 {
