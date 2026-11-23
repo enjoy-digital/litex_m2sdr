@@ -102,6 +102,7 @@
 #define AN_LORA_SAMPLE_RATE     1e6           /* The three bandwidths divide it by a power of two. */
 #define AN_ADEV_SAMPLES         (1 << 17)     /* Capture of a carrier estimate. */
 #define AN_ADEV_HISTORY         1024          /* Captures kept in the series of the Allan deviation. */
+#define AN_GNSS_DEFAULT_MS      10            /* Milliseconds of a GPS acquisition. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 /* Monitoring. */
@@ -158,9 +159,11 @@ struct an_settings {
     bool   adsb_on;                /* ADS-B at 1090 MHz. */
     struct m2sdr_adsb_config adsb; /* Its receiver position. */
     bool   lora_on;                /* LoRa channel. */
-    /* Timing: stability of a carrier. */
+    /* Timing: stability of a carrier, GPS L1 C/A. */
     bool   adev_on;
     double adev_carrier_hz;        /* Nominal RF frequency of the carrier; 0: the first one found. */
+    bool   gnss_on;
+    int    gnss_ms;                /* Milliseconds integrated; 0: AN_GNSS_DEFAULT_MS. */
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -290,6 +293,8 @@ struct an_result {
     bool   adev_nominal_given;     /* From the settings; else the first carrier found. */
     int    adev_npoints;           /* History, oldest first: time from the first point, offset. */
     float  adev_t_s[AN_ADEV_HISTORY], adev_ppb[AN_ADEV_HISTORY];
+    struct m2sdr_gnss_result gnss;
+    bool   gnss_valid;             /* Measured: the sample rate was 2.048 or 4.096 MSPS. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */

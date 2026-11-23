@@ -332,7 +332,7 @@ static int adev_option(int id, const char *arg, struct an_cli *cli)
 
 static void adev_help(void)
 {
-    printf("Timing options:\n"
+    printf("Allan deviation options:\n"
            "      --adev             With --report: frequency, phase and Allan deviation of the strongest\n"
            "                         carrier (inside the capture; over the captures with --watch).\n"
            "      --adev-carrier HZ  Its nominal RF frequency: offsets in ppb from it, searched near it.\n"
