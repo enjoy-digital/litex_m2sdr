@@ -385,6 +385,7 @@ struct m2sdr_dvbt_result {
     bool   pilots;              /* Continual pilots found: the figures below are valid. */
     double pilot_quality;       /* Their coherence from symbol to symbol, 0 to 1. */
     double freq_error_hz;       /* Centre of the multiplex, from the centre of the capture. */
+    int    carrier_offset;      /* Its whole carriers. */
     int    symbols;             /* Analysed. */
     bool   tps;                 /* TPS sync word found: the parameters below are read. */
     int    tps_fft_len, tps_guard;
@@ -417,6 +418,8 @@ struct m2sdr_dvbt_config {
     int    fft_len;             /* 2048 or 8192, with guard. */
     int    guard;
     enum m2sdr_modulation modulation;   /* Of the MER when the capture has no TPS. */
+    bool   offset_known;        /* carrier_offset of an earlier result: searched around it only. */
+    int    carrier_offset;
 };
 
 /* Returns 0, or -1 on a bad argument (sample rate, less than the time of eight 8k symbols)
