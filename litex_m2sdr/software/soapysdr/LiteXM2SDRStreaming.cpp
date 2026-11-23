@@ -706,6 +706,11 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             get_kwargs_long_long(searchArgs, _deviceArgs, "tx_latency_ns", 0);
         _tx_stream.timed_tx_late_margin_configured =
             has_kwargs_key(searchArgs, _deviceArgs, "tx_late_margin_ns");
+        /* tx_strict_timing=1 (a terminal, which must hit its UL slots within the cyclic prefix): the hardware
+         * timed TX measures its on-time reference only after an early stamp held by the gate, and catches up to
+         * slightly early after any burst restart. */
+        _tx_stream.strict_timing =
+            get_kwargs_long_long(searchArgs, _deviceArgs, "tx_strict_timing", 0) != 0;
         _tx_stream.timed_tx_late_margin_ns =
             get_kwargs_long_long(searchArgs, _deviceArgs, "tx_late_margin_ns", 0);
         if (_tx_stream.timed_tx_late_margin_ns < 0)
@@ -979,6 +984,12 @@ int SoapyLiteXM2SDR::activateStream(
         _tx_stream.status_time_ns = 0;
         resetTimedTxTimeline();
         _tx_stream.hw_next_valid = false;
+        /* The on-time reference of the drift check is the bias of its estimate: it holds for the
+         * whole activation, it is measured again only after a new activation. */
+        _tx_stream.hw_check_ref_valid = false;
+        _tx_stream.hw_catchup = false;
+        _tx_stream.hw_ref_pending = false;
+        _tx_stream.hw_restamp_on_time = false;
         if (_tx_stream.timed_tx_enabled)
             initTimedTxTimeline();
         if (flags & SOAPY_SDR_HAS_TIME) {
@@ -2275,16 +2286,54 @@ int SoapyLiteXM2SDR::writeStream(
                 const long long late_tolerance_ns  = 500000;
                 const long long early_tolerance_ns = 500000;
                 const long long estimate_ns = intended_ns - air_next_ns;
-                const long long plausible_bias_ns = 2000000;
-                if (!_tx_stream.hw_check_ref_valid &&
-                    estimate_ns > -plausible_bias_ns && estimate_ns < plausible_bias_ns) {
-                    _tx_stream.hw_check_ref_valid = true;
-                    _tx_stream.hw_check_ref_ns = estimate_ns;
+                /* The on-time reference is the bias of the estimate. It is measured only when the stream is
+                 * known to be exactly on time: after a stamp that the gate held, i.e. an early one. A stream that
+                 * started late (its first stamped buffer reached the gate after its time and was dropped, the
+                 * samples behind it airing late) would otherwise make its lateness the reference for good. So,
+                 * after an activation: drop samples until the stream is clearly early, stamp the next buffer
+                 * (held by the gate to its exact time), and take the reference at the next check. */
+                if (!_tx_stream.hw_check_ref_valid && !_tx_stream.strict_timing) {
+                    /* Reference from the first check (the stream assumed on time). */
+                    const long long plausible_bias_ns = 2000000;
+                    if (estimate_ns > -plausible_bias_ns && estimate_ns < plausible_bias_ns) {
+                        _tx_stream.hw_check_ref_valid = true;
+                        _tx_stream.hw_check_ref_ns    = estimate_ns;
+                    }
+                } else if (!_tx_stream.hw_check_ref_valid) {
+                    const long long calib_early_ns = 300000;
+                    if (_tx_stream.hw_ref_pending) {
+                        /* The bias is negative (the estimate counts the queue as airing at once) and small;
+                         * anything else means the stamp was not held as expected: calibrate again. */
+                        _tx_stream.hw_ref_pending = false;
+                        if (estimate_ns <= 0 && estimate_ns > -2000000) {
+                            _tx_stream.hw_check_ref_valid = true;
+                            _tx_stream.hw_check_ref_ns    = estimate_ns;
+                        }
+                    } else if (estimate_ns < calib_early_ns) {
+                        _tx_stream.hw_next_ns += samples_to_ns(_tx_stream.samplerate,
+                            static_cast<long long>(returnedElems));
+                        _tx_stream.hw_check_count = 15; /* check again at the next write */
+                        _tx_stream.time_error = true;
+                        _tx_stream.status_time_ns = _tx_stream.hw_next_ns;
+                        return static_cast<int>(returnedElems);
+                    } else {
+                        _tx_stream.hw_ref_pending     = true;
+                        _tx_stream.hw_burst_valid     = false;
+                        _tx_stream.hw_restamp_on_time = true;
+                    }
                 }
                 /* Without a reference yet (far off, e.g. at start-up), the estimate itself. */
                 const long long drift_ns = estimate_ns -
                     (_tx_stream.hw_check_ref_valid ? _tx_stream.hw_check_ref_ns : 0);
-                if (drift_ns < -late_tolerance_ns) {
+                /* Once late, catch up past on time, to slightly early: the next buffer is then
+                 * stamped and the gate holds it to its exact time. Stopping as soon as the drift is
+                 * within the tolerance would leave the stream up to late_tolerance_ns late for the
+                 * rest of the burst, its stamped buffers dropped by the gate: far beyond what a
+                 * receiver can work with (a terminal must hit its slot within the cyclic prefix). */
+                const long long catchup_early_ns = 300000;
+                if (drift_ns < -late_tolerance_ns ||
+                    (_tx_stream.hw_catchup && drift_ns < catchup_early_ns)) {
+                    _tx_stream.hw_catchup = true;
                     _tx_stream.hw_next_ns += samples_to_ns(_tx_stream.samplerate,
                         static_cast<long long>(returnedElems));
                     _tx_stream.hw_check_count = 15; /* check again at the next write */
@@ -2292,8 +2341,16 @@ int SoapyLiteXM2SDR::writeStream(
                     _tx_stream.status_time_ns = _tx_stream.hw_next_ns;
                     return static_cast<int>(returnedElems);
                 }
-                if (drift_ns > early_tolerance_ns)
+                if (_tx_stream.hw_catchup) {
+                    /* Caught up (slightly early): stamp the next buffer. */
+                    _tx_stream.hw_catchup     = false;
                     _tx_stream.hw_burst_valid = false;
+                    _tx_stream.hw_restamp_on_time = true;
+                }
+                if (drift_ns > early_tolerance_ns) {
+                    _tx_stream.hw_burst_valid = false;
+                    _tx_stream.hw_restamp_on_time = true; /* early: the gate holds the stamp */
+                }
             }
         }
         if (!has_time && _tx_stream.hw_next_valid && !_tx_stream.hw_burst_valid) {
@@ -2310,8 +2367,11 @@ int SoapyLiteXM2SDR::writeStream(
             }
             if (!continues) {
                 const long long now_ns = txCheckNowNs();
+                /* now_ns is the end of the last RX buffer the host read; an application pipelines its TX behind
+                 * it (srsUE: rx time + 3 ms, written by the worker of a slot read ~2.5 slots earlier, so ~0.5 ms
+                 * ahead of it). A new burst starts on an empty ring: two buffers of lead let the gate get it. */
                 const long long min_lead_ns = samples_to_ns(_tx_stream.samplerate,
-                    static_cast<long long>(4 * this->getStreamMTU(stream)));
+                    static_cast<long long>(2 * this->getStreamMTU(stream)));
                 if (now_ns != 0 && timeNs < now_ns + min_lead_ns) {
                     _tx_stream.hw_burst_valid = false;
                     _tx_stream.hw_next_ns = timeNs + samples_to_ns(_tx_stream.samplerate,
@@ -2434,8 +2494,19 @@ int SoapyLiteXM2SDR::writeStream(
             if (ret < 0)
                 return ret;
             if (!continues_burst) {
+                /* A new burst within a running activation (after an underflow, a write dropped as too late, an end
+                 * of burst) can start late by less than the drift tolerance: then nothing would correct it, and a
+                 * terminal that transmits even a fraction of a millisecond late is not decoded at all. Catch up to
+                 * slightly early once and stamp again, whatever the estimate (a few hundred microseconds of samples
+                 * at most). Not for the re-stamps of the check itself, which are on time or early. */
+                if (_tx_stream.strict_timing && _tx_stream.hw_check_ref_valid && !_tx_stream.hw_restamp_on_time)
+                    _tx_stream.hw_catchup = true;
+                _tx_stream.hw_restamp_on_time = false;
                 markTxRemainderTime(timeNs);
-                _tx_stream.hw_check_ref_valid = false;
+                /* Keep the on-time reference: a burst that starts late (e.g. the application
+                 * ends and restarts its burst while the ring still holds earlier samples) is
+                 * caught up by dropping samples, and a reference measured during that catch-up
+                 * (accepted up to 2 ms off) would make the remaining lateness the new "on time". */
                 _tx_stream.hw_burst_valid   = true;
                 _tx_stream.hw_burst_time_ns = timeNs;
                 _tx_stream.hw_burst_samples = 0;
