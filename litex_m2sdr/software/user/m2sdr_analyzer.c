@@ -72,6 +72,7 @@
 #define AN_DVBT_FULL_EVERY      300           /* Live, one capture in this many (about 15 s) reads the TPS again. */
 #define AN_WATCH_HEADER_EVERY   20            /* Lines of --watch between two headers of the columns. */
 #define AN_DVBT_RATE            (64e6 / 7.0)  /* Elementary rate of an 8 MHz DVB-T channel. */
+#define AN_DAB_SECONDS          0.2           /* Capture of a DAB analysis: a whole 96 ms frame wherever it starts. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 
@@ -101,6 +102,7 @@ struct an_settings {
     struct m2sdr_demod_config demod;
     bool   lte_on;                 /* LTE downlink carrier. */
     bool   dvbt_on;                /* DVB-T multiplex. */
+    bool   dab_on;                 /* DAB ensemble. */
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -573,6 +575,8 @@ struct an_result {
     bool   lte_valid;              /* Measured: the sample rate was one of LTE; lte.found says the rest. */
     struct m2sdr_dvbt_result dvbt;
     bool   dvbt_valid;             /* Measured: the sample rate was one of DVB-T; dvbt.found says the rest. */
+    struct m2sdr_dab_result dab;
+    bool   dab_valid;              /* Measured: the sample rate was 2.048 MSPS; dab.found says the rest. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
@@ -590,6 +594,8 @@ static size_t capture_samples(const struct an_settings *set)
         count = (size_t)1 << set->demod_log2;
     if (set->lte_on && count < (size_t)(AN_LTE_SECONDS * set->sample_rate))
         count = (size_t)(AN_LTE_SECONDS * set->sample_rate);
+    if (set->dab_on && count < (size_t)(AN_DAB_SECONDS * set->sample_rate))
+        count = (size_t)(AN_DAB_SECONDS * set->sample_rate);
     if (set->dvbt_on && count < (size_t)((set->dvbt_fast ? AN_DVBT_FAST_SECONDS : AN_DVBT_SECONDS) * set->sample_rate))
         count = (size_t)((set->dvbt_fast ? AN_DVBT_FAST_SECONDS : AN_DVBT_SECONDS) * set->sample_rate);
     return count < AN_TIME_POINTS ? AN_TIME_POINTS : count;
@@ -600,7 +606,7 @@ static int analyse(const float complex *x, size_t count, const struct an_setting
     const double half = 0.5 * set->sample_rate;
     /* The DVB-T capture is long: the spectrum keeps its own averages, for speed. */
     const size_t spectrum = (size_t)set->fft_len * ((size_t)set->averages + 1) / 2;
-    const size_t psd_count = set->dvbt_on && spectrum >= (size_t)set->fft_len && spectrum < count ? spectrum : count;
+    const size_t psd_count = (set->dvbt_on || set->dab_on) && spectrum >= (size_t)set->fft_len && spectrum < count ? spectrum : count;
 
     res->set = *set;
     if (m2sdr_psd_compute(x, psd_count, set->sample_rate, (size_t)set->fft_len, (enum m2sdr_window)set->window, &res->psd) != 0)
@@ -673,6 +679,12 @@ static int analyse(const float complex *x, size_t count, const struct an_setting
         const size_t n = (size_t)(AN_LTE_SECONDS * set->sample_rate);
 
         res->lte_valid = m2sdr_lte_analyse(x, count < n ? count : n, set->sample_rate, &res->lte) == 0;
+    }
+    res->dab_valid = false;
+    if (set->dab_on) {
+        const size_t n = (size_t)(AN_DAB_SECONDS * set->sample_rate);
+
+        res->dab_valid = m2sdr_dab_analyse(x, count < n ? count : n, set->sample_rate, &res->dab) == 0;
     }
     res->dvbt_valid = false;
     if (set->dvbt_on) {
@@ -888,7 +900,7 @@ static void report_json(const struct an_source *src, const struct an_result *res
     print_json_number("gain_imbalance_db", res->stats.gain_imbalance_db, false);
     print_json_number("quadrature_deg", res->stats.quadrature_deg, false);
     print_json_number("clipped", res->stats.clipped, true);
-    printf("  }%s\n", set->pn_on || set->demod_on || set->lte_on || set->dvbt_on ? "," : "");
+    printf("  }%s\n", set->pn_on || set->demod_on || set->lte_on || set->dvbt_on || set->dab_on ? "," : "");
     if (set->lte_on) {
         const struct m2sdr_lte_result *l = &res->lte;
         static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
@@ -929,7 +941,7 @@ static void report_json(const struct an_source *src, const struct an_result *res
                 printf("\n");
             }
         }
-        printf("  }%s\n", set->pn_on || set->demod_on || set->dvbt_on ? "," : "");
+        printf("  }%s\n", set->pn_on || set->demod_on || set->dvbt_on || set->dab_on ? "," : "");
     }
     if (set->dvbt_on) {
         const struct m2sdr_dvbt_result *t = &res->dvbt;
@@ -957,6 +969,29 @@ static void report_json(const struct an_source *src, const struct an_result *res
                 }
                 printf("    \"mer_against\": \"%s\",\n", m2sdr_modulation_name(t->modulation));
                 print_json_number("mer_needed_db", dvbt_needed_db(t), false);
+                print_json_number("echo_delay_us", t->echo_delay_us, false);
+                print_json_number("echo_level_db", t->echo_level_db, false);
+                print_json_number("mer_db", t->mer_db, true);
+            }
+        }
+        printf("  }%s\n", set->pn_on || set->demod_on || set->dab_on ? "," : "");
+    }
+    if (set->dab_on) {
+        const struct m2sdr_dab_result *t = &res->dab;
+        const bool ok = res->dab_valid && t->found;
+
+        printf("  \"dab\": {\n");
+        print_json_number("sync_quality", res->dab_valid ? t->sync_quality : 0.0, false);
+        printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
+        if (ok) {
+            print_json_number("power_db", t->power_dbfs + off, false);
+            print_json_number("null_depth_db", t->null_depth_db, false);
+            printf("    \"phase_reference\": %s%s\n", t->prs ? "true" : "false", t->prs ? "," : "");
+            if (t->prs) {
+                print_json_number("carrier_hz", set->freq_hz + t->freq_error_hz, false);
+                print_json_number("carrier_offset_hz", t->freq_error_hz, false);
+                printf("    \"frames\": %d,\n", t->frames);
+                print_json_number("snr_db", t->null_snr_db, false);
                 print_json_number("echo_delay_us", t->echo_delay_us, false);
                 print_json_number("echo_level_db", t->echo_level_db, false);
                 print_json_number("mer_db", t->mer_db, true);
@@ -1177,6 +1212,32 @@ static void report_text(const struct an_source *src, const struct an_result *res
         }
     }
 
+    if (set->dab_on) {
+        const struct m2sdr_dab_result *t = &res->dab;
+
+        printf("\nDAB:\n");
+        if (!res->dab_valid) {
+            printf("  The sample rate must be 2.048 MSPS, with at least 110 ms of samples.\n");
+        } else if (!t->found) {
+            printf("  No ensemble found (null symbol %.1f dB, guard interval correlation %.3f).\n", t->null_depth_db,
+                   t->sync_quality);
+        } else {
+            printf("  Sync       : null symbol %.1f dB, guard correlation %.2f, %.1f %s\n", t->null_depth_db, t->sync_quality,
+                   t->power_dbfs + off, unit);
+            if (!t->prs) {
+                printf("  Reference  : phase reference symbol not found (%.2f): too much noise for the figures below.\n",
+                       t->prs_quality);
+            } else {
+                printf("  Ensemble   : %.6f MHz (%+.1f Hz from the centre), %d frame%s\n", (set->freq_hz + t->freq_error_hz) / 1e6,
+                       t->freq_error_hz, t->frames, t->frames == 1 ? "" : "s");
+                printf("  MER        : %.1f dB over %d symbols, SNR on the carriers %.1f dB\n", t->mer_db, t->symbols, t->null_snr_db);
+                if (t->echo_level_db > -99.0)
+                    printf("  Echo       : strongest at %+.2f us, %.1f dB (guard interval %.0f us)\n", t->echo_delay_us,
+                           t->echo_level_db, t->guard_us);
+            }
+        }
+    }
+
     if (set->demod_on) {
         const struct m2sdr_demod_result *d = &res->demod;
 
@@ -1270,8 +1331,9 @@ static void watch_signal(int sig)
     watch_stop = 1;
 }
 
-/* DVB-T from a board, one line per capture until Ctrl-C: the figures to follow when placing an
- * antenna, without a display. Short captures once the TPS is read, as in the view. */
+/* DVB-T or DAB from a board, one line per capture until Ctrl-C: the figures to follow when
+ * placing an antenna, without a display. DVB-T: short captures once the TPS is read, as in the
+ * view. */
 static int run_watch(struct an_source *src, const struct an_settings *base, bool json)
 {
     struct an_settings set = *base;
@@ -1324,6 +1386,43 @@ static int run_watch(struct an_source *src, const struct an_settings *base, bool
         if (analyse(x, count, &set, res) != 0) {
             fprintf(stderr, "Analysis failed\n");
             goto out;
+        }
+        if (set.dab_on) {
+            const struct m2sdr_dab_result *d = &res->dab;
+            const bool dok = res->dab_valid && d->found && d->prs;
+
+            if (!res->dab_valid) {
+                fprintf(stderr, "The sample rate is not the one of DAB (2.048 MSPS).\n");
+                goto out;
+            }
+            if (json) {
+                printf("{\"time_s\": %.3f, \"found\": %s", now, dok ? "true" : "false");
+                if (dok) {
+                    printf(", \"mer_db\": %.2f, \"snr_db\": %.2f, \"power_db\": %.2f, \"null_depth_db\": %.1f, "
+                           "\"carrier_offset_hz\": %.1f", d->mer_db, d->null_snr_db, d->power_dbfs + set.ref_offset_db,
+                           d->null_depth_db, d->freq_error_hz);
+                    if (d->echo_level_db > -99.0)
+                        printf(", \"echo_delay_us\": %.2f, \"echo_level_db\": %.1f", d->echo_delay_us, d->echo_level_db);
+                }
+                printf("}\n");
+            } else {
+                if (lines++ % AN_WATCH_HEADER_EVERY == 0)
+                    printf("%8s %7s %7s %8s %6s %10s %8s %6s\n%8s %7s %7s %8s %6s %10s %8s %6s\n",
+                           "time", "MER", "SNR", "level", "null", "offset", "echo", "echo",
+                           "s", "dB", "dB", set.ref_offset_db != 0.0 ? "dBm" : "dBFS", "dB", "Hz", "us", "dB");
+                if (dok) {
+                    printf("%8.2f %7.1f %7.1f %8.1f %6.1f %+10.1f", now, d->mer_db, d->null_snr_db, d->power_dbfs + set.ref_offset_db,
+                           d->null_depth_db, d->freq_error_hz);
+                    if (d->echo_level_db > -99.0)
+                        printf(" %+8.2f %6.1f", d->echo_delay_us, d->echo_level_db);
+                    printf("\n");
+                } else {
+                    printf("%8.2f  no ensemble (null symbol %.1f dB, guard correlation %.3f)\n", now, d->null_depth_db,
+                           d->sync_quality);
+                }
+            }
+            fflush(stdout);
+            continue;
         }
         if (!res->dvbt_valid) {
             fprintf(stderr, "The sample rate is not one of DVB-T.\n");
@@ -1493,6 +1592,18 @@ static const ImU32 lte_mod_colors[M2SDR_MOD_COUNT] = {
 #define DVBT_COL_MER       0xff40c0ffu
 #define DVBT_COL_CHANNEL   0xffffb040u
 #define DVBT_COL_NEEDED    0xa04040ffu
+#define AN_TREND_BINS      512       /* At least the per-carrier and echo bins of DVB-T and DAB. */
+
+/* MER of each result and traces averaged over the results of one tuning (DVB-T, DAB): what to
+ * follow when moving an antenna. */
+struct an_trend {
+    float  mer[AN_DVBT_HISTORY];   /* Oldest first. */
+    int    nmer;
+    float  mer_bin[AN_TREND_BINS], channel_bin[AN_TREND_BINS], echo[AN_TREND_BINS];
+    int    navg;
+    double freq_hz, rate;
+    int    channel;
+};
 
 /* Shared between the worker, which captures and analyses, and the UI, which draws. */
 struct an_shared {
@@ -1535,7 +1646,7 @@ struct an_ui {
     bool   wf_on;
     bool   wf_auto;                /* Levels to be set from the next result. */
     /* Phase noise. */
-    int    tab;                    /* View shown: 0 spectrum, 1 time, 2 statistics, 3 phase noise, 4 modulation, 5 LTE, 6 DVB-T. */
+    int    tab;                    /* View shown: 0 spectrum, 1 time, 2 statistics, 3 phase noise, 4 modulation, 5 LTE, 6 DVB-T, 7 DAB. */
     bool   pn_am;
     struct an_floor *fl;
     const char *floor_path;        /* Where "Store as floor" writes; NULL: nowhere. */
@@ -1552,16 +1663,10 @@ struct an_ui {
     uint8_t lte_points_mod[M2SDR_LTE_MAX_POINTS];
     int    lte_npoints, lte_points_sfn;
     unsigned lte_points_seq;
-    /* DVB-T: MER of the last captures, oldest first, for as long as the tuning stays. */
-    float  dvbt_mer[AN_DVBT_HISTORY];
-    int    dvbt_nmer;
+    /* DVB-T and DAB: MER and traces over the results of one tuning. */
+    struct an_trend dvbt, dab;
     /* Last capture whose TPS was read: the short ones between carry none. */
     struct m2sdr_dvbt_result *dvbt_tps;
-    /* Traces averaged over the captures of the same tuning, and how many. */
-    float  dvbt_mer_bin[M2SDR_DVBT_BINS], dvbt_channel_bin[M2SDR_DVBT_BINS], dvbt_echo[M2SDR_DVBT_ECHO_BINS];
-    int    dvbt_navg;
-    double dvbt_freq_hz, dvbt_rate;
-    int    dvbt_channel;
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
 };
@@ -2981,51 +3086,204 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
     igEndGroup();
 }
 
+/* OFDM views */
+/*------------*/
+
+/* A result of the tuning of `set`; true when the tuning is a new one and the trend restarted. A
+ * result without the signal (ok false) counts as 0 dB in the trace. */
+static bool trend_add(struct an_trend *tr, const struct an_settings *set, bool ok, double mer, const float *mer_bin,
+                      const float *channel_bin, int bins, const float *echo, int echo_bins)
+{
+    bool fresh = false;
+    int i;
+
+    if (set->freq_hz != tr->freq_hz || set->sample_rate != tr->rate || set->channel != tr->channel) {
+        tr->freq_hz = set->freq_hz;
+        tr->rate    = set->sample_rate;
+        tr->channel = set->channel;
+        tr->nmer    = 0;
+        tr->navg    = 0;
+        fresh       = true;
+    }
+    if (ok) {
+        /* The first ones weigh more, so the traces settle at once after a change. */
+        const float w = tr->navg < 8 ? 1.0f / (float)(tr->navg + 1) : AN_DVBT_TRACE_AVG;
+
+        for (i = 0; i < bins && i < AN_TREND_BINS; i++) {
+            tr->mer_bin[i]     += w * (mer_bin[i] - tr->mer_bin[i]);
+            tr->channel_bin[i] += w * (channel_bin[i] - tr->channel_bin[i]);
+        }
+        for (i = 0; i < echo_bins && i < AN_TREND_BINS; i++)
+            tr->echo[i] += w * (echo[i] - tr->echo[i]);
+        tr->navg++;
+    }
+    if (tr->nmer == AN_DVBT_HISTORY) {
+        memmove(tr->mer, tr->mer + 1, (AN_DVBT_HISTORY - 1) * sizeof(tr->mer[0]));
+        tr->nmer--;
+    }
+    tr->mer[tr->nmer++] = ok ? (float)mer : 0.0f;
+    return fresh;
+}
+
+/* MER of the last results, in dB: the figure shown, steadier than one short capture. */
+static double trend_mer_shown(const struct an_trend *tr, double last)
+{
+    const int n = tr->nmer < AN_DVBT_MER_MEAN ? tr->nmer : AN_DVBT_MER_MEAN;
+    double sum = 0;
+    int i;
+
+    if (n == 0)
+        return last;
+    for (i = tr->nmer - n; i < tr->nmer; i++)
+        sum += tr->mer[i];
+    return sum / n;
+}
+
+/* The MER, large, a line under it, and its trace over the results: `height` pixels in all. The
+ * figure is red under the MER needed when there is one. */
+static void draw_trend_mer(const char *id, const struct an_trend *tr, bool ok, double last, double needed, const char *line,
+                           float width, float height)
+{
+    struct m2sdr_plot plot;
+    const float y0 = igGetCursorPosY();
+    const double mer = trend_mer_shown(tr, last);
+    float h;
+
+    igPushFont(NULL, 2.4f * igGetStyle()->FontSizeBase);
+    if (ok)
+        igTextColored(isfinite(needed) && mer < needed ? (ImVec4){ 1.0f, 0.45f, 0.35f, 1.0f } : (ImVec4){ 0.4f, 1.0f, 0.5f, 1.0f },
+                      "MER %.1f dB", mer);
+    else
+        igTextColored((ImVec4){ 1.0f, 0.45f, 0.35f, 1.0f }, "MER --");
+    igPopFont();
+    igPushTextWrapPos(igGetCursorPosX() + width);
+    igTextUnformatted(line, NULL);
+    igPopTextWrapPos();
+    h = height - (igGetCursorPosY() - y0);
+    if (m2sdr_plot_begin(&plot, id, (ImVec2){ width, h > 80.0f ? h : 80.0f }, -(double)(AN_DVBT_HISTORY - 1), 0.0, M2SDR_PLOT_PLAIN,
+                         0.0, 40.0, "MER (dB), one point per result")) {
+        if (isfinite(needed))
+            m2sdr_plot_hline(&plot, needed, DVBT_COL_NEEDED);
+        if (tr->nmer > 0)
+            m2sdr_plot_trace(&plot, tr->mer, (size_t)tr->nmer, -(double)(tr->nmer - 1), 0.0, DVBT_COL_MER);
+        m2sdr_plot_end(&plot);
+    }
+}
+
+/* Equalised points, and the crosses of their constellation. */
+static void draw_trend_points(const char *id, ImVec2 size, const float complex *points, int n, enum m2sdr_modulation mod)
+{
+    static float px[4096], py[4096];
+    static float complex ref[256];
+    struct m2sdr_plot plot;
+    const int nref = m2sdr_constellation(mod, ref);
+    char label[96];
+    int i;
+
+    snprintf(label, sizeof(label), "Q against I, equalised data carriers; crosses: %s", m2sdr_modulation_name(mod));
+    if (!m2sdr_plot_begin(&plot, id, size, -1.6, 1.6, M2SDR_PLOT_PLAIN, -1.6, 1.6, label))
+        return;
+    n = n < 4096 ? n : 4096;
+    for (i = 0; i < n; i++) {
+        px[i] = crealf(points[i]);
+        py[i] = cimagf(points[i]);
+    }
+    m2sdr_plot_points(&plot, px, py, (size_t)n, 1.0f, 0x90ffd080u);
+    for (i = 0; i < nref; i++) {
+        const float x = m2sdr_plot_x(&plot, crealf(ref[i])), y = m2sdr_plot_y(&plot, cimagf(ref[i]));
+        ImDrawList_AddLine(plot.dl, (ImVec2){ x - 4.0f, y }, (ImVec2){ x + 5.0f, y }, 0xa0ffffffu, 1.0f);
+        ImDrawList_AddLine(plot.dl, (ImVec2){ x, y - 4.0f }, (ImVec2){ x, y + 5.0f }, 0xa0ffffffu, 1.0f);
+    }
+    m2sdr_plot_end(&plot);
+}
+
+/* Channel and MER across the band (bins groups from -half_hz to half_hz), next to the echo
+ * profile with the guard interval shaded: echoes inside it do no harm by themselves. */
+static void draw_trend_traces(const char *id, const struct an_trend *tr, int bins, double half_hz, double echo_start_us,
+                              double echo_step_us, int echo_bins, double guard_us, double needed)
+{
+    struct m2sdr_plot plot;
+    ImVec2 avail;
+    char key[64], text[160];
+
+    igGetContentRegionAvail(&avail);
+    legend_item(DVBT_COL_CHANNEL, "channel (dB from its mean), averaged", avail.x);
+    legend_item(DVBT_COL_MER, "MER (dB), averaged", avail.x);
+    igNewLine();
+    snprintf(key, sizeof(key), "%schan", id);
+    if (m2sdr_plot_begin(&plot, key, (ImVec2){ 0.5f * avail.x - 4.0f, 0.0f }, -half_hz, half_hz, M2SDR_PLOT_FREQ, -20.0, 40.0, "")) {
+        m2sdr_plot_hline(&plot, 0.0, 0x40ffffffu);
+        if (isfinite(needed))
+            m2sdr_plot_hline(&plot, needed, DVBT_COL_NEEDED);
+        m2sdr_plot_trace(&plot, tr->channel_bin, (size_t)bins, -half_hz, half_hz, DVBT_COL_CHANNEL);
+        m2sdr_plot_trace(&plot, tr->mer_bin, (size_t)bins, -half_hz, half_hz, DVBT_COL_MER);
+        if (plot.hovered) {
+            int b = (int)((plot.mouse_x + half_hz) / (2.0 * half_hz) * bins);
+
+            b = b < 0 ? 0 : b >= bins ? bins - 1 : b;
+            snprintf(text, sizeof(text), "%+.3f MHz: channel %+.1f dB, MER %.1f dB", plot.mouse_x / 1e6, tr->channel_bin[b],
+                     tr->mer_bin[b]);
+            m2sdr_plot_text(&plot, 8.0f, 4.0f, text, 0xffffffffu);
+        }
+        m2sdr_plot_end(&plot);
+    }
+    igSameLine(0.0f, 8.0f);
+    {
+        const double x0 = echo_start_us * 1e-6, x1 = (echo_start_us + echo_bins * echo_step_us) * 1e-6;
+
+        snprintf(key, sizeof(key), "%secho", id);
+        if (m2sdr_plot_begin(&plot, key, (ImVec2){ 0.0f, 0.0f }, x0, x1, M2SDR_PLOT_TIME, -40.0, 0.0,
+                             "Echoes (dB from the strongest path), averaged")) {
+            m2sdr_plot_band(&plot, 0.0, guard_us * 1e-6 < x1 ? guard_us * 1e-6 : x1, 0x2040ff40u);
+            m2sdr_plot_trace(&plot, tr->echo, (size_t)echo_bins, x0, x1, DVBT_COL_MER);
+            if (plot.hovered) {
+                int b = (int)((plot.mouse_x - x0) / (x1 - x0) * echo_bins);
+
+                b = b < 0 ? 0 : b >= echo_bins ? echo_bins - 1 : b;
+                snprintf(text, sizeof(text), "%+.2f us (%.0f m): %.1f dB", 1e6 * plot.mouse_x, 299.792458 * 1e6 * plot.mouse_x,
+                         tr->echo[b]);
+                m2sdr_plot_text(&plot, 8.0f, 4.0f, text, 0xffffffffu);
+            }
+            m2sdr_plot_end(&plot);
+        }
+    }
+}
+
+static void view_retune(struct an_ui *ui, double freq_hz, bool *changed)
+{
+    ui->set.freq_hz = freq_hz;
+    traces_reset(ui);
+    *changed = true;
+}
+
+static void view_rate(struct an_ui *ui, double rate, bool *changed)
+{
+    ui->set.sample_rate = rate;
+    ui->set.bandwidth   = 0;
+    view_full(ui);
+    traces_reset(ui);
+    *changed = true;
+}
+
 /* DVB-T */
 /*-------*/
 
-/* MER of each result, kept while the tuning stays the same: the trace to follow when moving an
- * antenna. A capture without the pilots counts as 0 dB. */
 static void dvbt_keep(struct an_ui *ui)
 {
     const struct an_result *res = &ui->res;
+    const struct m2sdr_dvbt_result *t = &res->dvbt;
 
     if (!res->set.dvbt_on || !res->dvbt_valid)
         return;
-    if (res->set.freq_hz != ui->dvbt_freq_hz || res->set.sample_rate != ui->dvbt_rate || res->set.channel != ui->dvbt_channel) {
-        ui->dvbt_freq_hz = res->set.freq_hz;
-        ui->dvbt_rate    = res->set.sample_rate;
-        ui->dvbt_channel = res->set.channel;
-        ui->dvbt_nmer    = 0;
-        ui->dvbt_navg    = 0;
-        if (ui->dvbt_tps)
-            ui->dvbt_tps->tps = false;
-    }
-    if (res->dvbt.found && res->dvbt.pilots) {
-        const struct m2sdr_dvbt_result *t = &res->dvbt;
-        /* The first ones weigh more, so the traces settle at once after a change. */
-        const float w = ui->dvbt_navg < 8 ? 1.0f / (float)(ui->dvbt_navg + 1) : AN_DVBT_TRACE_AVG;
-        int i;
-
-        for (i = 0; i < M2SDR_DVBT_BINS; i++) {
-            ui->dvbt_mer_bin[i]     += w * (t->mer_bin_db[i] - ui->dvbt_mer_bin[i]);
-            ui->dvbt_channel_bin[i] += w * (t->channel_bin_db[i] - ui->dvbt_channel_bin[i]);
-        }
-        for (i = 0; i < M2SDR_DVBT_ECHO_BINS; i++)
-            ui->dvbt_echo[i] += w * (t->echo_db[i] - ui->dvbt_echo[i]);
-        ui->dvbt_navg++;
-    }
-    if (res->dvbt.tps) {
+    if (trend_add(&ui->dvbt, &res->set, t->found && t->pilots, t->mer_db, t->mer_bin_db, t->channel_bin_db, t->bins,
+                  t->echo_db, M2SDR_DVBT_ECHO_BINS) && ui->dvbt_tps)
+        ui->dvbt_tps->tps = false;
+    if (t->tps) {
         if (!ui->dvbt_tps)
             ui->dvbt_tps = malloc(sizeof(*ui->dvbt_tps));
         if (ui->dvbt_tps)
-            *ui->dvbt_tps = res->dvbt;
+            *ui->dvbt_tps = *t;
     }
-    if (ui->dvbt_nmer == AN_DVBT_HISTORY) {
-        memmove(ui->dvbt_mer, ui->dvbt_mer + 1, (AN_DVBT_HISTORY - 1) * sizeof(ui->dvbt_mer[0]));
-        ui->dvbt_nmer--;
-    }
-    ui->dvbt_mer[ui->dvbt_nmer++] = res->dvbt.found && res->dvbt.pilots ? (float)res->dvbt.mer_db : 0.0f;
 }
 
 /* Result whose TPS fields are shown: this one, or the last one that read it. */
@@ -3036,42 +3294,18 @@ static const struct m2sdr_dvbt_result *dvbt_tps_of(const struct an_ui *ui)
     return t->tps || !ui->dvbt_tps || !ui->dvbt_tps->tps ? t : ui->dvbt_tps;
 }
 
-/* MER of the last captures, in dB: the figure shown, steadier than one short capture. */
-static double dvbt_mer_shown(const struct an_ui *ui)
-{
-    const int n = ui->dvbt_nmer < AN_DVBT_MER_MEAN ? ui->dvbt_nmer : AN_DVBT_MER_MEAN;
-    double sum = 0;
-    int i;
-
-    if (n == 0)
-        return ui->res.dvbt.mer_db;
-    for (i = ui->dvbt_nmer - n; i < ui->dvbt_nmer; i++)
-        sum += ui->dvbt_mer[i];
-    return sum / n;
-}
-
-static void dvbt_retune(struct an_ui *ui, double freq_hz, bool *changed)
-{
-    ui->set.freq_hz = freq_hz;
-    traces_reset(ui);
-    *changed = true;
-}
-
 static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
 {
     static const double rates[3] = { 64e6 / 7.0, 8e6, 48e6 / 7.0 };
     static const char *const rate_names[3] = { "8 MHz", "7 MHz", "6 MHz" };
-    static float px[M2SDR_DVBT_MAX_POINTS], py[M2SDR_DVBT_MAX_POINTS];
-    static float complex ref[256];
     const struct an_result *res = &ui->res;
-    const struct m2sdr_dvbt_result *t = &res->dvbt;
-    struct m2sdr_plot plot;
+    const struct m2sdr_dvbt_result *t = &res->dvbt, *tp;
+    const bool ok = t->found && t->pilots;
     ImVec2 avail, sq;
-    float side, left_w, h, y0;
-    const struct m2sdr_dvbt_result *tp;
-    double needed, half_hz;
+    float side;
+    double needed;
     char text[160];
-    int i, nref;
+    int i;
 
     if (live) {
         int ch = (int)lround((ui->set.freq_hz - DVBT_UHF_BASE_HZ) / 8e6);
@@ -3079,25 +3313,20 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Channel:", NULL);
         for (i = 0; i < 3; i++) {
             igSameLine(0.0f, 8.0f);
-            if (igSmallButton(rate_names[i])) {
-                ui->set.sample_rate = rates[i];
-                ui->set.bandwidth   = 0;
-                view_full(ui);
-                traces_reset(ui);
-                *changed = true;
-            }
+            if (igSmallButton(rate_names[i]))
+                view_rate(ui, rates[i], changed);
         }
         igSameLine(0.0f, 16.0f);
         igTextUnformatted("UHF", NULL);
         igSameLine(0.0f, 4.0f);
         igSetNextItemWidth(100.0f);
         if (igInputInt("##uhf", &ch, 1, 1, 0) && ch >= 21 && ch <= 69)
-            dvbt_retune(ui, DVBT_UHF_BASE_HZ + 8e6 * ch, changed);
-        if (t->found && t->pilots && res->dvbt_valid && fabs(t->freq_error_hz) > 500.0) {
+            view_retune(ui, DVBT_UHF_BASE_HZ + 8e6 * ch, changed);
+        if (ok && res->dvbt_valid && fabs(t->freq_error_hz) > 500.0) {
             igSameLine(0.0f, 16.0f);
             snprintf(text, sizeof(text), "Centre on the multiplex (%+.1f kHz)", t->freq_error_hz / 1e3);
             if (igSmallButton(text))
-                dvbt_retune(ui, ui->set.freq_hz + 1e3 * round(t->freq_error_hz / 1e3), changed);
+                view_retune(ui, ui->set.freq_hz + 1e3 * round(t->freq_error_hz / 1e3), changed);
         }
     }
     if (!res->set.dvbt_on) {
@@ -3118,106 +3347,24 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
     }
     tp     = dvbt_tps_of(ui);
     needed = dvbt_needed_db(tp);
+    if (isfinite(needed))
+        snprintf(text, sizeof(text), "Needed for %s %s: %.1f dB (Gaussian channel), margin %+.1f dB",
+                 m2sdr_modulation_name(tp->tps_modulation), tp->code_rate_hp, needed,
+                 ok ? trend_mer_shown(&ui->dvbt, t->mer_db) - needed : -needed);
+    else
+        snprintf(text, sizeof(text), "%s", ok ? "TPS not read: no reference for the MER needed." : " ");
 
     igGetContentRegionAvail(&avail);
-    side   = 0.55f * avail.y < 0.42f * avail.x ? 0.55f * avail.y : 0.42f * avail.x;
-    sq     = m2sdr_plot_square(side);
-    left_w = avail.x - sq.x - 8.0f;
-
-    /* MER: the figure, large, and its trace over the last captures. */
+    side = 0.55f * avail.y < 0.42f * avail.x ? 0.55f * avail.y : 0.42f * avail.x;
+    sq   = m2sdr_plot_square(side);
     igBeginGroup();
-    y0 = igGetCursorPosY();
-    igPushFont(NULL, 2.4f * igGetStyle()->FontSizeBase);
-    if (t->found && t->pilots)
-        igTextColored(isfinite(needed) && dvbt_mer_shown(ui) < needed ? (ImVec4){ 1.0f, 0.45f, 0.35f, 1.0f } :
-                      (ImVec4){ 0.4f, 1.0f, 0.5f, 1.0f }, "MER %.1f dB", dvbt_mer_shown(ui));
-    else
-        igTextColored((ImVec4){ 1.0f, 0.45f, 0.35f, 1.0f }, "MER --");
-    igPopFont();
-    if (isfinite(needed))
-        igText("Needed for %s %s: %.1f dB (Gaussian channel), margin %+.1f dB", m2sdr_modulation_name(tp->tps_modulation),
-               tp->code_rate_hp, needed, t->found && t->pilots ? dvbt_mer_shown(ui) - needed : -needed);
-    else
-        igTextUnformatted(t->found && t->pilots ? "TPS not read: no reference for the MER needed." : " ", NULL);
-    h = sq.y - (igGetCursorPosY() - y0);
-    if (m2sdr_plot_begin(&plot, "##dvbtmer", (ImVec2){ left_w, h > 80.0f ? h : 80.0f },
-                         -(double)(AN_DVBT_HISTORY - 1), 0.0, M2SDR_PLOT_PLAIN, 0.0, 40.0, "MER (dB), one point per capture (about 20 a second)")) {
-        if (isfinite(needed))
-            m2sdr_plot_hline(&plot, needed, DVBT_COL_NEEDED);
-        if (ui->dvbt_nmer > 0)
-            m2sdr_plot_trace(&plot, ui->dvbt_mer, (size_t)ui->dvbt_nmer, -(double)(ui->dvbt_nmer - 1), 0.0, DVBT_COL_MER);
-        m2sdr_plot_end(&plot);
-    }
+    draw_trend_mer("##dvbtmer", &ui->dvbt, ok, t->mer_db, needed, text, avail.x - sq.x - 8.0f, sq.y);
     igEndGroup();
     igSameLine(0.0f, 8.0f);
-
-    /* Equalised data carriers. */
-    nref = m2sdr_constellation(t->found && t->pilots ? t->modulation : M2SDR_MOD_64QAM, ref);
-    snprintf(text, sizeof(text), "Q against I, equalised data carriers; crosses: %s",
-             m2sdr_modulation_name(t->found && t->pilots ? t->modulation : M2SDR_MOD_64QAM));
-    if (m2sdr_plot_begin(&plot, "##dvbtconst", sq, -1.6, 1.6, M2SDR_PLOT_PLAIN, -1.6, 1.6, text)) {
-        if (t->found && t->pilots) {
-            for (i = 0; i < t->npoints; i++) {
-                px[i] = crealf(t->points[i]);
-                py[i] = cimagf(t->points[i]);
-            }
-            m2sdr_plot_points(&plot, px, py, (size_t)t->npoints, 1.0f, 0x90ffd080u);
-        }
-        for (i = 0; i < nref; i++) {
-            const float x = m2sdr_plot_x(&plot, crealf(ref[i])), y = m2sdr_plot_y(&plot, cimagf(ref[i]));
-            ImDrawList_AddLine(plot.dl, (ImVec2){ x - 4.0f, y }, (ImVec2){ x + 5.0f, y }, 0xa0ffffffu, 1.0f);
-            ImDrawList_AddLine(plot.dl, (ImVec2){ x, y - 4.0f }, (ImVec2){ x, y + 5.0f }, 0xa0ffffffu, 1.0f);
-        }
-        m2sdr_plot_end(&plot);
-    }
-
-    if (!t->found || !t->pilots)
-        return;
-
-    /* Channel response and MER per group of carriers, across the multiplex. */
-    igGetContentRegionAvail(&avail);
-    half_hz = 0.5 * (t->carriers - 1) * res->set.sample_rate / t->fft_len;
-    legend_item(DVBT_COL_CHANNEL, "channel (dB from its mean), averaged", avail.x);
-    legend_item(DVBT_COL_MER, "MER (dB), averaged", avail.x);
-    igNewLine();
-    if (m2sdr_plot_begin(&plot, "##dvbtchan", (ImVec2){ 0.5f * avail.x - 4.0f, 0.0f }, -half_hz, half_hz, M2SDR_PLOT_FREQ,
-                         -20.0, 40.0, "")) {
-        m2sdr_plot_hline(&plot, 0.0, 0x40ffffffu);
-        if (isfinite(needed))
-            m2sdr_plot_hline(&plot, needed, DVBT_COL_NEEDED);
-        m2sdr_plot_trace(&plot, ui->dvbt_channel_bin, (size_t)t->bins, -half_hz, half_hz, DVBT_COL_CHANNEL);
-        m2sdr_plot_trace(&plot, ui->dvbt_mer_bin, (size_t)t->bins, -half_hz, half_hz, DVBT_COL_MER);
-        if (plot.hovered) {
-            int b = (int)((plot.mouse_x + half_hz) / (2.0 * half_hz) * t->bins);
-
-            b = b < 0 ? 0 : b >= t->bins ? t->bins - 1 : b;
-            snprintf(text, sizeof(text), "%+.3f MHz: channel %+.1f dB, MER %.1f dB", plot.mouse_x / 1e6, ui->dvbt_channel_bin[b],
-                     ui->dvbt_mer_bin[b]);
-            m2sdr_plot_text(&plot, 8.0f, 4.0f, text, 0xffffffffu);
-        }
-        m2sdr_plot_end(&plot);
-    }
-    igSameLine(0.0f, 8.0f);
-
-    /* Echo profile, the guard interval shaded: echoes inside it do no harm. */
-    {
-        const double x0 = t->echo_start_us * 1e-6, x1 = (t->echo_start_us + M2SDR_DVBT_ECHO_BINS * t->echo_step_us) * 1e-6;
-
-        if (m2sdr_plot_begin(&plot, "##dvbtecho", (ImVec2){ 0.0f, 0.0f }, x0, x1, M2SDR_PLOT_TIME, -40.0, 0.0,
-                             "Echoes (dB from the strongest path), averaged")) {
-            m2sdr_plot_band(&plot, 0.0, t->guard_us * 1e-6 < x1 ? t->guard_us * 1e-6 : x1, 0x2040ff40u);
-            m2sdr_plot_trace(&plot, ui->dvbt_echo, M2SDR_DVBT_ECHO_BINS, x0, x1, DVBT_COL_MER);
-            if (plot.hovered) {
-                int b = (int)((plot.mouse_x - x0) / (x1 - x0) * M2SDR_DVBT_ECHO_BINS);
-
-                b = b < 0 ? 0 : b >= M2SDR_DVBT_ECHO_BINS ? M2SDR_DVBT_ECHO_BINS - 1 : b;
-                snprintf(text, sizeof(text), "%+.2f us (%.0f m): %.1f dB", 1e6 * plot.mouse_x, 299.792458 * 1e6 * plot.mouse_x,
-                         ui->dvbt_echo[b]);
-                m2sdr_plot_text(&plot, 8.0f, 4.0f, text, 0xffffffffu);
-            }
-            m2sdr_plot_end(&plot);
-        }
-    }
+    draw_trend_points("##dvbtconst", sq, t->points, ok ? t->npoints : 0, ok ? t->modulation : M2SDR_MOD_64QAM);
+    if (ok)
+        draw_trend_traces("##dvbt", &ui->dvbt, t->bins, 0.5 * (t->carriers - 1) * res->set.sample_rate / t->fft_len,
+                          t->echo_start_us, t->echo_step_us, M2SDR_DVBT_ECHO_BINS, t->guard_us, needed);
 }
 
 static void draw_dvbt_results(struct an_ui *ui)
@@ -3248,14 +3395,151 @@ static void draw_dvbt_results(struct an_ui *ui)
             } else {
                 label_value("TPS", "not read");
             }
-            label_value("MER", "%.1f dB (last %.1f)", dvbt_mer_shown(ui), t->mer_db);
+            label_value("MER", "%.1f dB (last %.1f)", trend_mer_shown(&ui->dvbt, t->mer_db), t->mer_db);
             if (isfinite(needed))
-                label_value("Margin", "%+.1f dB", dvbt_mer_shown(ui) - needed);
+                label_value("Margin", "%+.1f dB", trend_mer_shown(&ui->dvbt, t->mer_db) - needed);
             if (t->echo_level_db > -99.0)
                 label_value("Strongest echo", "%+.2f us, %.1f dB", t->echo_delay_us, t->echo_level_db);
             label_value("Symbols", "%d%s", t->symbols, t->tps ? "" : " (TPS of an earlier capture)");
         } else {
             label_value("Pilots", "not found (%.2f)", t->pilot_quality);
+        }
+        igEndTable();
+    }
+}
+
+/* DAB */
+/*-----*/
+
+/* Band III blocks (EN 50248): name and centre, kHz. */
+static const struct {
+    const char *name;
+    int khz;
+} dab_blocks[] = {
+    { "5A", 174928 }, { "5B", 176640 }, { "5C", 178352 }, { "5D", 180064 }, { "6A", 181936 }, { "6B", 183648 },
+    { "6C", 185360 }, { "6D", 187072 }, { "7A", 188928 }, { "7B", 190640 }, { "7C", 192352 }, { "7D", 194064 },
+    { "8A", 195936 }, { "8B", 197648 }, { "8C", 199360 }, { "8D", 201072 }, { "9A", 202928 }, { "9B", 204640 },
+    { "9C", 206352 }, { "9D", 208064 }, { "10A", 209936 }, { "10N", 210096 }, { "10B", 211648 }, { "10C", 213360 },
+    { "10D", 215072 }, { "11A", 216928 }, { "11N", 217088 }, { "11B", 218640 }, { "11C", 220352 }, { "11D", 222064 },
+    { "12A", 223936 }, { "12N", 224096 }, { "12B", 225648 }, { "12C", 227360 }, { "12D", 229072 }, { "13A", 230784 },
+    { "13B", 232496 }, { "13C", 234208 }, { "13D", 235776 }, { "13E", 237488 }, { "13F", 239200 },
+};
+
+static void dab_keep(struct an_ui *ui)
+{
+    const struct an_result *res = &ui->res;
+    const struct m2sdr_dab_result *t = &res->dab;
+
+    if (!res->set.dab_on || !res->dab_valid)
+        return;
+    trend_add(&ui->dab, &res->set, t->found && t->prs, t->mer_db, t->mer_bin_db, t->channel_bin_db, t->bins, t->echo_db,
+              M2SDR_DAB_ECHO_BINS);
+}
+
+static void draw_dab(struct an_ui *ui, bool live, bool *changed)
+{
+    const struct an_result *res = &ui->res;
+    const struct m2sdr_dab_result *t = &res->dab;
+    const bool ok = t->found && t->prs;
+    ImVec2 avail, sq;
+    float side;
+    char text[160];
+    int i;
+
+    if (live) {
+        const int khz = (int)lround(ui->set.freq_hz / 1e3);
+        int sel = -1;
+
+        for (i = 0; i < (int)(sizeof(dab_blocks) / sizeof(dab_blocks[0])); i++)
+            if (abs(dab_blocks[i].khz - khz) < 5)
+                sel = i;
+        igTextUnformatted("Block:", NULL);
+        igSameLine(0.0f, 8.0f);
+        igSetNextItemWidth(160.0f);
+        if (sel >= 0)
+            snprintf(text, sizeof(text), "%s  %.3f MHz", dab_blocks[sel].name, dab_blocks[sel].khz / 1e3);
+        else
+            snprintf(text, sizeof(text), "%.3f MHz", ui->set.freq_hz / 1e6);
+        if (igBeginCombo("##dabblock", text, 0)) {
+            for (i = 0; i < (int)(sizeof(dab_blocks) / sizeof(dab_blocks[0])); i++) {
+                char item[32];
+
+                snprintf(item, sizeof(item), "%s  %.3f MHz", dab_blocks[i].name, dab_blocks[i].khz / 1e3);
+                if (igSelectable_Bool(item, i == sel, 0, (ImVec2){ 0.0f, 0.0f }))
+                    view_retune(ui, 1e3 * dab_blocks[i].khz, changed);
+            }
+            igEndCombo();
+        }
+        if (fabs(ui->set.sample_rate - M2SDR_DAB_SAMPLE_RATE) > 1.0) {
+            igSameLine(0.0f, 16.0f);
+            if (igSmallButton("2.048 MSPS"))
+                view_rate(ui, M2SDR_DAB_SAMPLE_RATE, changed);
+        }
+        if (ok && res->dab_valid && fabs(t->freq_error_hz) > 500.0) {
+            igSameLine(0.0f, 16.0f);
+            snprintf(text, sizeof(text), "Centre on the ensemble (%+.1f kHz)", t->freq_error_hz / 1e3);
+            if (igSmallButton(text))
+                view_retune(ui, ui->set.freq_hz + 1e3 * round(t->freq_error_hz / 1e3), changed);
+        }
+    }
+    if (!res->set.dab_on) {
+        igTextUnformatted("Waiting for a capture.", NULL);
+        return;
+    }
+    if (!res->dab_valid) {
+        igTextUnformatted("The sample rate must be 2.048 MSPS.", NULL);
+        return;
+    }
+    if (!t->found) {
+        igPushTextWrapPos(0.0f);
+        igText("No DAB ensemble (null symbol %.1f dB, guard interval correlation %.3f): tune on a block that carries one.",
+               t->null_depth_db, t->sync_quality);
+        igPopTextWrapPos();
+    }
+    if (ok)
+        snprintf(text, sizeof(text), "SNR on the carriers %.1f dB: the MER is below it by what the transmitter and the receiver add.",
+                 t->null_snr_db);
+    else
+        snprintf(text, sizeof(text), " ");
+
+    igGetContentRegionAvail(&avail);
+    side = 0.55f * avail.y < 0.42f * avail.x ? 0.55f * avail.y : 0.42f * avail.x;
+    sq   = m2sdr_plot_square(side);
+    igBeginGroup();
+    draw_trend_mer("##dabmer", &ui->dab, ok, t->mer_db, NAN, text, avail.x - sq.x - 8.0f, sq.y);
+    igEndGroup();
+    igSameLine(0.0f, 8.0f);
+    draw_trend_points("##dabconst", sq, t->points, ok ? t->npoints : 0, M2SDR_MOD_QPSK);
+    if (ok)
+        draw_trend_traces("##dab", &ui->dab, t->bins, 767.5e3, t->echo_start_us, t->echo_step_us, M2SDR_DAB_ECHO_BINS,
+                          t->guard_us, NAN);
+}
+
+static void draw_dab_results(struct an_ui *ui)
+{
+    const struct an_result *res = &ui->res;
+    const struct m2sdr_dab_result *t = &res->dab;
+
+    igSeparatorText("DAB");
+    if (!res->dab_valid || !t->found) {
+        igTextUnformatted("No ensemble.", NULL);
+        return;
+    }
+    if (igBeginTable("##dab", 2, ImGuiTableFlags_SizingStretchProp, (ImVec2){ 0.0f, 0.0f }, 0.0f)) {
+        label_value("Mode", "I, guard %.0f us", t->guard_us);
+        label_value("Null symbol", "%.1f dB", t->null_depth_db);
+        label_value("Guard correlation", "%.2f", t->sync_quality);
+        label_value("Power", "%.1f dBFS", t->power_dbfs);
+        if (t->prs) {
+            label_value("Ensemble", "%.6f MHz", (res->set.freq_hz + t->freq_error_hz) / 1e6);
+            label_value("Offset", "%+.1f Hz", t->freq_error_hz);
+            label_value("MER", "%.1f dB (last %.1f)", trend_mer_shown(&ui->dab, t->mer_db), t->mer_db);
+            label_value("SNR on the carriers", "%.1f dB", t->null_snr_db);
+            if (t->echo_level_db > -99.0)
+                label_value("Strongest echo", "%+.2f us, %.1f dB", t->echo_delay_us, t->echo_level_db);
+            label_value("Frames, symbols", "%d, %d", t->frames, t->symbols);
+        } else {
+            label_value("Phase reference", "not found (%.2f)", t->prs_quality);
         }
         igEndTable();
     }
@@ -3414,6 +3698,10 @@ static void draw_results(struct an_ui *ui, struct an_shared *sh, bool *changed)
     }
     if (ui->tab == 6) {
         draw_dvbt_results(ui);
+        goto status;
+    }
+    if (ui->tab == 7) {
+        draw_dab_results(ui);
         goto status;
     }
 
@@ -3667,6 +3955,7 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
                 waterfall_push(&ui);
             lte_keep(&ui);
             dvbt_keep(&ui);
+            dab_keep(&ui);
         } else {
             pthread_mutex_unlock(&sh.lock);
         }
@@ -3730,6 +4019,15 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
                         tab = 6;
                         draw_dvbt(&ui, src->live && !src->no_rf_init, &changed);
                         igEndTabItem();
+                    }
+                    if (igBeginTabItem("DAB", NULL, select == 7 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                        tab = 7;
+                        draw_dab(&ui, src->live && !src->no_rf_init, &changed);
+                        igEndTabItem();
+                    }
+                    if (select < 0 && (tab == 7) != ui.set.dab_on) {
+                        ui.set.dab_on = tab == 7;
+                        changed = true;
                     }
                     if (select < 0 && (tab == 5) != ui.set.lte_on) {
                         ui.set.lte_on = tab == 5;
@@ -3873,9 +4171,14 @@ static void help(void)
            "      --dvbt             With --report: reception of a DVB-T multiplex tuned near its centre:\n"
            "                         mode, TPS, MER, channel and echoes. The sample rate is the one of\n"
            "                         the channel (default with --dvbt: 9.142857 MSPS, 8 MHz).\n"
-           "      --watch            With --report --dvbt, on a board: one line per capture until\n"
+           "      --watch            With --report --dvbt or --dab, on a board: one line per capture until\n"
            "                         Ctrl-C (MER, margin, level, offset, echo); with --json, one JSON\n"
            "                         object per line.\n"
+           "\n"
+           "DAB options:\n"
+           "      --dab              With --report: reception of a DAB/DAB+ ensemble (mode I) tuned near\n"
+           "                         its centre: MER, SNR, carrier offset, channel and echoes. The sample\n"
+           "                         rate is 2.048 MSPS (the default with --dab). --watch works too.\n"
            "\n"
            "Phase noise options:\n"
            "      --phase-noise      With --report: phase noise of the strongest carrier.\n"
@@ -3890,7 +4193,7 @@ static void help(void)
            "\n"
            "Output options:\n"
            "      --view NAME        View shown first: spectrum, time, statistics, phase-noise,\n"
-           "                         modulation, lte or dvbt.\n"
+           "                         modulation, lte, dvbt or dab.\n"
            "      --report           Measure one capture and print the result, without a display.\n"
            "      --json             With --report: JSON.\n"
            "      --export-csv PATH  With --report: write the spectrum to a CSV file.\n"
@@ -3956,6 +4259,7 @@ int main(int argc, char **argv)
         { "lte",             no_argument,       NULL, 43 },
         { "dvbt",            no_argument,       NULL, 44 },
         { "watch",           no_argument,       NULL, 45 },
+        { "dab",             no_argument,       NULL, 46 },
         { NULL, 0, NULL, 0 }
     };
     struct m2sdr_cli_device cli_dev;
@@ -4162,8 +4466,10 @@ int main(int argc, char **argv)
                 view = 5;
             } else if (strcmp(optarg, "dvbt") == 0) {
                 view = 6;
+            } else if (strcmp(optarg, "dab") == 0) {
+                view = 7;
             } else {
-                m2sdr_cli_invalid_choice("view", optarg, "spectrum, time, statistics, phase-noise, modulation, lte or dvbt");
+                m2sdr_cli_invalid_choice("view", optarg, "spectrum, time, statistics, phase-noise, modulation, lte, dvbt or dab");
                 return 1;
             }
             break;
@@ -4242,6 +4548,7 @@ int main(int argc, char **argv)
         case 43: set.lte_on = true; break;
         case 44: set.dvbt_on = true; break;
         case 45: watch = true; break;
+        case 46: set.dab_on = true; break;
         case 34: src.tx_tone = true; break;
         case 35:
             if (m2sdr_cli_parse_int_range(optarg, 0, 89, &src.tx_att) != 0) {
@@ -4257,8 +4564,8 @@ int main(int argc, char **argv)
         m2sdr_cli_error("unexpected argument '%s'", argv[optind]);
         return 1;
     }
-    if (watch && (!report || !set.dvbt_on || file || csv_path || floor_store)) {
-        m2sdr_cli_error("--watch goes with --report and --dvbt, on a board");
+    if (watch && (!report || set.dvbt_on == set.dab_on || file || csv_path || floor_store)) {
+        m2sdr_cli_error("--watch goes with --report and one of --dvbt and --dab, on a board");
         return 1;
     }
     if ((json || csv_path || floor_store) && !report) {
@@ -4276,8 +4583,12 @@ int main(int argc, char **argv)
     if (view == 6)
         set.dvbt_on = true;
     /* A file gives its own rate. */
+    if (view == 7)
+        set.dab_on = true;
     if (set.dvbt_on && !rate_given)
         set.sample_rate = AN_DVBT_RATE;
+    if (set.dab_on && !rate_given)
+        set.sample_rate = M2SDR_DAB_SAMPLE_RATE;
     if (src.no_rf_init && (file || src.tx_tone)) {
         m2sdr_cli_error("--no-rf-init is for a board, without --tx-tone");
         return 1;
