@@ -17,6 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "m2sdr_cli.h"
+
 #include "analyzer.h"
 
 /* Analysis */
@@ -228,6 +230,22 @@ static int dvbt_watch_line(const struct an_settings *set, const struct an_result
             printf("%8.2f  no multiplex (guard correlation %.3f)\n", now, t->sync_quality);
         }
     }
+    return 0;
+}
+
+/* Command line */
+/*--------------*/
+
+static const struct option dvbt_options[] = {
+    { "dvbt", no_argument, NULL, 0 },
+    { NULL, 0, NULL, 0 }
+};
+
+static int dvbt_option(int id, const char *arg, struct an_cli *cli)
+{
+    (void)id;
+    (void)arg;
+    cli->set->dvbt_on = true;
     return 0;
 }
 
@@ -453,6 +471,8 @@ const struct an_mode an_mode_dvbt = {
     .report_json    = dvbt_report_json,
     .watch_prepare  = dvbt_watch_prepare,
     .watch_line     = dvbt_watch_line,
+    .options        = dvbt_options,
+    .option         = dvbt_option,
 #ifdef M2SDR_ANALYZER_GUI
     .worker_prepare = dvbt_worker_prepare,
     .worker_result  = dvbt_worker_result,

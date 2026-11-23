@@ -33,6 +33,7 @@
 #define M2SDR_ANALYZER_H
 
 #include <complex.h>
+#include <getopt.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -236,6 +237,18 @@ struct an_report {
     const struct an_floor *fl;     /* Phase noise floor of the board; NULL or empty: none. */
 };
 
+/* Command line: what the options of the modes set. A mode option is given to getopt_long with
+ * the id AN_OPT_BASE + AN_OPT_IDS * (index of the mode in an_modes[]) + (its id in the mode). */
+#define AN_OPT_BASE  1000
+#define AN_OPT_IDS   32            /* Ids of the options of a mode: 0 to AN_OPT_IDS - 1. */
+
+struct an_cli {
+    struct an_settings *set;
+    struct an_source   *src;
+    const char *floor_arg;         /* --pn-floor: file of the floor of the board. */
+    bool   floor_store;            /* --pn-floor-save. */
+};
+
 struct an_ui;
 
 /* A view of the window, and the measurement behind it. The views of the spectrum are measured
@@ -250,6 +263,12 @@ struct an_mode {
     int    report_rank;            /* Place of its section in the reports: lower first. */
     double default_rate;           /* Sample rate when it is on and none is given; 0: none. */
     bool   psd_short;              /* Its capture is long: the spectrum only takes its own averages of it. */
+    /* Command line: its defaults in the settings, set before the options are read; its long
+     * options, their .val its own ids, NULL-name terminated; and their parser, that returns 0, or
+     * -1 after its message. */
+    void   (*defaults)(struct an_settings *set);
+    const struct option *options;
+    int    (*option)(int id, const char *arg, struct an_cli *cli);
     /* Capture and analysis. */
     size_t (*samples)(const struct an_settings *set);             /* Samples it needs. */
     void   (*analyse)(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);

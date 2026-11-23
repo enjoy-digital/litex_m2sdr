@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "m2sdr_cli.h"
+
 #include "analyzer.h"
 
 /* Analysis */
@@ -134,6 +136,22 @@ static int dab_watch_line(const struct an_settings *set, const struct an_result 
                    d->sync_quality);
         }
     }
+    return 0;
+}
+
+/* Command line */
+/*--------------*/
+
+static const struct option dab_options[] = {
+    { "dab", no_argument, NULL, 0 },
+    { NULL, 0, NULL, 0 }
+};
+
+static int dab_option(int id, const char *arg, struct an_cli *cli)
+{
+    (void)id;
+    (void)arg;
+    cli->set->dab_on = true;
     return 0;
 }
 
@@ -295,6 +313,8 @@ const struct an_mode an_mode_dab = {
     .report_text  = dab_report_text,
     .report_json  = dab_report_json,
     .watch_line   = dab_watch_line,
+    .options      = dab_options,
+    .option       = dab_option,
 #ifdef M2SDR_ANALYZER_GUI
     .draw         = draw_dab,
     .results      = draw_dab_results,

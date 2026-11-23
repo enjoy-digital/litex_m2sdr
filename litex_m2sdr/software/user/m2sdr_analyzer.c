@@ -19,7 +19,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>
 
 #include "m2sdr.h"
 #include "m2sdr_analysis.h"
@@ -213,69 +212,90 @@ static void help(void)
            "span. R: restart the traces.\n");
 }
 
+/* Command line */
+/*--------------*/
+
+#define AN_OPTIONS_MAX 512
+
+/* Options of the core; the ones of the modes are in their files. */
+static const struct option core_options[] = {
+    { "help",            no_argument,       NULL, 'h' },
+    { "device",          required_argument, NULL, 'd' },
+    { "freq",            required_argument, NULL, 1 },
+    { "sample-rate",     required_argument, NULL, 2 },
+    { "bandwidth",       required_argument, NULL, 3 },
+    { "rx-gain",         required_argument, NULL, 4 },
+    { "channel",         required_argument, NULL, 5 },
+    { "refclk-ppm",      required_argument, NULL, 6 },
+    { "sync",            required_argument, NULL, 7 },
+    { "refclk-freq",     required_argument, NULL, 8 },
+    { "file",            required_argument, NULL, 9 },
+    { "format",          required_argument, NULL, 10 },
+    { "nbits",           required_argument, NULL, 11 },
+    { "nchannels",       required_argument, NULL, 12 },
+    { "frame-header",    no_argument,       NULL, 13 },
+    { "frame-size",      required_argument, NULL, 14 },
+    { "capture-index",   required_argument, NULL, 15 },
+    { "offset",          required_argument, NULL, 16 },
+    { "fft-len",         required_argument, NULL, 17 },
+    { "window",          required_argument, NULL, 18 },
+    { "averages",        required_argument, NULL, 19 },
+    { "channel-bw",      required_argument, NULL, 20 },
+    { "channel-offset",  required_argument, NULL, 21 },
+    { "channel-spacing", required_argument, NULL, 22 },
+    { "ref-offset",      required_argument, NULL, 23 },
+    { "report",          no_argument,       NULL, 24 },
+    { "json",            no_argument,       NULL, 25 },
+    { "export-csv",      required_argument, NULL, 26 },
+    { "view",            required_argument, NULL, 27 },
+    { "tx-tone",         no_argument,       NULL, 34 },
+    { "tx-att",          required_argument, NULL, 35 },
+    { "no-rf-init",      no_argument,       NULL, 42 },
+    { "watch",           no_argument,       NULL, 45 },
+    { NULL, 0, NULL, 0 }
+};
+
+/* The options of the core, then the ones of each mode, their ids moved to its range; NULL when a
+ * mode has an option without a parser, of a name already taken or of an id out of its range. */
+static const struct option *build_options(void)
+{
+    static struct option table[AN_OPTIONS_MAX];
+    const struct option *o;
+    int n = 0, m, k;
+
+    for (o = core_options; o->name; o++)
+        table[n++] = *o;
+    for (m = 0; an_modes[m]; m++) {
+        for (o = an_modes[m]->options; o && o->name; o++) {
+            for (k = 0; k < n && strcmp(table[k].name, o->name) != 0; k++)
+                ;
+            if (!an_modes[m]->option || k < n || o->val < 0 || o->val >= AN_OPT_IDS || n + 1 >= AN_OPTIONS_MAX) {
+                fprintf(stderr, "Option --%s of the mode %s: no parser, name taken, id out of 0 to %d, or too many options.\n",
+                        o->name, an_modes[m]->key, AN_OPT_IDS - 1);
+                return NULL;
+            }
+            table[n]     = *o;
+            table[n].val = AN_OPT_BASE + AN_OPT_IDS * m + o->val;
+            n++;
+        }
+    }
+    memset(&table[n], 0, sizeof(table[n]));
+    return table;
+}
+
 /* Main */
 /*------*/
 
 int main(int argc, char **argv)
 {
-    static struct option options[] = {
-        { "help",            no_argument,       NULL, 'h' },
-        { "device",          required_argument, NULL, 'd' },
-        { "freq",            required_argument, NULL, 1 },
-        { "sample-rate",     required_argument, NULL, 2 },
-        { "bandwidth",       required_argument, NULL, 3 },
-        { "rx-gain",         required_argument, NULL, 4 },
-        { "channel",         required_argument, NULL, 5 },
-        { "refclk-ppm",      required_argument, NULL, 6 },
-        { "sync",            required_argument, NULL, 7 },
-        { "refclk-freq",     required_argument, NULL, 8 },
-        { "file",            required_argument, NULL, 9 },
-        { "format",          required_argument, NULL, 10 },
-        { "nbits",           required_argument, NULL, 11 },
-        { "nchannels",       required_argument, NULL, 12 },
-        { "frame-header",    no_argument,       NULL, 13 },
-        { "frame-size",      required_argument, NULL, 14 },
-        { "capture-index",   required_argument, NULL, 15 },
-        { "offset",          required_argument, NULL, 16 },
-        { "fft-len",         required_argument, NULL, 17 },
-        { "window",          required_argument, NULL, 18 },
-        { "averages",        required_argument, NULL, 19 },
-        { "channel-bw",      required_argument, NULL, 20 },
-        { "channel-offset",  required_argument, NULL, 21 },
-        { "channel-spacing", required_argument, NULL, 22 },
-        { "ref-offset",      required_argument, NULL, 23 },
-        { "report",          no_argument,       NULL, 24 },
-        { "json",            no_argument,       NULL, 25 },
-        { "export-csv",      required_argument, NULL, 26 },
-        { "view",            required_argument, NULL, 27 },
-        { "phase-noise",     no_argument,       NULL, 28 },
-        { "pn-samples",      required_argument, NULL, 29 },
-        { "pn-from",         required_argument, NULL, 30 },
-        { "pn-to",           required_argument, NULL, 31 },
-        { "pn-floor",        required_argument, NULL, 32 },
-        { "pn-floor-save",   no_argument,       NULL, 33 },
-        { "tx-tone",         no_argument,       NULL, 34 },
-        { "tx-att",          required_argument, NULL, 35 },
-        { "demod",           no_argument,       NULL, 36 },
-        { "modulation",      required_argument, NULL, 37 },
-        { "symbol-rate",     required_argument, NULL, 38 },
-        { "rolloff",         required_argument, NULL, 39 },
-        { "pulse",           required_argument, NULL, 40 },
-        { "demod-samples",   required_argument, NULL, 41 },
-        { "no-rf-init",      no_argument,       NULL, 42 },
-        { "lte",             no_argument,       NULL, 43 },
-        { "dvbt",            no_argument,       NULL, 44 },
-        { "watch",           no_argument,       NULL, 45 },
-        { "dab",             no_argument,       NULL, 46 },
-        { NULL, 0, NULL, 0 }
-    };
     struct m2sdr_cli_device cli_dev;
     struct an_settings set;
     struct an_source src;
-    const char *file = NULL, *csv_path = NULL, *trim = NULL, *floor_arg = NULL, *floor_path = NULL;
+    const struct option *options = build_options();
+    struct an_cli cli;
+    const char *file = NULL, *csv_path = NULL, *trim = NULL, *floor_path = NULL;
     static struct an_floor fl;
     static char floor_default[1024];
-    bool floor_store = false;
     bool report = false, json = false, watch = false, freq_given = false, rate_given = false, nbits_given = false;
     double offset_s = 0.0;
     int capture_index = 0, view = 0;
@@ -299,8 +319,15 @@ int main(int argc, char **argv)
     src.frame_size   = M2SDR_BUFFER_BYTES;
     src.loop         = true;
     src.tx_att       = AN_TX_TONE_ATT_DB;
-    set.pn_log2      = AN_PN_DEFAULT_LOG2;
-    set.demod_log2   = AN_DEMOD_DEFAULT_LOG2;
+    memset(&cli, 0, sizeof(cli));
+    cli.set = &set;
+    cli.src = &src;
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->defaults)
+            an_modes[m]->defaults(&set);
+    }
+    if (!options)
+        return 1;
 
     while ((c = getopt_long(argc, argv, "hd:c:i:p:", options, NULL)) != -1) {
         double v;
@@ -468,82 +495,8 @@ int main(int argc, char **argv)
                 return 1;
             }
             break;
-        case 28: set.pn_on = true; break;
-        case 29:
-            if (m2sdr_cli_parse_double(optarg, &v) != 0 || v < (double)(1 << AN_PN_MIN_LOG2) || v > (double)(1 << AN_PN_MAX_LOG2)) {
-                m2sdr_cli_error("invalid phase noise samples '%s' (expected %d to %d)", optarg,
-                                1 << AN_PN_MIN_LOG2, 1 << AN_PN_MAX_LOG2);
-                return 1;
-            }
-            /* The power of two at or below. */
-            for (set.pn_log2 = AN_PN_MIN_LOG2; (double)((size_t)2 << set.pn_log2) <= v; set.pn_log2++)
-                ;
-            break;
-        case 30:
-            if (m2sdr_cli_parse_double(optarg, &set.pn_lo_hz) != 0 || set.pn_lo_hz < 0) {
-                m2sdr_cli_error("invalid offset '%s'", optarg);
-                return 1;
-            }
-            break;
-        case 31:
-            if (m2sdr_cli_parse_double(optarg, &set.pn_hi_hz) != 0 || set.pn_hi_hz < 0) {
-                m2sdr_cli_error("invalid offset '%s'", optarg);
-                return 1;
-            }
-            break;
-        case 32: floor_arg = optarg; break;
-        case 33: floor_store = true; break;
-        case 36: set.demod_on = true; break;
-        case 37:
-            for (n = M2SDR_MOD_AUTO; n < M2SDR_MOD_COUNT; n++) {
-                if (strcasecmp(optarg, m2sdr_modulation_name((enum m2sdr_modulation)n)) == 0)
-                    break;
-            }
-            if (n == M2SDR_MOD_COUNT) {
-                m2sdr_cli_invalid_choice("modulation", optarg, "auto, bpsk, qpsk, 8psk, 16qam, 32qam, 64qam, 128qam or 256qam");
-                return 1;
-            }
-            set.demod.modulation = (enum m2sdr_modulation)n;
-            break;
-        case 38:
-            if (m2sdr_cli_parse_double(optarg, &set.demod.symbol_rate) != 0 || set.demod.symbol_rate < 0) {
-                m2sdr_cli_error("invalid symbol rate '%s'", optarg);
-                return 1;
-            }
-            break;
-        case 39:
-            if (m2sdr_cli_parse_double(optarg, &set.demod.rolloff) != 0 ||
-                (set.demod.rolloff != 0 && (set.demod.rolloff < 0.05 || set.demod.rolloff > 1.0))) {
-                m2sdr_cli_error("invalid roll-off '%s' (expected 0.05 to 1, or 0 to find it)", optarg);
-                return 1;
-            }
-            break;
-        case 40:
-            if (strcmp(optarg, "rrc") == 0) {
-                set.demod.pulse = M2SDR_PULSE_RRC;
-            } else if (strcmp(optarg, "rc") == 0) {
-                set.demod.pulse = M2SDR_PULSE_RC;
-            } else if (strcmp(optarg, "rect") == 0) {
-                set.demod.pulse = M2SDR_PULSE_RECT;
-            } else {
-                m2sdr_cli_invalid_choice("pulse", optarg, "rrc, rc or rect");
-                return 1;
-            }
-            break;
-        case 41:
-            if (m2sdr_cli_parse_double(optarg, &v) != 0 || v < (double)(1 << AN_DEMOD_MIN_LOG2) || v > (double)(1 << AN_DEMOD_MAX_LOG2)) {
-                m2sdr_cli_error("invalid demodulation samples '%s' (expected %d to %d)", optarg,
-                                1 << AN_DEMOD_MIN_LOG2, 1 << AN_DEMOD_MAX_LOG2);
-                return 1;
-            }
-            for (set.demod_log2 = AN_DEMOD_MIN_LOG2; (double)((size_t)2 << set.demod_log2) <= v; set.demod_log2++)
-                ;
-            break;
         case 42: src.no_rf_init = true; break;
-        case 43: set.lte_on = true; break;
-        case 44: set.dvbt_on = true; break;
         case 45: watch = true; break;
-        case 46: set.dab_on = true; break;
         case 34: src.tx_tone = true; break;
         case 35:
             if (m2sdr_cli_parse_int_range(optarg, 0, 89, &src.tx_att) != 0) {
@@ -552,23 +505,25 @@ int main(int argc, char **argv)
             }
             break;
         default:
-            return 1;
+            /* An option of a mode: its index in the registry and its own id. */
+            if (c < AN_OPT_BASE ||
+                an_modes[(c - AN_OPT_BASE) / AN_OPT_IDS]->option((c - AN_OPT_BASE) % AN_OPT_IDS, optarg, &cli) != 0)
+                return 1;
+            break;
         }
     }
     if (optind < argc) {
         m2sdr_cli_error("unexpected argument '%s'", argv[optind]);
         return 1;
     }
-    if (watch && (!report || watch_modes(&set, NULL) != 1 || file || csv_path || floor_store)) {
+    if (watch && (!report || watch_modes(&set, NULL) != 1 || file || csv_path || cli.floor_store)) {
         m2sdr_cli_error("--watch goes with --report and one of --dvbt and --dab, on a board");
         return 1;
     }
-    if ((json || csv_path || floor_store) && !report) {
+    if ((json || csv_path || cli.floor_store) && !report) {
         m2sdr_cli_error("--json, --export-csv and --pn-floor-save go with --report");
         return 1;
     }
-    if (floor_store)
-        set.pn_on = true;
     /* The mode of the view shown first is measured from the first capture. */
     if (an_mode_flag(an_modes[view], &set))
         *an_mode_flag(an_modes[view], &set) = true;
@@ -647,15 +602,15 @@ int main(int argc, char **argv)
     }
 
     /* Floor of the phase noise: the file given, or the one of the board. */
-    if (floor_arg) {
-        floor_path = floor_arg;
+    if (cli.floor_arg) {
+        floor_path = cli.floor_arg;
     } else if (src.live && m2sdr_get_fpga_dna(src.dev, &src.dna) == M2SDR_ERR_OK &&
                floor_default_path(src.dna, floor_default, sizeof(floor_default)) == 0) {
         floor_path = floor_default;
     }
-    if (floor_path && floor_load(&fl, floor_path) != 0 && floor_arg && !floor_store)
+    if (floor_path && floor_load(&fl, floor_path) != 0 && cli.floor_arg && !cli.floor_store)
         fprintf(stderr, "No phase noise floor in %s.\n", floor_path);
-    if (floor_store && !floor_path) {
+    if (cli.floor_store && !floor_path) {
         m2sdr_cli_error("--pn-floor-save needs a board or --pn-floor PATH");
         source_close(&src);
         return 1;
@@ -665,7 +620,7 @@ int main(int argc, char **argv)
     if (watch) {
         status = run_watch(&src, &set, json);
     } else if (report) {
-        status = run_report(&src, &set, json, csv_path, &fl, floor_store ? floor_path : NULL);
+        status = run_report(&src, &set, json, csv_path, &fl, cli.floor_store ? floor_path : NULL);
     } else {
 #ifdef M2SDR_ANALYZER_GUI
         status = run_gui(&src, &set, view, &fl, floor_path);
