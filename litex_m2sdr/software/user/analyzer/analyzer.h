@@ -95,6 +95,8 @@
 #define AN_TETRA_SECONDS        1.1           /* The synchronisation burst comes once a multiframe (1.02 s). */
 #define AN_TETRA_RATE           1e6
 #define AN_WIFI_SECONDS         0.105         /* Capture of a Wi-Fi analysis: a beacon interval (102.4 ms). */
+#define AN_ADSB_SECONDS         0.5           /* Capture of an ADS-B analysis. */
+#define AN_ADSB_SAMPLE_RATE     2.4e6         /* Pulses across two samples decode with less SNR than at 2 MSPS. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 /* Monitoring. */
@@ -148,6 +150,8 @@ struct an_settings {
     bool   nr_on, gsm_on, tetra_on;
     double nr_scs_hz, nr_scs_known;
     bool   wifi_on;                /* Wi-Fi channel. */
+    bool   adsb_on;                /* ADS-B at 1090 MHz. */
+    struct m2sdr_adsb_config adsb; /* Its receiver position. */
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -248,6 +252,9 @@ struct an_result {
     struct m2sdr_wifi_result wifi;
     bool   wifi_valid;             /* Measured: the sample rate was 20 MSPS. */
     bool   wifi_no_psdu;           /* The data was not decoded: it took longer than the capture. */
+    struct m2sdr_adsb_result adsb;
+    struct m2sdr_adsb_state adsb_state;   /* Aircraft of the captures so far. */
+    bool   adsb_valid;             /* Measured: the sample rate was 2 MSPS or more. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
