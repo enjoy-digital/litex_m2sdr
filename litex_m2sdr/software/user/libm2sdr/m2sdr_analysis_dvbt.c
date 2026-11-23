@@ -12,12 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3), a third of the time of an analysis. */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
-
 #include "m2sdr_analysis.h"
 #include "m2sdr_fft.h"
 
@@ -34,6 +28,30 @@
 #define TPS_LAST_BIT       39      /* s39: the last of the parameters read. */
 #define MOD_TRIED          3       /* QPSK, 16QAM, 64QAM. */
 #define MOD_PREFER_DB      3.0     /* Without a TPS, the lowest order within this of the best MER. */
+
+/* The samples and the products here are finite: complex products written out, without the NaN
+ * and infinity handling of C99 (__mulsc3) that GCC calls for a * b, a third of the time of an
+ * analysis. */
+static inline float complex cmul(float complex a, float complex b)
+{
+    return (crealf(a) * crealf(b) - cimagf(a) * cimagf(b)) + I * (crealf(a) * cimagf(b) + cimagf(a) * crealf(b));
+}
+
+/* a b*. */
+static inline float complex cmulc(float complex a, float complex b)
+{
+    return (crealf(a) * crealf(b) + cimagf(a) * cimagf(b)) + I * (cimagf(a) * crealf(b) - crealf(a) * cimagf(b));
+}
+
+static inline float cnorm(float complex a)
+{
+    return crealf(a) * crealf(a) + cimagf(a) * cimagf(a);
+}
+
+static inline double complex cmul_d(double complex a, double complex b)
+{
+    return (creal(a) * creal(b) - cimag(a) * cimag(b)) + I * (creal(a) * cimag(b) + cimag(a) * creal(b));
+}
 
 /* Carriers of the 2k mode; the 8k mode repeats them every 1704 carriers. */
 static const int cp_2k[] = {
@@ -103,7 +121,7 @@ static double guard_search(const float complex *x, size_t count, int n, int g, s
         float p = 0;
 
         for (i = 0; i < l; i++) {
-            fold[i] += a[i] * conjf(a[i + n]);
+            fold[i] += cmulc(a[i], a[i + n]);
             p += crealf(a[i]) * crealf(a[i]) + cimagf(a[i]) * cimagf(a[i]) +
                  crealf(a[i + n]) * crealf(a[i + n]) + cimagf(a[i + n]) * cimagf(a[i + n]);
         }
@@ -155,8 +173,8 @@ static float complex *symbols_fft(const float complex *x, size_t count, const st
         const double complex step = cexp(I * 2.0 * M_PI * eps / d->n);
 
         for (i = 0; i < d->n; i++) {
-            in[i] = x[a + (size_t)i] * (float complex)rot;
-            rot *= step;
+            in[i] = cmul(x[a + (size_t)i], (float complex)rot);
+            rot = cmul_d(rot, step);
         }
         m2sdr_fft_run(fft, in, y + (size_t)s * (size_t)d->n);
     }
@@ -208,7 +226,7 @@ static int pilot_offset(const float complex *y, int nsym, const struct dvbt_dims
 
         for (b = 0; b < d->n; b++) {
             if (used[b]) {
-                const float complex v = a[b] * conjf(p[b]);
+                const float complex v = cmulc(a[b], p[b]);
 
                 dsum[b] += v;
                 asum[b] += cabsf(v);
@@ -256,8 +274,8 @@ static int pilot_phase(const float complex *cs, int nsym, int k, const uint8_t *
                 const float complex h0 = a[c] * (w[c] ? -1.0f : 1.0f);
                 const float complex h1 = a[c + SP_SPACING] * (w[c + SP_SPACING] ? -1.0f : 1.0f);
 
-                num += h1 * conjf(h0);
-                den += cabsf(h1 * conjf(h0));
+                num += cmulc(h1, h0);
+                den += cabsf(cmulc(h1, h0));
             }
             if (den > 0 && cabs(num) / den > score_best) {
                 score_best = cabs(num) / den;
@@ -284,7 +302,7 @@ static int tps_bit(const float complex *cs, int s, int k, const uint8_t *kind)
 
     for (c = 0; c < k; c++)
         if (kind[c] == KIND_TPS)
-            sum += crealf(a[c] * conjf(p[c]));
+            sum += crealf(cmulc(a[c], p[c]));
     return sum < 0;
 }
 
@@ -399,7 +417,7 @@ int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate,
     if (!rate_ok || count < 8 * (size_t)(8192 + 2048))
         return -1;
     for (j = 0; j < count; j++)
-        power += crealf(x[j] * conjf(x[j]));
+        power += cnorm(x[j]);
     res->power_dbfs = 10.0 * log10(power / (double)count + 1e-30);
 
     /* Mode and guard interval: the best correlation of the eight, or the one given. */
@@ -483,7 +501,7 @@ int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate,
         const float complex turn = (float complex)cexp(-I * 2.0 * M_PI * (double)off * (double)(a % (size_t)d.n) / d.n);
 
         for (c = 0; c < d.k; c++)
-            cs[(size_t)s * (size_t)d.k + (size_t)c] = y[(size_t)s * (size_t)d.n + (size_t)carrier_bin(&d, c, off)] * turn;
+            cs[(size_t)s * (size_t)d.k + (size_t)c] = cmul(y[(size_t)s * (size_t)d.n + (size_t)carrier_bin(&d, c, off)], turn);
     }
     free(y);
     y = NULL;
@@ -497,10 +515,10 @@ int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate,
 
         for (c = 0; c < d.k; c++)
             if (kind[c] == KIND_CP)
-                sum += a[c] * conjf(p[c]);
+                sum += cmulc(a[c], p[c]);
         turn = (float complex)cexp(-I * carg(sum));
         for (c = 0; c < d.k; c++)
-            a[c] *= turn;
+            a[c] = cmul(a[c], turn);
     }
 
     /* TPS: it gives the frame, so the phase of the scattered pilots too. */
@@ -569,27 +587,27 @@ int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate,
                     float complex z;
 
                     if (pass == 1)
-                        hpow[c] += crealf(h * conjf(h));
+                        hpow[c] += cnorm(h);
                     if (kind[c] != KIND_DATA || (c >= 3 * ph && (c - 3 * ph) % SP_SPACING == 0))
                         continue;
-                    if (crealf(h * conjf(h)) == 0)
+                    if (cnorm(h) == 0)
                         continue;
-                    z = a[c] * conjf(h) / crealf(h * conjf(h));
+                    z = cmulc(a[c], h) / cnorm(h);
                     if (pass == 0) {
                         for (i = 0; i < MOD_TRIED; i++) {
                             const int mi = qam_side(mod_tried[i]);
                             const float complex q = qam_slice(z, mi, qam_scale(mi));
 
-                            try_err[i] += crealf((z - q) * conjf(z - q));
-                            try_ref[i] += crealf(q * conjf(q));
+                            try_err[i] += cnorm(z - q);
+                            try_ref[i] += cnorm(q);
                         }
                         continue;
                     }
                     {
                         const float complex q = qam_slice(z, side, scale);
 
-                        err[c] += crealf((z - q) * conjf(z - q));
-                        ref[c] += crealf(q * conjf(q));
+                        err[c] += cnorm(z - q);
+                        ref[c] += cnorm(q);
                     }
                     if (taken < M2SDR_DVBT_MAX_POINTS && ndata++ % (size_t)stride == 0)
                         res->points[taken++] = z;
@@ -602,7 +620,7 @@ int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate,
                     ein[i] = h3[i] * (float)(0.5 - 0.5 * cos(2.0 * M_PI * (i + 0.5) / ngrid));
                 m2sdr_fft_run(efft, ein, eout);
                 for (i = 0; i < ECHO_FFT; i++)
-                    echo[i] += crealf(eout[i] * conjf(eout[i]));
+                    echo[i] += cnorm(eout[i]);
                 nused++;
             }
         }

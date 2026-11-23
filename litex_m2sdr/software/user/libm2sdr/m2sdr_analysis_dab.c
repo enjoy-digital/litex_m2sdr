@@ -15,11 +15,28 @@
 #include "m2sdr_analysis.h"
 #include "m2sdr_fft.h"
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3). */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
+/* The samples and the products here are finite: complex products written out, without the NaN
+ * and infinity handling of C99 (__mulsc3) that GCC calls for a * b. */
+static inline float complex cmul(float complex a, float complex b)
+{
+    return (crealf(a) * crealf(b) - cimagf(a) * cimagf(b)) + I * (crealf(a) * cimagf(b) + cimagf(a) * crealf(b));
+}
+
+/* a b*. */
+static inline float complex cmulc(float complex a, float complex b)
+{
+    return (crealf(a) * crealf(b) + cimagf(a) * cimagf(b)) + I * (cimagf(a) * crealf(b) - crealf(a) * cimagf(b));
+}
+
+static inline float cnorm(float complex a)
+{
+    return crealf(a) * crealf(a) + cimagf(a) * cimagf(a);
+}
+
+static inline double complex cmul_d(double complex a, double complex b)
+{
+    return (creal(a) * creal(b) - cimag(a) * cimag(b)) + I * (creal(a) * cimag(b) + cimag(a) * creal(b));
+}
 
 /* Transmission mode I at 2.048 MSPS. */
 #define DAB_N              2048    /* Useful part of a symbol: 1 ms. */
@@ -103,12 +120,12 @@ static void symbol_fft(const struct m2sdr_fft *fft, const float complex *x, size
     int i;
 
     for (i = 0; i < DAB_N; i++) {
-        in[i] = x[a + (size_t)i] * (float complex)rot;
-        rot *= step;
+        in[i] = cmul(x[a + (size_t)i], (float complex)rot);
+        rot = cmul_d(rot, step);
     }
     m2sdr_fft_run(fft, in, out);
     for (i = 0; i < DAB_N; i++)
-        out[i] *= turn;
+        out[i] = cmul(out[i], turn);
 }
 
 int m2sdr_dab_analyse(const float complex *x, size_t count, double sample_rate, struct m2sdr_dab_result *res)
@@ -131,7 +148,7 @@ int m2sdr_dab_analyse(const float complex *x, size_t count, double sample_rate, 
     if (fabs(sample_rate - M2SDR_DAB_SAMPLE_RATE) > 2e-3 * M2SDR_DAB_SAMPLE_RATE || count < (size_t)(0.11 * M2SDR_DAB_SAMPLE_RATE))
         return -1;
     for (i = 0; i < count; i++)
-        power += crealf(x[i] * conjf(x[i]));
+        power += cnorm(x[i]);
     res->power_dbfs = 10.0 * log10(power / (double)count + 1e-30);
 
     /* Null symbol: the least power over its length, the power folded on the frame. */
@@ -145,7 +162,7 @@ int m2sdr_dab_analyse(const float complex *x, size_t count, double sample_rate, 
         size_t best_t = 0;
 
         for (i = 0; i < span; i++)
-            fold[i % DAB_FRAME] += crealf(x[i] * conjf(x[i]));
+            fold[i % DAB_FRAME] += cnorm(x[i]);
         for (i = 0; i < DAB_NULL; i++)
             m += fold[i];
         for (i = 0; i < DAB_FRAME; i++) {
@@ -168,7 +185,7 @@ int m2sdr_dab_analyse(const float complex *x, size_t count, double sample_rate, 
         goto out;
     cum[0] = 0;
     for (i = 0; i + DAB_N < count; i++)
-        cum[i + 1] = cum[i] + x[i] * conjf(x[i + DAB_N]);
+        cum[i + 1] = cum[i] + cmulc(x[i], x[i + DAB_N]);
     frame0 = t_null >= (size_t)TIMING_SPAN ? t_null : t_null + DAB_FRAME;
     nfr = 0;
     while (frame0 + (size_t)(nfr + 1) * DAB_FRAME + TIMING_SPAN + DAB_N <= count)
@@ -201,7 +218,7 @@ int m2sdr_dab_analyse(const float complex *x, size_t count, double sample_rate, 
                 int k;
 
                 for (k = 0; k < DAB_G; k++)
-                    pw += 0.5 * (crealf(x[a + k] * conjf(x[a + k])) + crealf(x[a + k + DAB_N] * conjf(x[a + k + DAB_N])));
+                    pw += 0.5 * (cnorm(x[a + k]) + cnorm(x[a + k + DAB_N]));
             }
         res->sync_quality = pw > 0 ? best_q / pw : 0;
     }
@@ -250,9 +267,9 @@ int m2sdr_dab_analyse(const float complex *x, size_t count, double sample_rate, 
                 double complex m = 0;
 
                 for (c = 0; c + 1 < DAB_K; c++) {
-                    const float complex v = a[carrier_bin(c + 1, o)] * conjf(a[carrier_bin(c, o)]);
+                    const float complex v = cmulc(a[carrier_bin(c + 1, o)], a[carrier_bin(c, o)]);
 
-                    m   += v * conjf(prs[c + 1] * conjf(prs[c]));
+                    m   += cmulc(v, cmulc(prs[c + 1], prs[c]));
                     den += cabsf(v);
                 }
                 num += cabs(m);
@@ -287,7 +304,7 @@ int m2sdr_dab_analyse(const float complex *x, size_t count, double sample_rate, 
 
         symbol_fft(fft, x, t + DAB_G - ADV, eps, off, in, y);
         for (c = 0; c < DAB_K; c++) {
-            hf[c]   = y[carrier_bin(c, off)] * conjf(prs[c]);
+            hf[c]   = cmulc(y[carrier_bin(c, off)], prs[c]);
             hsum[c] = hf[c];
         }
         for (s = 1; s < DAB_SYMBOLS; s++) {
@@ -306,23 +323,23 @@ int m2sdr_dab_analyse(const float complex *x, size_t count, double sample_rate, 
                 float complex back;
 
                 for (c = 0; c < DAB_K; c++) {
-                    const float hh = crealf(hf[c] * conjf(hf[c]));
+                    const float hh = cnorm(hf[c]);
 
-                    z[c] = hh > 0 ? ys[c] * conjf(hf[c]) / hh * onto : 0;
-                    common += z[c] * conjf((crealf(z[c]) >= 0 ? 1.0f : -1.0f) + I * (cimagf(z[c]) >= 0 ? 1.0f : -1.0f));
+                    z[c] = hh > 0 ? cmul(cmulc(ys[c], hf[c]) / hh, onto) : 0;
+                    common += cmulc(z[c], (crealf(z[c]) >= 0 ? 1.0f : -1.0f) + I * (cimagf(z[c]) >= 0 ? 1.0f : -1.0f));
                 }
                 back = (float complex)cexp(-I * carg(common));
                 for (c = 0; c < DAB_K; c++) {
-                    const float complex v = z[c] * back;
+                    const float complex v = cmul(z[c], back);
                     const float complex q = ((crealf(v) >= 0 ? 1.0f : -1.0f) + I * (cimagf(v) >= 0 ? 1.0f : -1.0f)) *
                                             (float)M_SQRT1_2;
 
                     if (pass == 0) {
                         /* y = h q, with the turn of the symbol and its common phase. */
-                        hsum[c] += ys[c] * conjf(q) * onto * back;
+                        hsum[c] += cmul(cmul(cmulc(ys[c], q), onto), back);
                         continue;
                     }
-                    err[c] += crealf((v - q) * conjf(v - q));
+                    err[c] += cnorm(v - q);
                     ref[c] += 1.0;
                     if (taken < M2SDR_DAB_MAX_POINTS && n++ % stride == 0)
                         res->points[taken++] = v;
@@ -332,7 +349,7 @@ int m2sdr_dab_analyse(const float complex *x, size_t count, double sample_rate, 
             }
         }
         for (c = 0; c < DAB_K; c++)
-            hpow[c] += crealf(hf[c] * conjf(hf[c]));
+            hpow[c] += cnorm(hf[c]);
 
         /* Impulse response: the channel over the carriers, the gap of carrier 0 filled. */
         memset(ein, 0, ECHO_FFT * sizeof(*ein));
@@ -343,7 +360,7 @@ int m2sdr_dab_analyse(const float complex *x, size_t count, double sample_rate, 
         }
         m2sdr_fft_run(efft, ein, eout);
         for (i = 0; i < ECHO_FFT; i++)
-            echo[i] += crealf(eout[i] * conjf(eout[i]));
+            echo[i] += cnorm(eout[i]);
         nused++;
     }
     res->npoints = taken;
@@ -358,7 +375,7 @@ int m2sdr_dab_analyse(const float complex *x, size_t count, double sample_rate, 
 
             symbol_fft(fft, x, t, eps, off, in, y);
             for (c = 0; c < DAB_K; c++)
-                noise += crealf(y[carrier_bin(c, off)] * conjf(y[carrier_bin(c, off)]));
+                noise += cnorm(y[carrier_bin(c, off)]);
         }
         for (c = 0; c < DAB_K; c++)
             sig += hpow[c];
