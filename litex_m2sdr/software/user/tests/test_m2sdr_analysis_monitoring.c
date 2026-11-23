@@ -556,8 +556,195 @@ static void test_emc(void)
     free(res);
 }
 
-int main(void)
+/* Captures for m2sdr_analyzer */
+/*------------------------------*/
+
+/* SC16, one channel, 12 bits: what make test-analyzer gives m2sdr_analyzer --file. */
+static int write_sc16(const char *path, const float complex *x, size_t n)
 {
+    FILE *f = fopen(path, "wb");
+    size_t i;
+
+    if (!f)
+        return 1;
+    for (i = 0; i < n; i++) {
+        const short v[2] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
+
+        if (fwrite(v, sizeof(v), 1, f) != 1) {
+            fclose(f);
+            return 1;
+        }
+    }
+    return fclose(f) == 0 ? 0 : 1;
+}
+
+static char *read_text(const char *path)
+{
+    static char text[1 << 20];
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f) {
+        printf("test_m2sdr_analysis_monitoring: cannot open %s\n", path);
+        return NULL;
+    }
+    n = fread(text, 1, sizeof(text) - 1, f);
+    fclose(f);
+    text[n] = '\0';
+    return text;
+}
+
+/* Number after "name": in the section "section" of a JSON report. */
+static double json_number(const char *json, const char *section, const char *name)
+{
+    char key[64];
+    const char *p;
+
+    snprintf(key, sizeof(key), "\"%s\"", section);
+    p = strstr(json, key);
+    if (!p)
+        return NAN;
+    snprintf(key, sizeof(key), "\"%s\":", name);
+    p = strstr(p, key);
+    return p ? strtod(p + strlen(key), NULL) : NAN;
+}
+
+static int report_done(const char *what)
+{
+    if (failures) {
+        printf("test_m2sdr_analysis_monitoring: %d FAILED\n", failures);
+        return 1;
+    }
+    printf("test_m2sdr_analysis_monitoring: %s report checked\n", what);
+    return 0;
+}
+
+/* Pulses: LFM pulses of 20 us sweeping 1 MHz, 1 MHz over the centre, staggered PRI
+ * 800/1000/1300 us, 30 dB of SNR, 60 ms at 10 MSPS (the analyzer takes 50). */
+static int write_pulse(const char *path)
+{
+    const size_t n = (size_t)(0.06 * PFS);
+    float complex *x = malloc(n * sizeof(*x));
+    const struct pulse_signal p = { 0.1e-3, 20e-6, 1e-6, 0.5, 1e6, 1e6 / 20e-6, NULL, 0 };
+    const double pri[3] = { 800e-6, 1000e-6, 1300e-6 };
+    int rc;
+
+    if (!x)
+        return 1;
+    make_train(x, n, PFS, &p, pri, 3, 30.0);
+    rc = write_sc16(path, x, n);
+    free(x);
+    return rc;
+}
+
+static int check_pulse_report(const char *path)
+{
+    const char *json = read_text(path), *p;
+    double pri[3] = { NAN, NAN, NAN };
+    int i;
+
+    if (!json)
+        return 1;
+    printf("Pulse report of m2sdr_analyzer:\n");
+    CHECK("found", strstr(json, "\"found\": true") != NULL);
+    CHECK("stagger, LFM", strstr(json, "\"pri\": \"stagger\"") && strstr(json, "\"modulation\": \"lfm\""));
+    CHECK_NEAR("stagger", json_number(json, "pulse", "stagger"), 3, 0);
+    p = strstr(json, "\"pri_us\": [");
+    for (i = 0; p && i < 3; i++) {
+        char *end;
+
+        p = strchr(p, i ? ',' : '[');
+        if (!p)
+            break;
+        pri[i] = strtod(p + 1, &end);
+        p = end;
+    }
+    CHECK_NEAR("PRI 1 (us)", pri[0], 800.0, 0.05);
+    CHECK_NEAR("PRI 2 (us)", pri[1], 1000.0, 0.05);
+    CHECK_NEAR("PRI 3 (us)", pri[2], 1300.0, 0.05);
+    CHECK_NEAR("width (us)", json_number(json, "pulse", "width_us"), 20.0, 0.05);
+    /* The 12-bit samples add nothing to the noise of 30 dB under 0.5. */
+    CHECK_NEAR("offset (kHz)", json_number(json, "pulse", "offset_hz") / 1e3, 1000.0, 10.0);
+    CHECK_NEAR("chirp (MHz/ms)", json_number(json, "pulse", "chirp_hz_per_s") / 1e9, 50.0, 0.5);
+    CHECK_NEAR("peak (dBFS)", json_number(json, "pulse", "peak_db"), 20.0 * log10(0.5) + 0.5, 0.5);
+    return report_done("pulse");
+}
+
+/* EMC: band C/D at 1.048576 MSPS, 2^18 samples (250 ms): a CW of -20 dBFS at +195.712 kHz (on
+ * a channel of the default span, and on a bin) and impulses of 0.05 at 100 Hz, 25 in the
+ * capture: a whole number for the steady state. Limit line: -40 flat; factors: 5 dB flat. */
+#define EMC_FS     1048576.0
+#define EMC_N      (1u << 18)
+#define EMC_CW_HZ  195712.0
+
+static int write_emc(const char *path, const char *limit, const char *factors)
+{
+    float complex *x = malloc(EMC_N * sizeof(*x));
+    FILE *f;
+    size_t i;
+    int rc;
+
+    if (!x || make_impulses(x, EMC_N, 0.05, 25, false, 0.0) != 0)
+        return 1;
+    for (i = 0; i < EMC_N; i++)
+        x[i] += 0.1f * (float complex)cexp(I * 2.0 * M_PI * EMC_CW_HZ * (double)i / EMC_FS);
+    rc = write_sc16(path, x, EMC_N);
+    free(x);
+    f = fopen(limit, "w");
+    if (!f)
+        return 1;
+    fprintf(f, "# QP limit, dBuV/m\n30e6 -40\n1e9 -40\n");
+    fclose(f);
+    f = fopen(factors, "w");
+    if (!f)
+        return 1;
+    fprintf(f, "# antenna factor and cable\n30e6 5.0 # flat\n1e9 5.0\n");
+    return fclose(f) == 0 ? rc : 1;
+}
+
+static int check_emc_report(const char *path)
+{
+    const char *json = read_text(path);
+    const double bimp = 120e3 * sqrt(M_PI / M_LN2) / 2.0;
+    double peak0, qp0;
+
+    if (!json)
+        return 1;
+    printf("EMC report of m2sdr_analyzer:\n");
+    CHECK("band C/D, dBuV/m", strstr(json, "\"band\": \"cd\"") && strstr(json, "\"unit\": \"dBuV/m\""));
+    /* Default span: 100 RBW clamped to the capture, every 60 kHz: 12 channels. */
+    CHECK_NEAR("channels", json_number(json, "emc", "nchannels"), 12, 0);
+    CHECK_NEAR("strongest (Hz)", json_number(json, "emc", "max_peak_hz"), 100e6 + EMC_CW_HZ, 2.0);
+    /* The CW and the peak of an impulse in its channel, in phase at some point: 0.1 + 0.05 Bimp / fs. */
+    CHECK_NEAR("its peak (dBuV/m)", json_number(json, "emc", "max_peak_db"), 20.0 * log10(0.1 + 0.05 * bimp / EMC_FS) + 5.0,
+               0.1);
+    CHECK("fails", strstr(json, "\"pass\": false") != NULL);
+    /* QP of the CW, -20 + 5, against -40: the impulses add little to it. */
+    CHECK_NEAR("worst margin (dB)", json_number(json, "emc", "worst_margin_db"), -40.0 - (-20.0 + 5.0), 0.2);
+    CHECK_NEAR("at (Hz)", json_number(json, "emc", "worst_freq_hz"), 100e6 + EMC_CW_HZ, 2.0);
+    /* First channel, impulses only: peak 0.05 Bimp / fs, QP/peak at 100 Hz as in test_emc (CISPR
+     * reference: -12.0 dB +-1.5). */
+    peak0 = json_number(json, "channels", "peak_db");
+    qp0   = json_number(json, "channels", "qp_db");
+    CHECK_NEAR("impulses: peak (dBuV/m)", peak0, 20.0 * log10(0.05 * bimp / EMC_FS) + 5.0, 0.2);
+    CHECK_NEAR("impulses: QP/peak (dB)", qp0 - peak0, -11.99, 1.5);
+    return report_done("EMC");
+}
+
+int main(int argc, char **argv)
+{
+    if (argc == 3 && strcmp(argv[1], "--write-pulse") == 0)
+        return write_pulse(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-pulse") == 0)
+        return check_pulse_report(argv[2]);
+    if (argc == 5 && strcmp(argv[1], "--write-emc") == 0)
+        return write_emc(argv[2], argv[3], argv[4]);
+    if (argc == 3 && strcmp(argv[1], "--check-emc") == 0)
+        return check_emc_report(argv[2]);
+    if (argc != 1) {
+        fprintf(stderr, "usage: %s [--write-pulse F | --check-pulse F | --write-emc F LIMIT FACTORS | --check-emc F]\n", argv[0]);
+        return 1;
+    }
     test_pulse();
     test_emc();
     if (failures) {
