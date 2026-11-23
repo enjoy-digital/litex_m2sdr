@@ -660,6 +660,42 @@
     "offset": 96,
     "reset": null,
     "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: TXNRX pin from config.txnrx. `0b1`: TXNRX pin driven by the TX activity (TDD, ENSM in pin control).",
+      "name": "auto",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "TXNRX pin from config.txnrx."
+       ],
+       [
+        "``0b1``",
+        "TXNRX pin driven by the TX activity (TDD, ENSM in pin control)."
+       ]
+      ]
+     }
+    ],
+    "name": "txnrx_control",
+    "offset": 100,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "TX on time (sys clock cycles) after the last non-zero TX sample, in auto mode.",
+    "fields": [],
+    "name": "txnrx_hold",
+    "offset": 104,
+    "reset": 1250,
+    "size": 32
    }
   ],
   "capability": [
@@ -795,12 +831,20 @@
       "reset": 1,
       "size": 1,
       "values": []
+     },
+     {
+      "description": "TX gating of the RFIC on the TXNRX pin (ad9361 txnrx_control, header tx_lead).",
+      "name": "txnrx_auto",
+      "offset": 15,
+      "reset": 1,
+      "size": 1,
+      "values": []
      }
     ],
     "name": "features",
     "offset": 4,
     "reset": null,
-    "size": 15
+    "size": 16
    },
    {
     "access": "ro",
@@ -1888,6 +1932,15 @@
     "offset": 60,
     "reset": 0,
     "size": 64
+   },
+   {
+    "access": "rw",
+    "description": "TX lead time (ns): the TX path of the RFIC is turned on this long before a timed frame airs, when the TX gating of the RFIC (ad9361 txnrx_control.auto) is enabled.",
+    "fields": [],
+    "name": "tx_lead",
+    "offset": 68,
+    "reset": 20000,
+    "size": 32
    }
   ],
   "icap": [
