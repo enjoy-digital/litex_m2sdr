@@ -59,6 +59,7 @@
 #include "m2sdr_analysis_cellular.h"
 #include "m2sdr_analysis_wireless.h"
 #include "m2sdr_analysis_timing.h"
+#include "m2sdr_analysis_dual.h"
 
 #define AN_DEFAULT_FREQ_HZ     2400e6
 #define AN_DEFAULT_SAMPLE_RATE 7680000.0
@@ -104,6 +105,8 @@
 #define AN_ADEV_SAMPLES         (1 << 17)     /* Capture of a carrier estimate. */
 #define AN_ADEV_HISTORY         1024          /* Captures kept in the series of the Allan deviation. */
 #define AN_GNSS_DEFAULT_MS      10            /* Milliseconds of a GPS acquisition. */
+#define AN_TWO_LOG2             18            /* Samples of a coherence or direction finding capture: 2^18. */
+#define AN_COHERENCE_FFT_LEN    1024          /* Default of the coherence. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 /* Monitoring. */
@@ -165,6 +168,9 @@ struct an_settings {
     double adev_carrier_hz;        /* Nominal RF frequency of the carrier; 0: the first one found. */
     bool   gnss_on;
     int    gnss_ms;                /* Milliseconds integrated; 0: AN_GNSS_DEFAULT_MS. */
+    /* Two channels: RX1 and RX2 captured together. */
+    bool   coherence_on;           /* Coherence, gain, phase and delay between RX1 and RX2. */
+    int    coherence_fft_len;
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -300,6 +306,8 @@ struct an_result {
     struct m2sdr_gnss_result gnss;
     bool   gnss_valid;             /* Measured: the sample rate was 2.048 or 4.096 MSPS. */
     bool   two_channels;           /* The capture had both channels: the modes of two are measured. */
+    struct m2sdr_coherence_result coherence;
+    bool   coherence_valid;
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
