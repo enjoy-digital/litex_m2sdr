@@ -499,7 +499,8 @@ static int analyse_run(const float complex *X, size_t p, size_t count, double sa
         for (k = 0;; k++) {
             if (!grid_symbol(c, bd, &g, ks + 4 + k, false, (size_t)(n / 4), &pk))
                 break;      /* Cut by the end of the capture. */
-            if (pk.power < END_DROP * pre_peak) {
+            /* The end: the peak far under those of the preamble, or no peak above the noise. */
+            if (pk.power < END_DROP * pre_peak || pk.power < thr * pk.mean) {
                 pkt->complete = true;
                 break;
             }

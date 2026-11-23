@@ -175,9 +175,13 @@ struct m2sdr_lora_config {
  * takes the three bandwidths). Each spreading factor then dechirps windows of 2^sf samples:
  * four windows or more in a row with the same strong FFT peak are up-chirps of a preamble. The
  * peak of the down-chirps after them gives, with that of the up-chirps, the carrier offset and
- * the timing; the symbols are then read on their own windows, the FFT peak of each. A packet
- * taken by the wrong bandwidth and SF of the same chirp slope (SF + 2 at twice the bandwidth) is
- * left to the right one, the stronger peak.
+ * the timing. The band of the packet is then cut again around its carrier and ahead by the
+ * fraction of a sample of its timing, until the symbols sit on whole samples (0.01 sample), and
+ * the symbols are read on their own windows, the FFT peak of each, until the peaks drop. A
+ * packet taken by the wrong bandwidth and SF of the same chirp slope (SF + 2 at twice the
+ * bandwidth) is left to the right one, the larger share of power in the peak. The SNR is that of
+ * the peaks of the preamble over the median of the bins; it stops near +21 dB at SF7 (+28 at
+ * SF12), the chirp cut at the band edges.
  *
  * Not decoded: the header and the payload (Gray mapping, interleaving, Hamming code, whitening,
  * CRC): symbol[] holds the FFT bins as received. */
