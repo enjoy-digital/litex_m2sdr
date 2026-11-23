@@ -70,6 +70,7 @@
 #define AN_DVBT_SECONDS         0.15          /* Capture of a DVB-T analysis: a TPS frame wherever it starts. */
 #define AN_DVBT_FAST_SECONDS    0.04          /* Once the TPS is read: the MER and the channel. */
 #define AN_DVBT_FULL_EVERY      300           /* Live, one capture in this many (about 30 s) reads the TPS again. */
+#define AN_WATCH_HEADER_EVERY   20            /* Lines of --watch between two headers of the columns. */
 #define AN_DVBT_RATE            (64e6 / 7.0)  /* Elementary rate of an 8 MHz DVB-T channel. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
@@ -1279,7 +1280,7 @@ static int run_watch(struct an_source *src, const struct an_settings *base, bool
     struct m2sdr_dvbt_config known;
     float complex *x = NULL;
     size_t x_count = 0;
-    unsigned since = 0;
+    unsigned since = 0, lines = 0;
     bool ok = false;
     const double start = now_ms();
     int status = 1;
@@ -1339,6 +1340,7 @@ static int run_watch(struct an_source *src, const struct an_settings *base, bool
                 if (isfinite(dvbt_needed_db(t)))
                     printf(": MER needed %.1f dB", dvbt_needed_db(t));
                 printf("\n");
+                lines = 0;
             }
             *tps = *t;
             known.fft_len    = t->fft_len;
@@ -1362,17 +1364,25 @@ static int run_watch(struct an_source *src, const struct an_settings *base, bool
                     printf(", \"echo_delay_us\": %.2f, \"echo_level_db\": %.1f", t->echo_delay_us, t->echo_level_db);
             }
             printf("}\n");
-        } else if (t->found && t->pilots) {
-            printf("%7.2f s  MER %5.1f dB", now, t->mer_db);
-            if (isfinite(needed))
-                printf(" (margin %+5.1f dB)", t->mer_db - needed);
-            printf("  level %6.1f %s  guard corr %.2f  offset %+9.1f Hz", t->power_dbfs + set.ref_offset_db,
-                   set.ref_offset_db != 0.0 ? "dBm" : "dBFS", t->sync_quality, t->freq_error_hz);
-            if (t->echo_level_db > -99.0)
-                printf("  echo %+.2f us %5.1f dB", t->echo_delay_us, t->echo_level_db);
-            printf("\n");
         } else {
-            printf("%7.2f s  no multiplex (guard correlation %.3f)\n", now, t->sync_quality);
+            /* The names of the columns now and then, the numbers between. */
+            if (lines++ % AN_WATCH_HEADER_EVERY == 0)
+                printf("%8s %7s %7s %8s %6s %10s %8s %6s\n%8s %7s %7s %8s %6s %10s %8s %6s\n",
+                       "time", "MER", "margin", "level", "guard", "offset", "echo", "echo",
+                       "s", "dB", "dB", set.ref_offset_db != 0.0 ? "dBm" : "dBFS", "corr", "Hz", "us", "dB");
+            if (t->found && t->pilots) {
+                printf("%8.2f %7.1f ", now, t->mer_db);
+                if (isfinite(needed))
+                    printf("%+7.1f", t->mer_db - needed);
+                else
+                    printf("%7s", "--");
+                printf(" %8.1f %6.2f %+10.1f", t->power_dbfs + set.ref_offset_db, t->sync_quality, t->freq_error_hz);
+                if (t->echo_level_db > -99.0)
+                    printf(" %+8.2f %6.1f", t->echo_delay_us, t->echo_level_db);
+                printf("\n");
+            } else {
+                printf("%8.2f  no multiplex (guard correlation %.3f)\n", now, t->sync_quality);
+            }
         }
         fflush(stdout);
     }
