@@ -789,6 +789,7 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | DVB-T | MER and its trace, constellation, channel, MER per carrier and echoes of a DVB-T multiplex |
 | DVB-T2 | Pilot and data MER and their trace, P1, mode and pilot pattern, constellation (rotated or not), channel and echoes of a DVB-T2 multiplex |
 | DAB | MER and its trace, SNR, constellation, channel, MER per carrier and echoes of a DAB/DAB+ ensemble |
+| FM | Multiplex spectrum, deviation histogram, MPX power and its 60 s mean, pilot, RDS (PS, RadioText, bits) of an FM station |
 
 The tabs of the window group the views by category: Spectrum (Spectrum, Time, Statistics),
 Signal (Phase noise, Modulation), Cellular (LTE) and Broadcast (DVB-T, DVB-T2, DAB). `--view`
@@ -1061,6 +1062,39 @@ capture on the ensemble.
 
 The MER is below the SNR on the carriers by what the transmitter and the receiver add (phase
 noise, distortion): the two read alike on a clean signal.
+
+#### FM broadcast {#sw-analyzer-fm}
+
+The FM view, and `--fm` with `--report` (and `--watch`), measure one FM broadcast station tuned
+near the centre of the capture (within 25 kHz), as a monitoring receiver does: deviation,
+multiplex power (ITU-R BS.412), pilot, stereo and RDS.
+
+```sh
+m2sdr_analyzer --freq 98.0e6 --view fm
+m2sdr_analyzer --freq 98.0e6 --report --fm
+m2sdr_analyzer --freq 98.0e6 --report --fm --watch
+m2sdr_analyzer --freq 98.0e6 --report --fm --fm-tone 1000   # stereo separation on a test tone
+```
+
+The sample rate is any from 240 kSPS (default with `--fm`: 0.96 MSPS) and a capture is 1 s,
+about 11 RDS groups. A channel filter (flat to +-100 kHz) selects the station, the
+discriminator gives the multiplex in Hz of deviation, its response compensated. The view tunes
+by frequency and in steps of 50 and 100 kHz, and centres the capture on the carrier.
+
+| Figure | From |
+|---------------------------|---------------------------------------------------------------------|
+| Carrier offset, level, CNR | Mean frequency (Hann weighted); second and fourth moments of the filtered samples |
+| Peak deviation, p99.9, p99 | Multiplex low-passed at 60 kHz: its largest value, the levels exceeded by 0.1 % and 1 % of the samples |
+| MPX power | Mean square deviation, in dB from a sine of +-19 kHz (0 dBr). BS.412 integrates it over 60 s: the view and `--watch` show the mean of the last 60 s, the report the one capture (`mpx_mean_square_hz2` in the JSON, to average) |
+| Pilot | Phase of 10 ms pieces of the 19 kHz tone: deviation, frequency error (against the sample clock) |
+| L+R, L-R | RMS deviation of 30 Hz to 15 kHz, and of the L-R sidebands (23 to 53 kHz) |
+| Stereo separation | `--fm-tone HZ`: a known tone on one channel, measured in L+R and in L-R demodulated with the pilot. Programme content gives no separation |
+| RDS | Decoder of libm2sdr: PI, PTY, TP/TA, PS, RadioText, groups by type, block error rate, level (twice the RMS of the 57 kHz band) |
+| Audio SNR | Mono, de-emphasis `--fm-deemph` (50 us), from a sine of 75 kHz: the noise between 16 and 18.5 kHz, extrapolated with the f^2 spectrum of FM noise |
+
+The view and `--watch` keep the RDS decoder between the captures of a frequency, so PS and
+RadioText build up live; the report has the one second of its capture. RDS needs about 16 dB of
+CNR for no block errors, and the audio SNR means nothing below the FM threshold (about 12 dB).
 
 #### Phase noise {#sw-analyzer-pn}
 
