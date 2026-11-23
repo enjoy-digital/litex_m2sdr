@@ -796,12 +796,17 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | Wi-Fi | Networks, packets, airtime, channel, EVM per carrier and constellation of a Wi-Fi channel |
 | ADS-B | Aircraft (callsign, altitude, speed, track, position), message rate, level and SNR at 1090 MHz |
 | LoRa | LoRa packets (SF, bandwidth, offset, RSSI, SNR, sync word, symbols), channel busy time |
+| Coherence | Levels, coherence, gain and phase of RX2 against RX1 over frequency |
+| Direction | Angle of arrival on two antennas, beamscan and MUSIC on a half circle and against the angle |
+| LTE 2x2 | Paths, condition number and singular values per resource block of a 2-port LTE cell |
 
 The tabs of the window group the views by category: Spectrum (Spectrum, Time, Statistics),
 Signal (Phase noise, Modulation), Cellular (LTE) and Broadcast (DVB-T, DVB-T2, DAB). `--view`
 selects one of them by its name: `spectrum`, `time`, `statistics`, `phase-noise`, `modulation`,
 `lte`, `dvbt`, `dvbt2` or `dab`.
 Wi-Fi is in the Wireless category (`wifi`), ADS-B and LoRa in Monitoring (`adsb`, `lora`).
+The Two channels category (Coherence, Direction, LTE 2x2: `coherence`, `df`, `mimo`) compares
+RX1 and RX2: see [Two channels](#sw-analyzer-two).
 
 The figures are next to the views, and `--report` prints the same ones for one capture:
 
@@ -1347,6 +1352,59 @@ two Doppler bins, half a sample off the code phase), 35 dB-Hz with 20 ms; open s
 50 dB-Hz. The Doppler holds the frequency error of the board: 1 ppm of its reference is 1575 Hz,
 common to all the satellites. A search takes about 0.25 s. Tracking, the navigation message and
 a position are not done.
+#### Two channels {#sw-analyzer-two}
+RX1 and RX2 of the AD9361 share their local oscillator and their sample clock. The board
+always streams both (2T2R): while a mode of two channels is on, `m2sdr_analyzer` keeps both,
+from the same sample periods, and the spectrum still shows the channel selected. A file must
+hold two channels (`--nchannels 2`, RX1 first). Use a manual gain (`--rx-gain`): with the AGC
+each receiver sets its own gain, and a change of gain can move its phase.
+**Coherence** (`--coherence`): one source on both receivers, through a splitter or on two
+antennas side by side, checks the board, the cables and the antennas.
+m2sdr_analyzer --freq 2.45e9 --rx-gain 30 --view coherence
+m2sdr_analyzer --freq 2.45e9 --rx-gain 30 --report --coherence --channel-bw 5e6
+|-------------|---------------------------------------------------------------------------------------|
+| Coherence | Per bin, the magnitude-squared coherence of the averaged cross spectrum; noise alone reads about 1/K for K segments |
+| Gain | RX2 over RX1, from the power of the coherent bins |
+| Delay | RX2 behind RX1: the peak of the phase transform, then a line fitted to the phase over frequency, each bin weighted by its coherence |
+| Phase | At the centre of the capture, the delay taken off |
+| Ripple | What is left of the gain and the phase over frequency: filters, cables, reflections |
+The band is the one of `--channel-bw` and `--channel-offset` when given, the whole capture
+otherwise; the DC bin and its neighbours, where the LO leaks, are left out. A tone gives the
+gain and the phase, not the delay. The FFT is `--coherence-fft` points (1024 by default),
+over 2^18 samples.
+**Direction finding** (`--df`): two antennas on RX1 and RX2, `--df-spacing` apart, make a phase
+interferometer. The angle is from broadside, positive towards the RX2 antenna: a wave from there
+reaches RX2 first, which leads RX1 by 2 pi d sin(angle) / lambda.
+# Source at broadside first: store the phase of the board and cables for this frequency.
+m2sdr_analyzer --freq 2.45e9 --rx-gain 30 --report --df --df-spacing 0.06 --df-cal-store
+m2sdr_analyzer --freq 2.45e9 --rx-gain 30 --report --df --df-spacing 0.06 --watch
+The signal is the strongest one off the centre, or the one at `--df-freq` (from the centre),
+over its main lobe or `--df-bw`. The phase of the receivers and their cables is taken off: the
+one stored for the frequency (within 5 MHz, in `~/.config/litex_m2sdr/df_cal_<dna>.csv`, or
+`--df-cal-file`), or `--df-cal`. The view stores it with "Calibrate: source at broadside". Spaced
+more than half a wavelength, the antennas give several angles for one phase: they are all
+listed, and the angle is the one nearest broadside. Two antennas on a line do not tell the
+front from the back. The beamscan and MUSIC pseudo-spectra are those of the 2x2 covariance:
+with two antennas MUSIC finds one source, drawn more sharply. Re-tuning the LO may change the
+phase between the receivers: calibrate again after a change of frequency.
+**LTE 2x2** (`--mimo`): the 2x2 channel of an LTE downlink cell of two antenna ports, from its
+cell reference signals of ports 0 and 1 received on RX1 and RX2.
+m2sdr_analyzer --freq 1842.5e6 --sample-rate 7.68e6 --rx-gain 40 --view mimo
+m2sdr_analyzer --freq 1842.5e6 --sample-rate 7.68e6 --rx-gain 40 --report --mimo
+The cell, its frame and its carrier offset come from the LTE analysis on RX1 (RX2 when RX1 has
+no cell), the sample rates as for [LTE](#sw-analyzer-lte). Per resource block, H is the mean of
+the estimates at its pilots over the frame:
+| Figure | Content |
+|------------------|-------------------------------------------------------------------------------|
+| Paths | Power of each of the four paths, RX1 and RX2 from port 0 and port 1 |
+| Singular values | s1^2 and s2^2 of H, per block and their mean |
+| Condition number | s1 / s2 in dB, per block, mean and worst: high when the paths are alike |
+| Rank | Two layers when their Shannon capacity beats one layer's at the SNR of the pilots |
+| Correlation | Of the rows (receivers) and of the columns (ports) of H |
+The rank is an estimate with ideal precoding, not the rank indicator a UE reports from the
+tables of TS 36.213. The noise comes from how the estimate of a block changes over the frame:
+a channel that moves reads as noise. The cell search takes about 0.2 s a capture, a few results a
+second.
 #### Phase noise {#sw-analyzer-pn}
 
 The Phase noise view, and `--phase-noise` with `--report`, measure the strongest carrier of the

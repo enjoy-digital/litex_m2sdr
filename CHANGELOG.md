@@ -58,6 +58,10 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added a Wi-Fi view to `m2sdr_analyzer` (802.11 OFDM, 20 MHz, `--wifi`): networks from the beacons (BSSID, SSID), packets with their rate, level, SNR, EVM and carrier offset, the L-SIG and HT-SIG, the legacy data decoded to the MAC header with its FCS, airtime, channel and EVM per carrier, constellation, a channel selector and `--watch`.
 - Added an ADS-B view to `m2sdr_analyzer` (1090 MHz, `--adsb`, 2.4 MSPS): DF17/DF18 squitters with CRC-24 and one-bit correction, aircraft kept over the captures (callsign, altitude, velocity, CPR positions, with `--adsb-ref`), level, SNR, message rate and `--watch`.
 - Added a LoRa view to `m2sdr_analyzer` (`--lora`, 1 MSPS, 868 MHz channels): packets at SF7 to SF12 and 125, 250 and 500 kHz with their carrier offset, RSSI, SNR, sync word, symbols and airtime, channel busy time and `--watch`.
+- Added the capture of both RX channels to `m2sdr_analyzer` for the modes that compare them (board 2T2R, or a file of two channels), sample for sample, and the Two channels category.
+- Added the coherence of RX1 and RX2 to `m2sdr_analyzer` (`--coherence`): coherence, gain, phase and delay between them over frequency, and their ripple, a check of the board, cables and antennas on one source.
+- Added direction finding with two antennas to `m2sdr_analyzer` (`--df`): angle of arrival from the phase between RX1 and RX2, every candidate beyond lambda/2, beamscan and MUSIC pseudo-spectra, and a calibration from a source at broadside stored per board and frequency.
+- Added the 2x2 channel of an LTE cell of two antenna ports to `m2sdr_analyzer` (`--mimo`): channel matrix per resource block from the reference signals of ports 0 and 1 on RX1 and RX2, singular values, condition number, rank estimate and path powers.
 - Added `m2sdr_gen --signal qam`: random PSK or QAM symbols under a root raised cosine, as a test source. `m2sdr_gen` now sends at the sample rate over Ethernet, where it used to send as fast as the host could and the board dropped most of the datagrams, and reports the TX underflows counted by the FPGA.
 
 **FM Utilities**
