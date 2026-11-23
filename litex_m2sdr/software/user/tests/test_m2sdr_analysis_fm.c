@@ -522,11 +522,109 @@ static void test_timing(float complex *x, size_t cap)
     free(res);
 }
 
-int main(void)
+/* Report of m2sdr_analyzer */
+/*--------------------------*/
+
+#define FILE_OFFSET_HZ 2500.0
+#define FILE_PI        0xC0DE
+#define FILE_PS        "M2SDR FM"
+#define FILE_RT        "M2SDR test"   /* Three groups 2A: complete in the 1 s of a report. */
+
+/* 1.2 s at 0.96 MSPS of the modulator, stereo with RDS and 1 kHz on the left at half scale,
+ * +2.5 kHz from the centre: raw SC16, 12 bits, two channels (the same on both). */
+static int write_fm(const char *path)
+{
+    const size_t max = (size_t)(1.2 * FS);
+    float complex *x = malloc(max * sizeof(*x));
+    struct m2sdr_fm_config cfg;
+    FILE *f = fopen(path, "wb");
+    size_t n, i;
+
+    if (!x || !f)
+        return 1;
+    m2sdr_fm_config_init(&cfg);
+    cfg.sample_rate = FS;
+    cfg.tau         = 0.0;
+    cfg.stereo      = true;
+    cfg.bits        = 16;
+    cfg.rds.enable  = true;
+    cfg.rds.pi      = FILE_PI;
+    cfg.rds.pty     = 5;
+    strcpy(cfg.rds.ps, FILE_PS);
+    strcpy(cfg.rds.rt, FILE_RT);
+    n = make_tx(x, max, &cfg, 1000.0, 0.5);
+    if (n == 0)
+        return 1;
+    for (i = 0; i < n; i++) {
+        const float complex v = 0.9f * x[i] * (float complex)cexp(I * 2.0 * M_PI * FILE_OFFSET_HZ * (double)i / FS);
+        const short s[4] = { (short)lrintf(crealf(v) * 2047.0f), (short)lrintf(cimagf(v) * 2047.0f),
+                             (short)lrintf(crealf(v) * 2047.0f), (short)lrintf(cimagf(v) * 2047.0f) };
+
+        if (fwrite(s, sizeof(s), 1, f) != 1)
+            return 1;
+    }
+    free(x);
+    return fclose(f) == 0 ? 0 : 1;
+}
+
+static double json_number(const char *json, const char *section, const char *name)
+{
+    char key[64];
+    const char *p;
+
+    snprintf(key, sizeof(key), "\"%s\"", section);
+    p = strstr(json, key);
+    if (!p)
+        return NAN;
+    snprintf(key, sizeof(key), "\"%s\":", name);
+    p = strstr(p, key);
+    return p ? strtod(p + strlen(key), NULL) : NAN;
+}
+
+/* The report of the file of write_fm(), run with --fm --fm-tone 1000. The figures are those of
+ * test_tx_stereo_rds(); 12 bits instead of 16 only lower the noise floor. */
+static int check_fm(const char *path)
+{
+    static char json[32768];
+    const double tone = 0.5 * 0.86 * 75000.0 / 2.0;
+    const double ms   = tone * tone * 0.75 + 7500.0 * 7500.0 / 2.0 + 3000.0 * 3000.0 / 4.0;
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f) {
+        printf("test_m2sdr_analysis_fm: cannot open %s\n", path);
+        return 1;
+    }
+    n = fread(json, 1, sizeof(json) - 1, f);
+    fclose(f);
+    json[n] = '\0';
+    printf("FM report of m2sdr_analyzer:\n");
+    CHECK("station, pilot and RDS", strstr(json, "\"found\": true") && strstr(json, "\"pilot\": true") &&
+                                    strstr(json, "\"rds\": true"));
+    CHECK_NEAR("carrier offset (Hz)", json_number(json, "fm", "carrier_offset_hz"), FILE_OFFSET_HZ, 1.0);
+    CHECK_NEAR("carrier (dBFS)", json_number(json, "fm", "carrier_db"), 20.0 * log10(0.9 * 2047.0 / 2048.0), 0.05);
+    CHECK_NEAR("pilot deviation (Hz)", json_number(json, "fm", "pilot_dev_hz"), 7500.0, 20.0);
+    CHECK_NEAR("pilot frequency error (Hz)", json_number(json, "fm", "pilot_freq_error_hz"), 0.0, 0.02);
+    CHECK_NEAR("MPX power (dBr)", json_number(json, "fm", "mpx_power_dbr"), 10.0 * log10(ms / REF2), 0.05);
+    CHECK("separation > 40 dB", json_number(json, "fm", "separation_db") > 40.0);
+    CHECK_NEAR("RDS level (Hz)", json_number(json, "fm", "rds_dev_hz"), 3000.0, 60.0);
+    CHECK_NEAR("RDS block error rate", json_number(json, "fm", "rds_bler"), 0.0, 0.0);
+    CHECK("RDS PI, PS, RT", strstr(json, "\"pi\": \"C0DE\"") && strstr(json, "\"ps\": \"" FILE_PS "\"") &&
+                            strstr(json, "\"rt\": \"" FILE_RT "\""));
+    printf("test_m2sdr_analysis_fm: FM report %s (%d failures)\n", failures ? "FAIL" : "checked", failures);
+    return failures ? 1 : 0;
+}
+
+int main(int argc, char **argv)
 {
     const size_t cap = (size_t)(2.0 * 1920000.0);
-    float complex *x = malloc(cap * sizeof(*x));
+    float complex *x;
 
+    if (argc == 3 && strcmp(argv[1], "--write-fm") == 0)
+        return write_fm(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-fm") == 0)
+        return check_fm(argv[2]);
+    x = malloc(cap * sizeof(*x));
     if (!x)
         return 1;
     test_tx_stereo_rds(x, cap);
