@@ -234,10 +234,10 @@ static void test_adsb(void)
         CHECK("analyse", m2sdr_adsb_analyse(x, count, sig->fs, 10.0, NULL, NULL, res) == 0);
         printf("  time of one analysis: %.2f ms for %.0f ms of samples\n", now_ms() - t0, dur * 1e3);
         CHECK("five messages", res->messages == 5 && res->nmessages == 5);
-        /* Pulses on the samples: no bit wrong at these SNR (the halves of a bit differ by over
-         * 4 noise rms). Across samples, the contrast is lower: a bit corrected now and then. */
+        /* Pulses on the samples: a bit is wrong with a probability of exp(-snr / 2) / 2, 2e-4 at
+         * 12 dB, a message every 50. Across samples, the contrast is lower. One corrected at most. */
         printf("  corrected: %d\n", res->corrected);
-        CHECK("bits corrected", sig->offset == 0.0 ? res->corrected == 0 : res->corrected <= 1);
+        CHECK("bits corrected", res->corrected <= 1);
         CHECK_NEAR("message rate (/s)", res->message_rate, 5.0 / dur, 1e-6);
         /* The median of the samples is noise: their power within the spread of the median of
          * 65536 exponential samples (well under 0.1 dB). */
@@ -267,9 +267,10 @@ static void test_adsb(void)
         if (sig->offset == 0.0) {
             /* Pulses on whole samples: the chips read their power exactly, and the noise its own
              * over the 116 chips without a pulse of each message: 9 % (0.4 dB) rms for one,
-             * 0.2 dB over five. */
+             * 0.2 dB over five; three times that, and 0.2 dB for the halves told apart by their
+             * power at 12 dB. */
             CHECK_NEAR("pulse level (dBFS)", level, sig->level_db, 0.3);
-            CHECK_NEAR("SNR (dB)", snr, sig->level_db - sig->noise_db, 0.5);
+            CHECK_NEAR("SNR (dB)", snr, sig->level_db - sig->noise_db, 0.8);
         } else {
             /* Pulses across samples: the box filter spreads each pulse on two samples, a chip
              * reads (1 - d)^3 + d^3 of its power at 2 MSPS, 6 dB low at d = 0.5 sample; less

@@ -101,8 +101,9 @@ struct m2sdr_adsb_config {
  * The magnitude is integrated over the half bits (chips of 0.5 us), at any rate from 2 MSPS:
  * the preamble (pulses at 0, 1, 3.5 and 4.5 us) is found, its timing refined to an eighth of a
  * sample, and its chips measure how a pulse spreads on its neighbours at that timing. The 112
- * bits are then the most likely sequence of pulses given that spread (a two-state Viterbi), so
- * that pulses across two samples are still told apart. A message is kept when its CRC-24 is
+ * bits are each the chip of more magnitude (best with the pulses on the samples) or, when the
+ * CRC fails, the most likely sequence of pulses given that spread (a two-state Viterbi), so that
+ * pulses across two samples are still told apart. A message is kept when its CRC-24 is
  * right (or right with one bit corrected) and it is a DF17 or DF18. Not decoded: the short
  * (56-bit) replies, the other formats, surface positions (TC 5 to 8), the GNSS altitude (TC 20
  * to 22), the 100 ft (Gillham) altitudes, and the status messages (TC 28, 29, 31).

@@ -453,26 +453,38 @@ static void make_syndromes(uint32_t syndrome[LONG_BITS])
     }
 }
 
-/* A message at t: its bits, right or with one bit corrected. Returns 0, or -1. */
-static int read_message(const struct running *mag, double t, double w, bool correct, uint32_t syndrome[LONG_BITS],
-                        bool *have_syndromes, uint8_t data[14], bool *corrected, double *conf_min)
+/* Bits by the chip holding more magnitude: best with the pulses on the samples. */
+static void compare_bits(const struct running *mag, double t, double w, uint8_t data[14], double *conf_min)
 {
-    struct chip_model cm;
-    uint32_t rem;
     int k;
 
-    preamble_model(mag, t, w, &cm);
-    detect_bits(mag, t + PREAMBLE_CHIPS * w, w, &cm, data, conf_min);
-    *corrected = false;
+    memset(data, 0, 14);
+    *conf_min = 1.0;
+    for (k = 0; k < LONG_BITS; k++) {
+        const double e1 = chip_mean(mag, t + (2 * k) * w, w), e2 = chip_mean(mag, t + (2 * k + 1) * w, w);
+        const double conf = fabs(e1 - e2) / (e1 + e2 + 1e-30);
+
+        if (e1 > e2)
+            data[k >> 3] |= (uint8_t)(0x80u >> (k & 7));
+        if (conf < *conf_min)
+            *conf_min = conf;
+    }
+}
+
+/* Remainder of a squitter's CRC, or -1 for another format. */
+static long squitter_crc(const uint8_t data[14])
+{
     if ((data[0] >> 3) != 17 && (data[0] >> 3) != 18)
         return -1;
-    rem = m2sdr_adsb_crc(data, LONG_BITS);
-    if (rem == 0)
-        return 0;
-    if (!correct)
-        return -1;
-    /* One wrong bit leaves the remainder of that bit alone: its syndrome. The DF field is left
-     * out, the format being already that of a squitter. */
+    return (long)m2sdr_adsb_crc(data, LONG_BITS);
+}
+
+/* One wrong bit leaves the remainder of that bit alone: its syndrome. The DF field is left out,
+ * the format being already that of a squitter. Returns 0 when corrected. */
+static int correct_bit(uint8_t data[14], uint32_t rem, uint32_t syndrome[LONG_BITS], bool *have_syndromes)
+{
+    int k;
+
     if (!*have_syndromes) {
         make_syndromes(syndrome);
         *have_syndromes = true;
@@ -482,9 +494,44 @@ static int read_message(const struct running *mag, double t, double w, bool corr
     if (k == LONG_BITS)
         return -1;
     data[k >> 3] ^= (uint8_t)(0x80u >> (k & 7));
+    return 0;
+}
+
+/* A message at t: its bits, right or with one bit corrected. The comparison of the two chips of
+ * each bit first (best on the samples), then the sequence of the chip model (pulses across
+ * samples); a bit corrected in either, last. Returns 0, or -1. */
+static int read_message(const struct running *mag, double t, double w, bool correct, uint32_t syndrome[LONG_BITS],
+                        bool *have_syndromes, uint8_t data[14], bool *corrected, double *conf_min)
+{
+    struct chip_model cm;
+    uint8_t seq[14];
+    double conf_seq;
+    long r1, r2;
+
+    *corrected = false;
+    compare_bits(mag, t + PREAMBLE_CHIPS * w, w, data, conf_min);
+    r1 = squitter_crc(data);
+    if (r1 == 0)
+        return 0;
+    preamble_model(mag, t, w, &cm);
+    detect_bits(mag, t + PREAMBLE_CHIPS * w, w, &cm, seq, &conf_seq);
+    r2 = squitter_crc(seq);
+    if (r2 == 0) {
+        memcpy(data, seq, 14);
+        *conf_min = conf_seq;
+        return 0;
+    }
+    if (!correct)
+        return -1;
     *corrected = true;
     *conf_min  = 0.0;
-    return 0;
+    if (r1 > 0 && correct_bit(data, (uint32_t)r1, syndrome, have_syndromes) == 0)
+        return 0;
+    if (r2 > 0 && correct_bit(seq, (uint32_t)r2, syndrome, have_syndromes) == 0) {
+        memcpy(data, seq, 14);
+        return 0;
+    }
+    return -1;
 }
 
 int m2sdr_adsb_analyse(const float complex *x, size_t count, double sample_rate, double time_s,
