@@ -56,6 +56,7 @@
 #include "m2sdr_analysis_fm.h"
 #include "m2sdr_analysis_monitoring.h"
 #include "m2sdr_analysis_cellular.h"
+#include "m2sdr_analysis_wireless.h"
 
 #define AN_DEFAULT_FREQ_HZ     2400e6
 #define AN_DEFAULT_SAMPLE_RATE 7680000.0
@@ -93,6 +94,7 @@
 #define AN_GSM_RATE             1.92e6
 #define AN_TETRA_SECONDS        1.1           /* The synchronisation burst comes once a multiframe (1.02 s). */
 #define AN_TETRA_RATE           1e6
+#define AN_WIFI_SECONDS         0.105         /* Capture of a Wi-Fi analysis: a beacon interval (102.4 ms). */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 /* Monitoring. */
@@ -145,6 +147,7 @@ struct an_settings {
      * on this tuning, set by the worker (0: none). */
     bool   nr_on, gsm_on, tetra_on;
     double nr_scs_hz, nr_scs_known;
+    bool   wifi_on;                /* Wi-Fi channel. */
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -242,6 +245,9 @@ struct an_result {
     bool   gsm_valid;
     struct m2sdr_tetra_result tetra;
     bool   tetra_valid;
+    struct m2sdr_wifi_result wifi;
+    bool   wifi_valid;             /* Measured: the sample rate was 20 MSPS. */
+    bool   wifi_no_psdu;           /* The data was not decoded: it took longer than the capture. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
@@ -321,6 +327,7 @@ struct an_mode {
     size_t valid;                  /* offsetof(struct an_result, <flag>): cleared before each analysis. */
     int    report_rank;            /* Place of its section in the reports: lower first. */
     double default_rate;           /* Sample rate when it is on and none is given; 0: none. */
+    double default_freq;           /* Centre frequency when it is on and none is given; 0: none. */
     bool   psd_short;              /* Its capture is long: the spectrum only takes its own averages of it. */
     /* Command line: its defaults in the settings, set before the options are read; its long
      * options, their .val its own ids, NULL-name terminated; their parser, that returns 0, or -1

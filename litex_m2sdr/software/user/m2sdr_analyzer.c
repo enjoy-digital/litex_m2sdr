@@ -507,10 +507,12 @@ int main(int argc, char **argv)
     /* The mode of the view shown first is measured from the first capture. */
     if (an_mode_flag(an_modes[view], &set))
         *an_mode_flag(an_modes[view], &set) = true;
-    /* The sample rate of a mode, unless one is given; a file gives its own. */
+    /* The sample rate and the frequency of a mode, unless given; a file gives its own. */
     for (m = 0; an_modes[m]; m++) {
         if (an_modes[m]->default_rate > 0 && an_mode_on(an_modes[m], &set) && !rate_given)
             set.sample_rate = an_modes[m]->default_rate;
+        if (an_modes[m]->default_freq > 0 && an_mode_on(an_modes[m], &set) && !freq_given)
+            set.freq_hz = an_modes[m]->default_freq;
     }
     if (src.no_rf_init && (file || src.tx_tone)) {
         m2sdr_cli_error("--no-rf-init is for a board, without --tx-tone");
