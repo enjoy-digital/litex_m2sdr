@@ -155,6 +155,7 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_analysis_tetra.o \
 	libm2sdr/m2sdr_analysis_adsb.o \
 	libm2sdr/m2sdr_analysis_lora.o \
+	libm2sdr/m2sdr_analysis_wifi.o \
 	libm2sdr/m2sdr_hal_litepcie.o \
 	libm2sdr/m2sdr_hal_liteeth.o \
 	liblitepcie/litepcie_dma.o \

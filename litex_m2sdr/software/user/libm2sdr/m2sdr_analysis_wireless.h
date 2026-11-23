@@ -199,6 +199,112 @@ struct m2sdr_lora_result {
 int m2sdr_lora_analyse(const float complex *x, size_t count, double sample_rate,
                        const struct m2sdr_lora_config *cfg, struct m2sdr_lora_result *res);
 
+/* Wi-Fi */
+/*-------*/
+
+#define M2SDR_WIFI_SAMPLE_RATE   20.0e6
+#define M2SDR_WIFI_CARRIERS      52      /* Of the per-carrier traces: -26 to 26 without 0. */
+#define M2SDR_WIFI_MAX_PACKETS   256
+#define M2SDR_WIFI_MAX_BSS       32
+#define M2SDR_WIFI_MAX_POINTS    4096
+
+enum m2sdr_wifi_format {
+    M2SDR_WIFI_LEGACY = 0,      /* 802.11a/g OFDM, or a format below not recognised. */
+    M2SDR_WIFI_HT     = 1,      /* 802.11n mixed format: HT-SIG (QBPSK) with a right CRC after the L-SIG. */
+    M2SDR_WIFI_VHT    = 2,      /* VHT or later (802.11ac/ax): a BPSK then a QBPSK symbol after the L-SIG. */
+};
+
+struct m2sdr_wifi_packet {
+    double   time_s;            /* Start of the L-STF, from the first sample. */
+    double   duration_s;        /* From the L-SIG: the preamble (20 us) and its symbols. */
+    double   rssi_dbfs;         /* Power over the L-LTF. */
+    double   freq_error_hz;     /* Carrier, from the centre of the capture. */
+    double   snr_db;            /* Per carrier, from the L-LTF: its two symbols differ by noise only. */
+    double   evm_db;            /* L-SIG and data symbols (legacy) or HT-SIG, against the nearest points
+                                 * of their constellation, after the channel of the L-LTF and the phase
+                                 * of the pilots: the channel estimate adds an eighth of the noise of a
+                                 * carrier (a fifth for long channels), the pilots an eighth (1 dB over
+                                 * the noise of the carriers). */
+    bool     signal_ok;         /* L-SIG right: parity, rate, reserved and tail bits. */
+    int      rate_mbps;         /* L-SIG: 6 to 54 (6 for the HT and VHT formats, whose L-SIG only gives
+                                 * the duration). */
+    int      length;            /* L-SIG: bytes of the PSDU. */
+    enum m2sdr_modulation modulation;   /* Of the data symbols at that rate. */
+    enum m2sdr_wifi_format format;
+    int      ht_mcs;            /* HT-SIG: MCS, 0 to 76. */
+    int      ht_length;         /* Bytes. */
+    bool     ht_40mhz;
+    bool     ht_short_gi;
+    bool     decoded;           /* Legacy PSDU decoded (the packet whole in the capture). */
+    bool     fcs_ok;            /* Its FCS (CRC-32) right: the MAC fields below are read. */
+    uint16_t frame_control;
+    int      type, subtype;     /* 0 management (8 beacon, 5 probe response), 1 control, 2 data. */
+    int      naddr;             /* Addresses of the frame: 1 (CTS, ACK), 2 (RTS) or 3. */
+    uint8_t  addr1[6], addr2[6], addr3[6];
+    char     ssid[33];          /* Beacons and probe responses; "" otherwise. */
+};
+
+/* A network, from its beacons. */
+struct m2sdr_wifi_bss {
+    uint8_t  bssid[6];
+    char     ssid[33];
+    int      beacons;
+    double   rssi_dbfs;         /* Of its last beacon. */
+    double   snr_db;
+};
+
+struct m2sdr_wifi_config {
+    bool     no_psdu;           /* L-SIG and HT-SIG only: no Viterbi of the data (faster). */
+};
+
+/* Wi-Fi OFDM at 20 MHz (802.11a/g, and the legacy preamble of 802.11n/ac/ax), tuned on the
+ * channel. The sample rate is 20 MSPS: a capture at another rate is resampled by the caller.
+ *
+ * A packet is found from its L-STF (the 16-sample period of its short symbols, an
+ * autocorrelation), which gives a coarse carrier offset; its timing is the correlation with the
+ * L-LTF, whose two symbols give the fine offset, the channel per carrier (projected on short
+ * responses: 12 taps, or 22 when the channel is longer, a quarter or two fifths of the noise of
+ * the estimate left) and the noise (their difference). Each OFDM symbol is equalised by that channel and turned by the phase of its
+ * four pilots (common phase and slope: carrier and sampling offsets). The L-SIG (BPSK 1/2) is
+ * decoded: deinterleaver, Viterbi; then the two symbols after it tell the HT (QBPSK HT-SIG,
+ * decoded, CRC-8 checked) and VHT formats. A legacy packet whole in the capture is decoded at
+ * its rate: soft demapping (BPSK to 64QAM), deinterleaver, depuncturing (2/3, 3/4), Viterbi,
+ * descrambler, then the FCS checked and the MAC header read (addresses, SSID of beacons).
+ *
+ * Not decoded: the data of HT and later formats (MIMO, other interleavers, LDPC), 40 MHz and
+ * wider channels (their 20 MHz part is seen), DSSS/CCK (802.11b) packets. */
+struct m2sdr_wifi_result {
+    int      packets;           /* Found (in packet[], the first M2SDR_WIFI_MAX_PACKETS). */
+    int      signal_ok;         /* Of them, with a right L-SIG. */
+    int      fcs_ok;            /* Legacy PSDUs with a right FCS. */
+    double   busy_fraction;     /* Airtime of the packets (their L-SIG durations) over the capture. */
+    double   energy_busy_fraction;  /* 4 us slots 6 dB over the noise floor, of any signal. */
+    double   noise_dbfs;        /* Floor: the tenth of the 4 us slots with the least power (right
+                                 * while a tenth of the capture or more is quiet). */
+    double   power_dbfs;        /* Of the capture. */
+    int      npackets;
+    struct m2sdr_wifi_packet packet[M2SDR_WIFI_MAX_PACKETS];
+    int      nbss;
+    struct m2sdr_wifi_bss bss[M2SDR_WIFI_MAX_BSS];
+    /* The strongest packet with a right L-SIG (-1 without): its channel per carrier in dB from
+     * its mean, its EVM per carrier, and its equalised data points (L-SIG and data, or HT-SIG),
+     * of its modulation. */
+    int      trace_packet;
+    float    channel_db[M2SDR_WIFI_CARRIERS];
+    float    evm_carrier_db[M2SDR_WIFI_CARRIERS];
+    enum m2sdr_modulation points_modulation;
+    int      npoints;
+    float complex points[M2SDR_WIFI_MAX_POINTS];
+};
+
+/* cfg may be NULL. Returns 0, or -1 on a bad argument (sample rate, less than 100 us of
+ * samples) or an allocation failure. Without a packet, packets = 0. */
+int m2sdr_wifi_analyse(const float complex *x, size_t count, double sample_rate,
+                       const struct m2sdr_wifi_config *cfg, struct m2sdr_wifi_result *res);
+
+/* CRC-32 of 802.3/802.11 (FCS): of "123456789", 0xcbf43926. */
+uint32_t m2sdr_wifi_crc32(const uint8_t *data, size_t len);
+
 #ifdef __cplusplus
 }
 #endif
