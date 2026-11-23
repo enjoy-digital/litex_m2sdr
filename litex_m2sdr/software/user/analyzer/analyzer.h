@@ -180,6 +180,7 @@ struct an_settings {
     bool   df_cal_given;           /* df_cal_deg given: the stored calibration is not used. */
     double df_cal_deg;
     bool   df_cal_store;           /* --report: store the phase read as the calibration (source at broadside). */
+    bool   mimo_on;                /* 2x2 channel of an LTE cell. */
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -323,6 +324,8 @@ struct an_result {
     double df_cal_deg;             /* Used, */
     int    df_cal_source;          /* from: 0 none, 1 the command line or the view, 2 the store. */
     double df_cal_freq_hz;         /* The frequency of the stored one. */
+    struct m2sdr_mimo_result mimo;
+    bool   mimo_valid;
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
