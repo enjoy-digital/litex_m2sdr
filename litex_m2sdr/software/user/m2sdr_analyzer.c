@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -785,6 +786,27 @@ static const double pn_spots[] = { 100.0, 1e3, 1e4, 1e5, 1e6, 1e7 };
 /* Report */
 /*--------*/
 
+/* C/N for quasi error free reception in a Gaussian channel (EN 300 744, annex A), by
+ * constellation and code rate: what the MER must at least reach. NAN when not known. */
+static double dvbt_needed_db(const struct m2sdr_dvbt_result *t)
+{
+    static const double cn[3][5] = {
+        {  3.1,  4.9,  5.9,  6.9,  7.7 },
+        {  8.8, 11.1, 12.5, 13.5, 13.9 },
+        { 14.4, 16.5, 18.0, 19.3, 20.1 },
+    };
+    static const char *const rates[5] = { "1/2", "2/3", "3/4", "5/6", "7/8" };
+    int m, r;
+
+    if (!t->tps || t->tps_hierarchy)
+        return NAN;
+    m = t->tps_modulation == M2SDR_MOD_QPSK ? 0 : t->tps_modulation == M2SDR_MOD_16QAM ? 1 : 2;
+    for (r = 0; r < 5; r++)
+        if (strcmp(t->code_rate_hp, rates[r]) == 0)
+            return cn[m][r];
+    return NAN;
+}
+
 static void print_json_number(const char *name, double value, bool last)
 {
     if (isfinite(value))
@@ -933,6 +955,7 @@ static void report_json(const struct an_source *src, const struct an_result *res
                         printf("    \"cell_id\": %d,\n", t->cell_id);
                 }
                 printf("    \"mer_against\": \"%s\",\n", m2sdr_modulation_name(t->modulation));
+                print_json_number("mer_needed_db", dvbt_needed_db(t), false);
                 print_json_number("echo_delay_us", t->echo_delay_us, false);
                 print_json_number("echo_level_db", t->echo_level_db, false);
                 print_json_number("mer_db", t->mer_db, true);
@@ -1142,7 +1165,10 @@ static void report_text(const struct an_source *src, const struct an_result *res
                 } else {
                     printf("  TPS        : not read\n");
                 }
-                printf("  MER        : %.1f dB against %s, over %d symbols\n", t->mer_db, m2sdr_modulation_name(t->modulation), t->symbols);
+                printf("  MER        : %.1f dB against %s, over %d symbols", t->mer_db, m2sdr_modulation_name(t->modulation), t->symbols);
+                if (isfinite(dvbt_needed_db(t)))
+                    printf(" (%.1f dB needed, margin %+.1f dB)", dvbt_needed_db(t), t->mer_db - dvbt_needed_db(t));
+                printf("\n");
                 if (t->echo_level_db > -99.0)
                     printf("  Echo       : strongest at %+.2f us, %.1f dB (guard interval %.0f us)\n", t->echo_delay_us,
                            t->echo_level_db, t->guard_us);
@@ -1222,6 +1248,135 @@ static int export_csv(const char *path, const struct an_result *res)
         fprintf(f, "%.3f,%.3f,%.3f\n", res->set.freq_hz + m2sdr_psd_freq(&res->psd, k), m2sdr_psd_freq(&res->psd, k),
                 m2sdr_power_db(res->psd.power[k]) + res->set.ref_offset_db);
     return fclose(f) == 0 ? 0 : -1;
+}
+
+/* DVB-T watch */
+/*-------------*/
+
+static double now_ms(void)
+{
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return 1e3 * (double)ts.tv_sec + 1e-6 * (double)ts.tv_nsec;
+}
+
+static volatile sig_atomic_t watch_stop;
+
+static void watch_signal(int sig)
+{
+    (void)sig;
+    watch_stop = 1;
+}
+
+/* DVB-T from a board, one line per capture until Ctrl-C: the figures to follow when placing an
+ * antenna, without a display. Short captures once the TPS is read, as in the view. */
+static int run_watch(struct an_source *src, const struct an_settings *base, bool json)
+{
+    struct an_settings set = *base;
+    struct an_result *res = calloc(1, sizeof(*res));
+    struct m2sdr_dvbt_result *tps = calloc(1, sizeof(*tps));
+    struct m2sdr_dvbt_config known;
+    float complex *x = NULL;
+    size_t x_count = 0;
+    unsigned since = 0;
+    bool ok = false;
+    const double start = now_ms();
+    int status = 1;
+
+    memset(&known, 0, sizeof(known));
+    if (!res || !tps) {
+        fprintf(stderr, "Out of memory\n");
+        goto out;
+    }
+    signal(SIGINT, watch_signal);
+    if (!json)
+        printf("  time s   MER dB  margin   level dBFS  guard corr   offset Hz   echo\n");
+    while (!watch_stop) {
+        const struct m2sdr_dvbt_result *t = &res->dvbt;
+        const double now = (now_ms() - start) / 1e3;
+        char err[256];
+        size_t count;
+        double needed;
+        int rc;
+
+        set.dvbt_fast = ok && ++since % AN_DVBT_FULL_EVERY != 0;
+        memset(&set.dvbt_hint, 0, sizeof(set.dvbt_hint));
+        if (ok)
+            set.dvbt_hint = known;
+        count = capture_samples(&set);
+        if (count > x_count) {
+            float complex *grown = realloc(x, count * sizeof(*x));
+
+            if (!grown) {
+                fprintf(stderr, "Out of memory\n");
+                goto out;
+            }
+            x       = grown;
+            x_count = count;
+        }
+        rc = source_capture(src, &set, x, count, err, sizeof(err));
+        if (rc < 0) {
+            fprintf(stderr, "Capture failed: %s\n", err);
+            goto out;
+        }
+        if (analyse(x, count, &set, res) != 0) {
+            fprintf(stderr, "Analysis failed\n");
+            goto out;
+        }
+        if (!res->dvbt_valid) {
+            fprintf(stderr, "The sample rate is not one of DVB-T.\n");
+            goto out;
+        }
+        if (t->tps) {
+            *tps = *t;
+            known.fft_len    = t->fft_len;
+            known.guard      = t->guard;
+            known.modulation = t->tps_modulation;
+            ok    = true;
+            since = 0;
+        } else if (!t->found || !t->pilots) {
+            ok = false;
+        }
+        needed = dvbt_needed_db(tps);
+        if (json) {
+            printf("{\"time_s\": %.3f, \"found\": %s", now, t->found && t->pilots ? "true" : "false");
+            if (t->found && t->pilots) {
+                printf(", \"mer_db\": %.2f", t->mer_db);
+                if (isfinite(needed))
+                    printf(", \"margin_db\": %.2f", t->mer_db - needed);
+                printf(", \"power_db\": %.2f, \"sync_quality\": %.3f, \"carrier_offset_hz\": %.1f",
+                       t->power_dbfs + set.ref_offset_db, t->sync_quality, t->freq_error_hz);
+                if (t->echo_level_db > -99.0)
+                    printf(", \"echo_delay_us\": %.2f, \"echo_level_db\": %.1f", t->echo_delay_us, t->echo_level_db);
+            }
+            printf("}\n");
+        } else if (t->found && t->pilots) {
+            printf("%8.2f  %7.1f  ", now, t->mer_db);
+            if (isfinite(needed))
+                printf("%+6.1f", t->mer_db - needed);
+            else
+                printf("%6s", "--");
+            printf("  %11.1f  %10.2f  %10.1f", t->power_dbfs + set.ref_offset_db, t->sync_quality, t->freq_error_hz);
+            if (t->echo_level_db > -99.0)
+                printf("   %+.2f us %.1f dB", t->echo_delay_us, t->echo_level_db);
+            printf("\n");
+        } else {
+            printf("%8.2f  no multiplex (guard correlation %.3f)\n", now, t->sync_quality);
+        }
+        fflush(stdout);
+    }
+    status = 0;
+
+out:
+    if (res) {
+        m2sdr_psd_free(&res->psd);
+        m2sdr_psd_free(&res->tone_psd);
+    }
+    free(res);
+    free(tps);
+    free(x);
+    return status;
 }
 
 static int run_report(struct an_source *src, const struct an_settings *set, bool json, const char *csv_path,
@@ -1381,14 +1536,6 @@ struct an_ui {
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
 };
-
-static double now_ms(void)
-{
-    struct timespec ts;
-
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return 1e3 * (double)ts.tv_sec + 1e-6 * (double)ts.tv_nsec;
-}
 
 /* Copy of a result, with its own spectrum. */
 static int result_copy(struct an_result *dst, const struct an_result *src)
@@ -2727,27 +2874,6 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
 /* DVB-T */
 /*-------*/
 
-/* C/N for quasi error free reception in a Gaussian channel (EN 300 744, annex A), by
- * constellation and code rate: what the MER must at least reach. NAN when not known. */
-static double dvbt_needed_db(const struct m2sdr_dvbt_result *t)
-{
-    static const double cn[3][5] = {
-        {  3.1,  4.9,  5.9,  6.9,  7.7 },
-        {  8.8, 11.1, 12.5, 13.5, 13.9 },
-        { 14.4, 16.5, 18.0, 19.3, 20.1 },
-    };
-    static const char *const rates[5] = { "1/2", "2/3", "3/4", "5/6", "7/8" };
-    int m, r;
-
-    if (!t->tps || t->tps_hierarchy)
-        return NAN;
-    m = t->tps_modulation == M2SDR_MOD_QPSK ? 0 : t->tps_modulation == M2SDR_MOD_16QAM ? 1 : 2;
-    for (r = 0; r < 5; r++)
-        if (strcmp(t->code_rate_hp, rates[r]) == 0)
-            return cn[m][r];
-    return NAN;
-}
-
 /* MER of each result, kept while the tuning stays the same: the trace to follow when moving an
  * antenna. A capture without the pilots counts as 0 dB. */
 static void dvbt_keep(struct an_ui *ui)
@@ -3608,6 +3734,9 @@ static void help(void)
            "      --dvbt             With --report: reception of a DVB-T multiplex tuned near its centre:\n"
            "                         mode, TPS, MER, channel and echoes. The sample rate is the one of\n"
            "                         the channel (default with --dvbt: 9.142857 MSPS, 8 MHz).\n"
+           "      --watch            With --report --dvbt, on a board: one line per capture until\n"
+           "                         Ctrl-C (MER, margin, level, offset, echo); with --json, one JSON\n"
+           "                         object per line.\n"
            "\n"
            "Phase noise options:\n"
            "      --phase-noise      With --report: phase noise of the strongest carrier.\n"
@@ -3687,6 +3816,7 @@ int main(int argc, char **argv)
         { "no-rf-init",      no_argument,       NULL, 42 },
         { "lte",             no_argument,       NULL, 43 },
         { "dvbt",            no_argument,       NULL, 44 },
+        { "watch",           no_argument,       NULL, 45 },
         { NULL, 0, NULL, 0 }
     };
     struct m2sdr_cli_device cli_dev;
@@ -3696,7 +3826,7 @@ int main(int argc, char **argv)
     static struct an_floor fl;
     static char floor_default[1024];
     bool floor_store = false;
-    bool report = false, json = false, freq_given = false, rate_given = false, nbits_given = false;
+    bool report = false, json = false, watch = false, freq_given = false, rate_given = false, nbits_given = false;
     double offset_s = 0.0;
     int capture_index = 0, view = 0;
     char err[256];
@@ -3972,6 +4102,7 @@ int main(int argc, char **argv)
         case 42: src.no_rf_init = true; break;
         case 43: set.lte_on = true; break;
         case 44: set.dvbt_on = true; break;
+        case 45: watch = true; break;
         case 34: src.tx_tone = true; break;
         case 35:
             if (m2sdr_cli_parse_int_range(optarg, 0, 89, &src.tx_att) != 0) {
@@ -3985,6 +4116,10 @@ int main(int argc, char **argv)
     }
     if (optind < argc) {
         m2sdr_cli_error("unexpected argument '%s'", argv[optind]);
+        return 1;
+    }
+    if (watch && (!report || !set.dvbt_on || file || csv_path || floor_store)) {
+        m2sdr_cli_error("--watch goes with --report and --dvbt, on a board");
         return 1;
     }
     if ((json || csv_path || floor_store) && !report) {
@@ -4089,7 +4224,9 @@ int main(int argc, char **argv)
     }
 
     (void)view;
-    if (report) {
+    if (watch) {
+        status = run_watch(&src, &set, json);
+    } else if (report) {
         status = run_report(&src, &set, json, csv_path, &fl, floor_store ? floor_path : NULL);
     } else {
 #ifdef M2SDR_ANALYZER_GUI

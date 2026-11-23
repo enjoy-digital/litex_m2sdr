@@ -961,7 +961,12 @@ tuning, and when the multiplex is lost.
 ```sh
 m2sdr_analyzer --freq 650e6 --view dvbt
 m2sdr_analyzer --freq 650e6 --report --dvbt
+m2sdr_analyzer --freq 650e6 --report --dvbt --watch
 ```
+
+Without a display, `--watch` prints one line per capture until Ctrl-C: MER, margin, level,
+guard interval correlation, carrier offset and strongest echo, from a board. With `--json`,
+each line is a JSON object.
 
 The sample rate is the elementary rate of the channel, 8/7 of its bandwidth: 9.142857 MSPS for
 8 MHz (the default with `--dvbt`), 8 MSPS for 7 MHz, 6.857143 MSPS for 6 MHz. The view has a
