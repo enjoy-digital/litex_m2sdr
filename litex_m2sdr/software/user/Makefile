@@ -147,7 +147,7 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_analysis_dab.o \
 	libm2sdr/m2sdr_analysis_dvbt2.o \
 	libm2sdr/m2sdr_analysis_fm.o \
-	libm2sdr/m2sdr_analysis_pulse.o \
+	libm2sdr/m2sdr_analysis_pulse.o libm2sdr/m2sdr_analysis_emc.o \
 	libm2sdr/m2sdr_hal_litepcie.o \
 	libm2sdr/m2sdr_hal_liteeth.o \
 	liblitepcie/litepcie_dma.o \

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * M2SDR signal analysis, monitoring: pulsed signals.
+ * M2SDR signal analysis, monitoring: pulsed signals and EMC pre-compliance.
  *
  * Like the functions of m2sdr_analysis.h: samples scaled to full scale 1.0, no state besides
  * the arguments.
@@ -103,6 +103,114 @@ struct m2sdr_pulse_config {
  * allocation failure. Without pulses, found = false. */
 int m2sdr_pulse_analyse(const float complex *x, size_t count, double sample_rate,
                         const struct m2sdr_pulse_config *cfg, struct m2sdr_pulse_result *res);
+
+/* EMC */
+/*-----*/
+
+#define M2SDR_EMC_MAX_CHANNELS   2048
+#define M2SDR_EMC_MAX_LIMIT      32
+
+/* Frequency bands of CISPR 16-1-1 and their measuring receivers. */
+enum m2sdr_emc_band {
+    M2SDR_EMC_BAND_AUTO = 0,    /* From centre_hz. */
+    M2SDR_EMC_BAND_A    = 1,    /* 9 to 150 kHz: 200 Hz, QP 45 ms / 500 ms / 160 ms. */
+    M2SDR_EMC_BAND_B    = 2,    /* 0.15 to 30 MHz: 9 kHz, QP 1 ms / 160 ms / 160 ms. */
+    M2SDR_EMC_BAND_CD   = 3,    /* 30 to 1000 MHz: 120 kHz, QP 1 ms / 550 ms / 100 ms. */
+};
+
+/* A point of a line in frequency: the line is linear in log frequency between its points, as
+ * CISPR limits are, and flat beyond its ends. Two points at one frequency make a step: the
+ * upper part applies above it. */
+struct m2sdr_emc_point {
+    double freq_hz;             /* Absolute. */
+    double level_db;
+};
+
+struct m2sdr_emc_config {
+    enum m2sdr_emc_band band;
+    double centre_hz;           /* Absolute frequency of the centre of the capture. */
+    /* Channels from start_hz to stop_hz (from the centre of the capture) every step_hz. All at 0:
+     * the whole capture but 1.5 RBW at each edge, every RBW / 2. */
+    double start_hz, stop_hz, step_hz;
+    /* The capture is one period of a stationary emission (false), as for a live view: the
+     * detectors are in their steady state; or one event (true): they start at zero and the
+     * signal is absent after the capture, as for an isolated pulse. */
+    bool   single;
+    /* Factor added to the dBFS of the detectors to give the unit of the limits (dBuV, dBuV/m):
+     * a constant, plus a line when nfactor > 0 (antenna factor, cable loss). */
+    double offset_db;
+    int    nfactor;
+    struct m2sdr_emc_point factor[M2SDR_EMC_MAX_LIMIT];
+    /* Limit lines, in the unit of the limits, of the quasi-peak (the peak is checked against it
+     * too, as a pre-scan) and of the average detector. 0 points: not checked. */
+    int    nqp_limit, nav_limit;
+    struct m2sdr_emc_point qp_limit[M2SDR_EMC_MAX_LIMIT];
+    struct m2sdr_emc_point av_limit[M2SDR_EMC_MAX_LIMIT];
+};
+
+/* EMC pre-compliance: the measuring receiver of CISPR 16-1-1 on a bank of channels.
+ *
+ * Each channel is the capture through a Gaussian filter of the 6 dB bandwidth of the band
+ * (applied in frequency on one FFT of the capture, then brought to baseband at a rate of at
+ * least 3 RBW), and its envelope through the three detectors:
+ * - peak: the highest envelope;
+ * - quasi-peak: a diode on the crests of the IF carrier, its charge and discharge time
+ *   constants those of the band (the charge one as CISPR defines it: 63 % of the final output
+ *   on a sine applied at once), then the critically damped meter, its reading the highest
+ *   deflection. It follows the pulse response curves of CISPR 16-1-1 in the three bands;
+ * - average (CISPR-AV): the linear envelope through the same meter, the highest deflection.
+ * The levels are in dBFS of the envelope: a CW of power P dBFS in the channel reads P on all
+ * three. Calibration, antenna and cable factors are the caller's (offset_db, factor).
+ *
+ * Not covered: band E (above 1 GHz), the selectivity mask beyond the 6 dB bandwidth, overload
+ * of the receiver, the APD and the RMS-average detector. The FFT takes the largest power of two
+ * of samples of the capture; in the steady state (single = false) it is taken as periodic, so
+ * an impulsive emission should repeat a whole number of times in it. A capture shorter than
+ * the time constants gives the steady state of a repeating capture, not a long measurement.
+ *
+ * Results per channel: frequency, the three levels and, with limits, the margins (limit minus
+ * level, negative fails). */
+struct m2sdr_emc_result {
+    enum m2sdr_emc_band band;
+    double rbw_hz;              /* 6 dB bandwidth. */
+    double impulse_bw_hz;       /* Of the filter: its integral over its peak. */
+    double charge_s, discharge_s, meter_s;   /* Quasi-peak. */
+    double av_meter_s;          /* Average. */
+    double capture_s;           /* Samples used. */
+    double env_rate_hz;         /* Sample rate of the envelopes. */
+    int    nchannels;
+    double freq_hz[M2SDR_EMC_MAX_CHANNELS];   /* Absolute. */
+    float  peak_dbfs[M2SDR_EMC_MAX_CHANNELS];
+    float  qp_dbfs[M2SDR_EMC_MAX_CHANNELS];
+    float  av_dbfs[M2SDR_EMC_MAX_CHANNELS];
+    /* With limits (margins in dB, 999 where there is no limit). */
+    bool   limits;
+    float  margin_peak_db[M2SDR_EMC_MAX_CHANNELS];   /* Against the quasi-peak limit. */
+    float  margin_qp_db[M2SDR_EMC_MAX_CHANNELS];
+    float  margin_av_db[M2SDR_EMC_MAX_CHANNELS];
+    bool   pass;                /* Quasi-peak and average within their limits. */
+    double worst_margin_db;     /* Lowest margin of the quasi-peak and the average... */
+    double worst_freq_hz;       /* ...its channel... */
+    int    worst_detector;      /* ...and its detector: 1 quasi-peak, 2 average. */
+    /* Strongest channel by its peak. */
+    double max_peak_dbfs, max_peak_freq_hz;
+};
+
+/* Returns 0, or -1 on a bad argument (sample rate, fewer than 4096 samples or not enough for 8
+ * bins of the FFT in the RBW, a rate under 3 RBW, a channel within 1.5 RBW of an edge, more
+ * than M2SDR_EMC_MAX_CHANNELS channels, a bad line) or an allocation failure. cfg may be NULL:
+ * band B, channels by default, no limits. Without a band, the one of centre_hz, B when it is 0.
+ * By default, channels every RBW / 2, or wider to keep within M2SDR_EMC_MAX_CHANNELS. */
+int m2sdr_emc_analyse(const float complex *x, size_t count, double sample_rate,
+                      const struct m2sdr_emc_config *cfg, struct m2sdr_emc_result *res);
+
+/* Level of a line at freq_hz, interpolated in log frequency; NAN with no points. */
+double m2sdr_emc_line_db(const struct m2sdr_emc_point *line, int n, double freq_hz);
+
+/* Time constants of a band (charge, discharge, quasi-peak meter, average meter) and its RBW;
+ * -1 on a bad band. */
+int m2sdr_emc_band_params(enum m2sdr_emc_band band, double *rbw_hz, double *charge_s, double *discharge_s,
+                          double *meter_s, double *av_meter_s);
 
 #ifdef __cplusplus
 }
