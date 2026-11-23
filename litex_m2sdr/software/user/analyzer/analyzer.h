@@ -53,6 +53,7 @@
 #include "m2sdr.h"
 #include "m2sdr_analysis.h"
 #include "m2sdr_analysis_dvbt2.h"
+#include "m2sdr_analysis_fm.h"
 
 #define AN_DEFAULT_FREQ_HZ     2400e6
 #define AN_DEFAULT_SAMPLE_RATE 7680000.0
@@ -82,6 +83,7 @@
 #define AN_WATCH_HEADER_EVERY   20            /* Lines of --watch between two headers of the columns. */
 #define AN_DVBT_RATE            (64e6 / 7.0)  /* Elementary rate of an 8 MHz DVB-T channel. */
 #define AN_DAB_SECONDS          0.2           /* Capture of a DAB analysis: a whole 96 ms frame wherever it starts. */
+#define AN_FM_SECONDS           1.0           /* Capture of an FM analysis: about 11 RDS groups. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 
@@ -112,6 +114,9 @@ struct an_settings {
     bool   lte_on;                 /* LTE downlink carrier. */
     bool   dvbt_on;                /* DVB-T multiplex. */
     bool   dab_on;                 /* DAB ensemble. */
+    bool   fm_on;                  /* FM broadcast station. */
+    double fm_tone_hz;             /* Its known test tone (stereo separation); 0: none. */
+    int    fm_deemph_us;           /* De-emphasis of its audio SNR: 0: 50 us, -1: none. */
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -194,6 +199,8 @@ struct an_result {
     bool   dvbt_valid;             /* Measured: the sample rate was one of DVB-T; dvbt.found says the rest. */
     struct m2sdr_dab_result dab;
     bool   dab_valid;              /* Measured: the sample rate was 2.048 MSPS; dab.found says the rest. */
+    struct m2sdr_fm_result fm;
+    bool   fm_valid;               /* Measured: the sample rate was 240 kSPS or more; fm.found says the rest. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
@@ -420,6 +427,7 @@ struct an_ui {
     struct an_trend dvbt, dab;
     /* Last capture whose TPS was read: the short ones between carry none. */
     struct m2sdr_dvbt_result *dvbt_tps;
+    struct an_fm_ui *fm;           /* FM: its view, see mode_fm.c. */
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
     /* DVB-T2: MER over the results of one tuning, and the last capture with a P1. */
