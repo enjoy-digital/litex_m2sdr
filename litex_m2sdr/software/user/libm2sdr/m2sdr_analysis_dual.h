@@ -117,6 +117,71 @@ static inline double m2sdr_coherence_freq(const struct m2sdr_coherence_result *r
 int m2sdr_coherence_analyse(const float complex *x1, const float complex *x2, size_t count, double sample_rate,
                             const struct m2sdr_coherence_config *cfg, struct m2sdr_coherence_result *res);
 
+/* Direction finding */
+/*-------------------*/
+
+#define M2SDR_DF_POINTS         181     /* Angles of the pseudo-spectra: -90 to 90 degrees, 1 degree apart. */
+#define M2SDR_DF_MAX_CANDIDATES 16
+
+/* Angle of arrival of the strongest signal (or of the one at freq_hz) on two antennas spaced
+ * spacing_m apart: RX1 and RX2.
+ *
+ * The angle is from broadside, positive towards RX2: a plane wave from there reaches RX2
+ * first, and RX2 leads RX1 by phi = 2 pi d sin(angle) / lambda. phi is the phase of the cross
+ * spectrum summed over the bins of the signal, less the phase of the receivers and their
+ * cables (cal_phase_deg, measured on a source at a known angle: m2sdr_df_calibration()).
+ * lambda is that of rf_freq_hz + freq: the bandwidth of the signal is taken as small against
+ * its frequency.
+ *
+ * Spaced more than lambda / 2, the antennas give several angles for one phase: they are all in
+ * candidate_deg, and angle_deg is the one nearest broadside. Two antennas on a line do not tell
+ * the front from the back either: the angle a and 180 - a give the same phase.
+ *
+ * The pseudo-spectra over the angle are those of the 2x2 covariance of the signal: beamscan
+ * a^H R a, and MUSIC 1 / |e^H a|^2 with e the eigenvector of the smaller eigenvalue. With two
+ * antennas, MUSIC finds one source, the angle of the phase above, more sharply drawn. Several
+ * signals at the same frequency mix into one angle. */
+struct m2sdr_df_config {
+    double spacing_m;           /* Between the phase centres of the antennas. */
+    double rf_freq_hz;          /* Of the centre of the capture. */
+    double freq_hz;             /* Signal, from the centre of the capture; 0: the strongest one. */
+    double bandwidth_hz;        /* Bins used around it; 0: the main lobe of its peak. */
+    double cal_phase_deg;       /* Phase of RX2 against RX1 of the receivers and cables, taken off. */
+    size_t fft_len;             /* Power of two, 64 to 65536; 0: 4096. */
+};
+
+struct m2sdr_df_result {
+    bool   found;               /* A signal stands above the noise, coherent on both channels. */
+    double freq_hz;             /* Used, from the centre of the capture. */
+    double level_db;            /* Its power on RX1, dBFS. */
+    double snr_db;              /* Over the noise in the same bins. */
+    double coherence;           /* Of the bins used, 0 to 1. */
+    double gain_db;             /* RX2 over RX1. */
+    double phase_raw_deg;       /* RX2 against RX1, as received. */
+    double phase_deg;           /* Less cal_phase_deg: the one of the geometry, -180 to 180. */
+    double phase_std_deg;       /* Its standard deviation, from the coherence. */
+    double wavelength_m;
+    double spacing_wl;          /* Spacing over the wavelength. */
+    bool   ambiguous;           /* Several candidates. */
+    int    candidates;
+    double candidate_deg[M2SDR_DF_MAX_CANDIDATES];   /* The lowest first. */
+    double angle_deg;           /* The candidate nearest broadside. */
+    double angle_std_deg;       /* From phase_std_deg. */
+    double music_peak_deg;      /* Highest point of the MUSIC pseudo-spectrum, interpolated. */
+    /* dB from their highest point, angle -90 + i degrees. */
+    float  beamscan_db[M2SDR_DF_POINTS];
+    float  music_db[M2SDR_DF_POINTS];
+};
+
+/* Returns 0, or -1 on a bad argument (spacing or frequency not positive, fewer than eight
+ * segments of samples) or an allocation failure. Without a signal, found = false. */
+int m2sdr_df_analyse(const float complex *x1, const float complex *x2, size_t count, double sample_rate,
+                     const struct m2sdr_df_config *cfg, struct m2sdr_df_result *res);
+
+/* cal_phase_deg that turns the result of a source at known_angle_deg into that angle: the
+ * measured phase less the one of the geometry, -180 to 180. Broadside (0) needs no spacing. */
+double m2sdr_df_calibration(const struct m2sdr_df_result *res, double known_angle_deg);
+
 #ifdef __cplusplus
 }
 #endif
