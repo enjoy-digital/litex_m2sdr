@@ -874,9 +874,10 @@ int m2sdr_wifi_analyse(const float complex *x, size_t count, double sample_rate,
     }
     last = count - AC_WIN - AC_LAG;
     for (n = 0; n < last; n++) {
-        const double m = cabs(cs) / (sqrt(p1 * p2) + 1e-30);
+        /* |C| / sqrt(P1 P2) over MIN_AC, without the roots. */
+        const double ac2 = creal(cs) * creal(cs) + cimag(cs) * cimag(cs);
 
-        if (m > MIN_AC) {
+        if (ac2 > MIN_AC * MIN_AC * p1 * p2) {
             if (run++ == 0)
                 run_start = n;
         } else {
@@ -945,8 +946,12 @@ int m2sdr_wifi_analyse(const float complex *x, size_t count, double sample_rate,
                                 hm += crealf(pc.h[k] * conjf(pc.h[k])) / M2SDR_WIFI_CARRIERS;
                             for (k = 0; k < M2SDR_WIFI_CARRIERS; k++) {
                                 res->channel_db[k]     = (float)(10.0 * log10(crealf(pc.h[k] * conjf(pc.h[k])) / (hm + 1e-30) + 1e-30));
-                                res->evm_carrier_db[k] = pc.car_n[k] ? (float)(10.0 * log10(pc.car_err[k] / pc.car_n[k] + 1e-30)) : 0.0f;
+                                res->evm_carrier_db[k] = pc.car_n[k] ? (float)(10.0 * log10(pc.car_err[k] / pc.car_n[k] + 1e-30)) : NAN;
                             }
+                            /* The pilots carry no data: the mean of their neighbours. */
+                            for (k = 0; k < M2SDR_WIFI_CARRIERS; k++)
+                                if (isnan(res->evm_carrier_db[k]))
+                                    res->evm_carrier_db[k] = 0.5f * (res->evm_carrier_db[k - 1] + res->evm_carrier_db[k + 1]);
                         }
                         /* Airtime: the union of the packets. */
                         {

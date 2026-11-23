@@ -287,7 +287,8 @@ struct m2sdr_wifi_result {
     int      nbss;
     struct m2sdr_wifi_bss bss[M2SDR_WIFI_MAX_BSS];
     /* The strongest packet with a right L-SIG (-1 without): its channel per carrier in dB from
-     * its mean, its EVM per carrier, and its equalised data points (L-SIG and data, or HT-SIG),
+     * its mean, its EVM per carrier (at the pilots, that of their neighbours), and its equalised
+     * data points (L-SIG and data, or HT-SIG),
      * of its modulation. */
     int      trace_packet;
     float    channel_db[M2SDR_WIFI_CARRIERS];
