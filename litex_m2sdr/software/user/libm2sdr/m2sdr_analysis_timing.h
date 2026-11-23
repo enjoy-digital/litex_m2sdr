@@ -82,7 +82,7 @@ struct m2sdr_carrier_result {
     double freq_mean_hz;       /* Mean frequency over the capture, from its end phases. */
     double freq_std_hz;        /* Cramer-Rao bound of freq_hz for the measured SNR. */
     double phase_rad;          /* At the timestamp, -pi to pi. */
-    double offset_ppb;         /* (freq_mean_hz - cfg offset_hz) / carrier_hz; 0 without carrier_hz. */
+    double offset_ppb;         /* (freq_hz - cfg offset_hz) / carrier_hz; 0 without carrier_hz. */
     double level_dbfs;         /* Of the carrier. */
     double snr_db;             /* Carrier over the noise of the whole capture bandwidth. */
     double cn0_dbhz;           /* Carrier over noise density. */

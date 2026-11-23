@@ -308,7 +308,7 @@ int m2sdr_carrier_estimate(const float complex *x, size_t count, double sample_r
         res->phase_rad = wrap_pi(2.0 * M_PI * fmod(coarse_hz * tc / sample_rate, 1.0) +
                                  icpt + slope * (tc - tmid));
     }
-    res->offset_ppb    = carrier > 0.0 ? (res->freq_mean_hz - (cfg ? cfg->offset_hz : 0.0)) / carrier * 1e9 : 0.0;
+    res->offset_ppb    = carrier > 0.0 ? (res->freq_hz - (cfg ? cfg->offset_hz : 0.0)) / carrier * 1e9 : 0.0;
     res->level_dbfs    = m2sdr_power_db(amp2);
     res->snr_db        = 10.0 * log10(eta);
     res->cn0_dbhz      = 10.0 * log10(eta * sample_rate);
