@@ -1014,6 +1014,82 @@ status:
     }
 }
 
+/* Tabs */
+/*------*/
+
+static const char *const category_names[AN_CAT_COUNT] = {
+    [AN_CAT_SPECTRUM]    = "Spectrum",
+    [AN_CAT_SIGNAL]      = "Signal",
+    [AN_CAT_CELLULAR]    = "Cellular",
+    [AN_CAT_BROADCAST]   = "Broadcast",
+    [AN_CAT_WIRELESS]    = "Wireless",
+    [AN_CAT_LAB]         = "Lab",
+    [AN_CAT_TWO_CHANNEL] = "Two channels",
+    [AN_CAT_TIMING]      = "Timing",
+    [AN_CAT_MONITORING]  = "Monitoring",
+};
+
+static bool category_has_views(enum an_category c)
+{
+    int m;
+
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->category == c)
+            return true;
+    }
+    return false;
+}
+
+/* A tab bar of the categories that have views and, in the one shown, a tab bar of its views.
+ * The view asked on the command line (*select, -1 once done) is selected first: its category,
+ * then itself when its tab bar shows. From then on, the mode of the view shown is measured and
+ * the others are not: some need their own captures. */
+static void draw_views(struct an_ui *ui, int *select, bool live, bool *changed)
+{
+    int shown = -1, c, m;
+
+    if (!igBeginTabBar("##categories", 0))
+        return;
+    for (c = 0; c < AN_CAT_COUNT; c++) {
+        const bool pick = *select >= 0 && an_modes[*select]->category == (enum an_category)c;
+        char id[32];
+
+        if (!category_has_views((enum an_category)c) ||
+            !igBeginTabItem(category_names[c], NULL, pick ? ImGuiTabItemFlags_SetSelected : 0))
+            continue;
+        snprintf(id, sizeof(id), "##views%d", c);
+        if (igBeginTabBar(id, 0)) {
+            for (m = 0; an_modes[m]; m++) {
+                if (an_modes[m]->category != (enum an_category)c)
+                    continue;
+                if (igBeginTabItem(an_modes[m]->title, NULL, *select == m ? ImGuiTabItemFlags_SetSelected : 0)) {
+                    shown = m;
+                    an_modes[m]->draw(ui, live, changed);
+                    igEndTabItem();
+                }
+            }
+            igEndTabBar();
+        }
+        igEndTabItem();
+    }
+    igEndTabBar();
+
+    if (*select >= 0 && shown != *select)
+        return;
+    *select = -1;
+    if (shown < 0)
+        return;
+    for (m = 0; an_modes[m]; m++) {
+        bool *on = an_mode_flag(an_modes[m], &ui->set);
+
+        if (on && *on != (shown == m)) {
+            *on      = shown == m;
+            *changed = true;
+        }
+    }
+    ui->tab = shown;
+}
+
 /* Window */
 /*--------*/
 
@@ -1150,34 +1226,7 @@ int run_gui(struct an_source *src, const struct an_settings *set, int first_view
             ImVec2 avail;
             igGetContentRegionAvail(&avail);
             if (igBeginChild_Str("##views", (ImVec2){ avail.x - 330.0f, 0.0f }, 0, 0)) {
-                if (igBeginTabBar("##tabs", 0)) {
-                    /* The view asked on the command line is selected once. */
-                    const int select = first_view;
-
-                    first_view = -1;
-                    int tab = ui.tab;
-
-                    for (m = 0; an_modes[m]; m++) {
-                        if (igBeginTabItem(an_modes[m]->title, NULL, select == m ? ImGuiTabItemFlags_SetSelected : 0)) {
-                            tab = m;
-                            an_modes[m]->draw(&ui, src->live && !src->no_rf_init, &changed);
-                            igEndTabItem();
-                        }
-                    }
-                    /* A mode is measured while its view is shown: some need their own
-                     * captures. */
-                    for (m = 0; select < 0 && an_modes[m]; m++) {
-                        bool *on = an_mode_flag(an_modes[m], &ui.set);
-
-                        if (on && *on != (tab == m)) {
-                            *on     = tab == m;
-                            changed = true;
-                        }
-                    }
-                    if (select < 0)
-                        ui.tab = tab;
-                    igEndTabBar();
-                }
+                draw_views(&ui, &first_view, src->live && !src->no_rf_init, &changed);
             }
             igEndChild();
         }
