@@ -550,7 +550,10 @@ static void test_gnss(void)
         CHECK("flatness below -10 dB", res->jamming.flatness_db < -10.0);
         /* The despread CW raises the noise of the correlations by about J / (N0 * 1.023 MHz *
          * its spectral line), but the 48 dB-Hz satellite stays well over the threshold. */
-        CHECK("PRN 3 still detected", res->found && res->prn[2].prn == 3 && res->prn[2].detected);
+        /* Its line notched out, the four satellites are found and nothing else: unremoved, the
+         * CW correlates with the lines of the C/A spectrum at whole kHz of Doppler. */
+        CHECK("line excised", res->excised == 1);
+        check_sats(res, sats, 4, fs);
     }
 
     CHECK("bad sample rate", m2sdr_gnss_analyse(x, max, 2.5e6, NULL, res) != 0);

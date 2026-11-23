@@ -206,7 +206,8 @@ struct m2sdr_gnss_jamming {
  * A detected PRN is then refined at the full rate: Doppler from the turn of its prompt
  * correlation from one millisecond to the next, code phase from early, prompt and late
  * correlations half a chip apart (a triangle), C/N0 from the prompt power over the noise of
- * the search.
+ * the search. The narrowband lines the jamming indicator finds are notched out of the
+ * samples first: a CW would otherwise correlate with the lines of the C/A spectrum.
  *
  * Sensitivity: a carrier between two Doppler bins loses 0.9 dB, a code half a sample from
  * the search grid 2.5 dB; 10 ms detect about 40 dB-Hz in that worst case, 20 ms 35 dB-Hz.
@@ -223,6 +224,7 @@ struct m2sdr_gnss_result {
     int    detected;
     int    ms;                     /* Integrated. */
     double threshold_db;           /* Detection threshold of metric_db. */
+    int    excised;                /* Narrowband lines of the jamming indicator notched out first. */
     int    nprn;                   /* Searched, by ascending PRN. */
     struct m2sdr_gnss_prn prn[M2SDR_GNSS_PRNS];
     /* The strongest PRN: its search at its Doppler, dB over the floor, one point per chip,
