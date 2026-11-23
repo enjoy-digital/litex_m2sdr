@@ -453,7 +453,7 @@ out:
 /* LTE 2x2 channel */
 /*-----------------*/
 
-#define CELL_FRAMES 3
+#define CELL_FRAMES 5           /* At most: the captures are shorter but the one of a file. */
 
 /* H[rx][port] at subcarrier sub (from the centre, 15 kHz apart): a flat part and an echo
  * delay_s later. */
@@ -852,8 +852,199 @@ out:
     free(res);
 }
 
-int main(void)
+/* Capture files */
+/*---------------*/
+
+/* Two channels as SC16 (12 bits) interleaved, RX1 first: what the board streams. */
+static int write_two(const char *path, const float complex *x1, const float complex *x2, size_t count)
 {
+    FILE *f = fopen(path, "wb");
+    size_t i;
+
+    if (!f)
+        return 1;
+    for (i = 0; i < count; i++) {
+        const short v[4] = { (short)lrintf(crealf(x1[i]) * 2047.0f), (short)lrintf(cimagf(x1[i]) * 2047.0f),
+                             (short)lrintf(crealf(x2[i]) * 2047.0f), (short)lrintf(cimagf(x2[i]) * 2047.0f) };
+        if (fwrite(v, sizeof(v), 1, f) != 1) {
+            fclose(f);
+            return 1;
+        }
+    }
+    return fclose(f) == 0 ? 0 : 1;
+}
+
+#define FILE_COUNT (1u << 19)
+
+/* Coherence: the wideband source of test_coherence(), 10 MSPS. */
+static int write_coherence(const char *path)
+{
+    float complex *x1 = calloc(FILE_COUNT, sizeof(*x1)), *x2 = calloc(FILE_COUNT, sizeof(*x2));
+    int rc = 1;
+
+    if (!x1 || !x2)
+        goto out;
+    add_noise(x1, FILE_COUNT, 0.01);
+    if (delay_copy(x1, x2, FILE_COUNT, -1.5, 37.0, 2.3, 0.0, 0.0) != 0)
+        goto out;
+    add_noise(x1, FILE_COUNT, 1e-4);
+    add_noise(x2, FILE_COUNT, 1e-4 * pow(10.0, -0.15));
+    rc = write_two(path, x1, x2, FILE_COUNT);
+out:
+    free(x1);
+    free(x2);
+    return rc;
+}
+
+/* Direction finding, 1 MSPS at 2.4 GHz: a tone from `angle` degrees, board phase 40 degrees. */
+static int write_df(const char *path, double angle)
+{
+    const double lambda = DF_C / (DF_RF + 150e3);
+    float complex *x1 = calloc(FILE_COUNT, sizeof(*x1)), *x2 = calloc(FILE_COUNT, sizeof(*x2));
+    int rc = 1;
+
+    if (!x1 || !x2)
+        goto out;
+    add_wave(x1, x2, FILE_COUNT, 150e3, 0.1, angle, lambda / 2, 40.0);
+    add_noise(x1, FILE_COUNT, 1e-4);
+    add_noise(x2, FILE_COUNT, 1e-4);
+    rc = write_two(path, x1, x2, FILE_COUNT);
+out:
+    free(x1);
+    free(x2);
+    return rc;
+}
+
+/* LTE 2x2: the flat channel of test_mimo(), 7.68 MSPS, five frames. */
+static int write_mimo(const char *path)
+{
+    static const struct mimo_cell cell = { 388, 25, 100, 2, 2, 812.0, 0.02, 3001, 0.02 };
+    const size_t max = (size_t)(0.05 * 7680000.0);
+    float complex *x[2] = { malloc(max * sizeof(float complex)), malloc(max * sizeof(float complex)) };
+    struct mimo_channel ch;
+    size_t count;
+    int rc = 1;
+
+    if (!x[0] || !x[1])
+        goto out;
+    memset(&ch, 0, sizeof(ch));
+    ch.h[0][0] = 1.0;
+    ch.h[0][1] = 0.4 * cexp(I * 1.1);
+    ch.h[1][0] = 0.3 * cexp(-I * 2.0);
+    ch.h[1][1] = 0.8 * cexp(I * 0.5);
+    count = make_cell(x, max, &cell, &ch);
+    rc    = write_two(path, x[0], x[1], count);
+out:
+    free(x[0]);
+    free(x[1]);
+    return rc;
+}
+
+/* Number after "name": in the object `section` of a JSON text. */
+static double json_number(const char *json, const char *section, const char *name)
+{
+    char key[64];
+    const char *p;
+
+    snprintf(key, sizeof(key), "\"%s\": {", section);
+    p = strstr(json, key);
+    if (!p)
+        return NAN;
+    p += strlen(key);
+    snprintf(key, sizeof(key), "\"%s\":", name);
+    p = strstr(p, key);
+    return p ? strtod(p + strlen(key), NULL) : NAN;
+}
+
+static int read_report(const char *path, char *json, size_t len)
+{
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f) {
+        printf("test_m2sdr_analysis_dual: cannot open %s\n", path);
+        return -1;
+    }
+    n = fread(json, 1, len - 1, f);
+    fclose(f);
+    json[n] = '\0';
+    return 0;
+}
+
+static int check_done(const char *what)
+{
+    if (failures) {
+        printf("test_m2sdr_analysis_dual: %d FAILED\n", failures);
+        return 1;
+    }
+    printf("test_m2sdr_analysis_dual: %s report checked\n", what);
+    return 0;
+}
+
+/* The tolerances are those of the tests above, with the 12 bits of the file added: their
+ * noise is 60 dB below a full-scale sample, far under the noise of the signals. */
+static int check_coherence(const char *path)
+{
+    static char json[65536];
+
+    if (read_report(path, json, sizeof(json)) != 0)
+        return 1;
+    printf("Coherence report of m2sdr_analyzer:\n");
+    CHECK("two channels, found", strstr(json, "\"two_channels\": true") && strstr(json, "\"found\": true"));
+    CHECK_NEAR("coherence", json_number(json, "coherence", "coherence"), 0.9803, 0.003);
+    CHECK_NEAR("gain (dB)", json_number(json, "coherence", "gain_db"), -1.5, 0.02);
+    CHECK_NEAR("phase (deg)", json_number(json, "coherence", "phase_deg"), 37.0, 0.05);
+    CHECK_NEAR("delay (ns)", json_number(json, "coherence", "delay_ns"), 230.0, 0.3);
+    return check_done("coherence");
+}
+
+static int check_df(const char *path, double cal, double angle)
+{
+    static char json[65536];
+
+    if (read_report(path, json, sizeof(json)) != 0)
+        return 1;
+    printf("Direction finding report of m2sdr_analyzer:\n");
+    CHECK("found", strstr(json, "\"found\": true") != NULL);
+    CHECK_NEAR("calibration (deg)", json_number(json, "df", "calibration_deg"), cal, 0.05);
+    CHECK_NEAR("angle (deg)", json_number(json, "df", "angle_deg"), angle, 0.05);
+    CHECK_NEAR("MUSIC peak (deg)", json_number(json, "df", "music_peak_deg"), angle, 0.05);
+    return check_done("direction finding");
+}
+
+static int check_mimo(const char *path)
+{
+    static char json[65536];
+
+    if (read_report(path, json, sizeof(json)) != 0)
+        return 1;
+    printf("LTE 2x2 report of m2sdr_analyzer:\n");
+    CHECK("found, two ports", strstr(json, "\"found\": true") && strstr(json, "\"mimo\": true"));
+    CHECK_NEAR("cell identity", json_number(json, "mimo", "cell_id"), 388, 0);
+    CHECK_NEAR("blocks", json_number(json, "mimo", "rb"), 25, 0);
+    /* 20 log10(s1 / s2) of the channel of the file. */
+    CHECK_NEAR("condition (dB)", json_number(json, "mimo", "condition_db"), 5.3854, 0.15);
+    CHECK_NEAR("rank", json_number(json, "mimo", "rank"), 2, 0);
+    return check_done("LTE 2x2");
+}
+
+int main(int argc, char **argv)
+{
+    if (argc == 3 && strcmp(argv[1], "--write-coherence") == 0)
+        return write_coherence(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-coherence") == 0)
+        return check_coherence(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--write-df") == 0)
+        return write_df(argv[2], 30.0);
+    if (argc == 3 && strcmp(argv[1], "--write-df-broadside") == 0)
+        return write_df(argv[2], 0.0);
+    /* A calibration of 40 degrees, given or stored, gives the angle of the file. */
+    if (argc == 3 && strcmp(argv[1], "--check-df") == 0)
+        return check_df(argv[2], 40.0, 30.0);
+    if (argc == 3 && strcmp(argv[1], "--write-mimo") == 0)
+        return write_mimo(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-mimo") == 0)
+        return check_mimo(argv[2]);
     test_coherence();
     test_df();
     test_mimo();
