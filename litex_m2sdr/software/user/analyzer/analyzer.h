@@ -371,6 +371,16 @@ void same_line_or_wrap(float spacing, float width);
 void view_full(struct an_ui *ui);
 void traces_reset(struct an_ui *ui);
 
+/* OFDM views: an_trend.c. */
+bool   trend_add(struct an_trend *tr, const struct an_settings *set, bool ok, double mer, const float *mer_bin,
+                 const float *channel_bin, int bins, const float *echo, int echo_bins);
+double trend_mer_shown(const struct an_trend *tr, double last);
+void   draw_trend_mer(const char *id, const struct an_trend *tr, bool ok, double last, double needed, const char *line,
+                      float width, float height);
+void   draw_trend_points(const char *id, ImVec2 size, const float complex *points, int n, enum m2sdr_modulation mod);
+void   draw_trend_traces(const char *id, const struct an_trend *tr, int bins, double half_hz, double echo_start_us,
+                         double echo_step_us, int echo_bins, double guard_us, double needed);
+
 #endif /* M2SDR_ANALYZER_GUI */
 
 #endif /* M2SDR_ANALYZER_H */

@@ -354,7 +354,7 @@ m2sdr_cal: $(LIBM2SDR_STATIC) m2sdr_cal.o
 M2SDR_ANALYZER_CORE_OBJS := m2sdr_analyzer.o analyzer/an_source.o analyzer/mode_pn.o analyzer/mode_demod.o analyzer/mode_lte.o
 ifeq ($(and $(filter 1,$(HAVE_SDL2)),$(filter 1,$(HAVE_CIMGUI))),1)
 M2SDR_ANALYZER_CFLAGS := -DM2SDR_ANALYZER_GUI -I. $(SDL2_CFLAGS)
-M2SDR_ANALYZER_OBJS   := $(SCAN_UI_DIR)/m2sdr_plot.o $(M2SDR_IMGUI_OBJS)
+M2SDR_ANALYZER_OBJS   := analyzer/an_trend.o $(SCAN_UI_DIR)/m2sdr_plot.o $(M2SDR_IMGUI_OBJS)
 M2SDR_ANALYZER_LIBS   := $(SDL2_LIBS) -lGL -ldl -lstdc++
 endif
 
