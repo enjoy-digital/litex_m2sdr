@@ -127,6 +127,11 @@ struct an_source {
     unsigned lost;                 /* Captures with samples lost, since the start. */
 };
 
+int  file_open(struct an_source *src, const char *path, int capture_index, char *err, size_t err_len);
+int  source_capture(struct an_source *src, const struct an_settings *set, float complex *x,
+                    size_t count, char *err, size_t err_len);
+void source_close(struct an_source *src);
+
 /* Analysis */
 /*----------*/
 

@@ -349,7 +349,9 @@ m2sdr_rf: $(LIBM2SDR_STATIC) m2sdr_rf.o
 m2sdr_cal: $(LIBM2SDR_STATIC) m2sdr_cal.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_cal.o $(M2SDR_LINK_LIBS)
 
-# m2sdr_analyzer always has its report mode; its window needs SDL2 and cimgui.
+# m2sdr_analyzer always has its report mode; its window needs SDL2 and cimgui. Its code is in
+# analyzer/, besides main and the command line.
+M2SDR_ANALYZER_CORE_OBJS := m2sdr_analyzer.o analyzer/an_source.o
 ifeq ($(and $(filter 1,$(HAVE_SDL2)),$(filter 1,$(HAVE_CIMGUI))),1)
 M2SDR_ANALYZER_CFLAGS := -DM2SDR_ANALYZER_GUI -I. $(SDL2_CFLAGS)
 M2SDR_ANALYZER_OBJS   := $(SCAN_UI_DIR)/m2sdr_plot.o $(M2SDR_IMGUI_OBJS)
@@ -359,11 +361,14 @@ endif
 m2sdr_analyzer.o: m2sdr_analyzer.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(M2SDR_ANALYZER_CFLAGS) -o $@ $<
 
+analyzer/%.o: analyzer/%.c $(BUILD_FLAGS_FILE)
+	$(CC) -c $(CFLAGS) $(M2SDR_ANALYZER_CFLAGS) -o $@ $<
+
 $(SCAN_UI_DIR)/m2sdr_plot.o: $(SCAN_UI_DIR)/m2sdr_plot.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) -I. -o $@ $<
 
-m2sdr_analyzer: $(LIBM2SDR_STATIC) m2sdr_analyzer.o $(M2SDR_ANALYZER_OBJS)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_analyzer.o $(M2SDR_ANALYZER_OBJS) $(M2SDR_LINK_LIBS) $(M2SDR_ANALYZER_LIBS) -pthread
+m2sdr_analyzer: $(LIBM2SDR_STATIC) $(M2SDR_ANALYZER_CORE_OBJS) $(M2SDR_ANALYZER_OBJS)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(M2SDR_ANALYZER_CORE_OBJS) $(M2SDR_ANALYZER_OBJS) $(M2SDR_LINK_LIBS) $(M2SDR_ANALYZER_LIBS) -pthread
 
 tests/test_m2sdr_analysis: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
@@ -428,6 +433,7 @@ clean:
 	rm -f ad9361/*.o ad9361/*.d ad9361/*~
 	rm -f $(THIRD_PARTY_DIR)/kissfft/*.o $(THIRD_PARTY_DIR)/kissfft/*.d
 	rm -f $(SCAN_UI_DIR)/*.o $(SCAN_UI_DIR)/*.d
+	rm -f analyzer/*.o analyzer/*.d
 	rm -f $(SCAN_CIMGUI_DIR)/*.o $(SCAN_CIMGUI_DIR)/*.d
 	rm -f $(SCAN_CIMGUI_DIR)/imgui/*.o $(SCAN_CIMGUI_DIR)/imgui/*.d
 	rm -f $(SCAN_CIMGUI_DIR)/imgui/backends/*.o $(SCAN_CIMGUI_DIR)/imgui/backends/*.d
@@ -447,6 +453,7 @@ $(BUILD_FLAGS_FILE): FORCE
 		rm -f ad9361/*.o ad9361/*.d; \
 		rm -f $(THIRD_PARTY_DIR)/kissfft/*.o $(THIRD_PARTY_DIR)/kissfft/*.d; \
 		rm -f $(SCAN_UI_DIR)/*.o $(SCAN_UI_DIR)/*.d; \
+		rm -f analyzer/*.o analyzer/*.d; \
 		rm -f $(SCAN_CIMGUI_DIR)/*.o $(SCAN_CIMGUI_DIR)/*.d; \
 		rm -f $(SCAN_CIMGUI_DIR)/imgui/*.o $(SCAN_CIMGUI_DIR)/imgui/*.d; \
 		rm -f $(SCAN_CIMGUI_DIR)/imgui/backends/*.o $(SCAN_CIMGUI_DIR)/imgui/backends/*.d; \
@@ -526,4 +533,4 @@ check:
 	cmake -S ../soapysdr -B ../soapysdr/build
 	cmake --build ../soapysdr/build
 
--include $(wildcard *.d tests/*.d libm2sdr/*.d libliteusb/*.d)
+-include $(wildcard *.d tests/*.d libm2sdr/*.d libliteusb/*.d analyzer/*.d)
