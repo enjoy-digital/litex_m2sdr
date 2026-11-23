@@ -11,6 +11,7 @@
 #include <complex.h>
 #include <errno.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -57,6 +58,192 @@ static void raw_to_complex(const void *raw, size_t count, int sample_bytes, int 
         for (i = 0; i < count; i++, p += stride)
             x[i] = (p[0] + I * p[1]) * scale;
     }
+}
+
+/* TX of a stimulus */
+
+/* A thread sends the period again and again; m2sdr_sync_tx() blocks on the DMA (or on the flow
+ * control of Ethernet), so it runs at the sample rate. The RX of the captures goes on beside it,
+ * from the worker. */
+struct an_tx {
+    pthread_t thread;
+    volatile int stop;
+    int16_t  *iq;              /* The period, 2T2R: both channels, I and Q, SC16 Q11. */
+    size_t    period;
+    uint64_t  hash;            /* Of the stimulus: a new one restarts the thread. */
+    int       att;
+    bool      configured;      /* TX stream set up. */
+    bool      running;
+    char      err[128];
+};
+
+static uint64_t stimulus_hash(const float complex *x, size_t period)
+{
+    const unsigned char *p = (const unsigned char *)x;
+    uint64_t h = 1469598103934665603ull ^ period;
+    size_t i;
+
+    for (i = 0; i < period * sizeof(*x); i++)
+        h = (h ^ p[i]) * 1099511628211ull;
+    return h;
+}
+
+static void *tx_main(void *arg)
+{
+    struct an_source *src = arg;
+    struct an_tx *tx = src->tx;
+    const unsigned per_buf = m2sdr_bytes_to_samples(M2SDR_FORMAT_SC16_Q11, M2SDR_BUFFER_BYTES);
+    const size_t pairs = 2 * tx->period;          /* I/Q pairs of a period, both channels. */
+    int16_t *chunk = malloc((size_t)per_buf * 2 * sizeof(*chunk));
+    size_t pos = 0;
+
+    if (!chunk) {
+        snprintf(tx->err, sizeof(tx->err), "out of memory");
+        return NULL;
+    }
+    while (!tx->stop) {
+        unsigned i;
+        int rc;
+
+        for (i = 0; i < per_buf; i++) {
+            chunk[2 * i]     = tx->iq[2 * pos];
+            chunk[2 * i + 1] = tx->iq[2 * pos + 1];
+            if (++pos == pairs)
+                pos = 0;
+        }
+        rc = m2sdr_sync_tx(src->dev, chunk, per_buf, NULL, 1000);
+        if (rc != M2SDR_ERR_OK && rc != M2SDR_ERR_TIMEOUT) {
+            snprintf(tx->err, sizeof(tx->err), "TX failed: %s", m2sdr_strerror(rc));
+            break;
+        }
+    }
+    free(chunk);
+    return NULL;
+}
+
+bool an_source_tx_running(const struct an_source *src)
+{
+    return src->tx && src->tx->running;
+}
+
+void an_source_tx_stop(struct an_source *src)
+{
+    struct an_tx *tx = src->tx;
+
+    if (!tx || !tx->running)
+        return;
+    tx->stop = 1;
+    pthread_join(tx->thread, NULL);
+    tx->running = false;
+    /* Nothing is left on the air: the attenuation at its highest, then the stream off. */
+    (void)m2sdr_set_tx_att(src->dev, 89);
+    (void)m2sdr_stream_deactivate(src->dev, M2SDR_TX);
+    tx->configured = false;
+}
+
+int an_source_tx_start(struct an_source *src, const float complex *x, size_t period, int att, char *err, size_t err_len)
+{
+    const unsigned per_buf = m2sdr_bytes_to_samples(M2SDR_FORMAT_SC16_Q11, M2SDR_BUFFER_BYTES);
+    const uint64_t hash = x ? stimulus_hash(x, period) : 0;
+    struct an_tx *tx;
+    size_t i;
+    int rc;
+
+    if (!src->live || !src->dev || !x || period < 2 || att < 0 || att > 89) {
+        snprintf(err, err_len, "no TX on this source");
+        return -1;
+    }
+    if (src->no_rf_init || src->tx_tone) {
+        snprintf(err, err_len, "the lab modes transmit: not with --no-rf-init or --tx-tone");
+        return -1;
+    }
+    if (!src->tx && !(src->tx = calloc(1, sizeof(*src->tx)))) {
+        snprintf(err, err_len, "out of memory");
+        return -1;
+    }
+    tx = src->tx;
+    if (tx->running && tx->hash == hash && tx->period == period) {
+        if (att != tx->att) {
+            rc = m2sdr_set_tx_att(src->dev, att);
+            if (rc != M2SDR_ERR_OK) {
+                snprintf(err, err_len, "TX attenuation refused: %s", m2sdr_strerror(rc));
+                return -1;
+            }
+            tx->att = att;
+            usleep(AN_SETTLE_US);
+        }
+        return 0;
+    }
+    an_source_tx_stop(src);
+
+    /* SC16 Q11, the same samples on TX1 and TX2: whichever the cable is on. */
+    free(tx->iq);
+    tx->iq = malloc(period * 4 * sizeof(*tx->iq));
+    if (!tx->iq) {
+        snprintf(err, err_len, "out of memory");
+        return -1;
+    }
+    for (i = 0; i < period; i++) {
+        const long re = lrintf(fminf(fmaxf(crealf(x[i]), -1.0f), 1.0f) * 2047.0f);
+        const long im = lrintf(fminf(fmaxf(cimagf(x[i]), -1.0f), 1.0f) * 2047.0f);
+        tx->iq[4 * i]     = tx->iq[4 * i + 2] = (int16_t)re;
+        tx->iq[4 * i + 1] = tx->iq[4 * i + 3] = (int16_t)im;
+    }
+    tx->period = period;
+    tx->hash   = hash;
+    tx->err[0] = '\0';
+
+    rc = m2sdr_set_tx_frequency(src->dev, (uint64_t)llround(src->applied.freq_hz));
+    if (rc == M2SDR_ERR_OK)
+        rc = m2sdr_set_tx_att(src->dev, att);
+    if (rc != M2SDR_ERR_OK) {
+        snprintf(err, err_len, "TX setup refused: %s", m2sdr_strerror(rc));
+        return -1;
+    }
+    tx->att = att;
+    if (!tx->configured) {
+        rc = m2sdr_sync_config(src->dev, M2SDR_TX, M2SDR_FORMAT_SC16_Q11, 0, per_buf, 0, 1000);
+        if (rc != M2SDR_ERR_OK) {
+            snprintf(err, err_len, "TX stream configuration failed: %s", m2sdr_strerror(rc));
+            return -1;
+        }
+        tx->configured = true;
+    }
+    tx->stop = 0;
+    if (pthread_create(&tx->thread, NULL, tx_main, src) != 0) {
+        snprintf(err, err_len, "no TX thread");
+        return -1;
+    }
+    tx->running = true;
+    /* The stimulus through the TX pipeline, and the RX filters settled on it. */
+    usleep(AN_SETTLE_US);
+    return 0;
+}
+
+/* The stimulus of the modes on (the first one that has one), started, changed or stopped. */
+static int live_tx_update(struct an_source *src, const struct an_settings *set, char *err, size_t err_len)
+{
+    int m;
+
+    for (m = 0; an_modes[m]; m++) {
+        const struct an_mode *mode = an_modes[m];
+        float complex *x;
+        size_t period = 0;
+        int rc;
+
+        if (!mode->stimulus || !an_mode_on(mode, set))
+            continue;
+        x = mode->stimulus(set, &period);
+        if (!x) {
+            snprintf(err, err_len, "%s: no stimulus for these settings", mode->title);
+            return -1;
+        }
+        rc = an_source_tx_start(src, x, period, set->lab.tx_att, err, err_len);
+        free(x);
+        return rc;
+    }
+    an_source_tx_stop(src);
+    return 0;
 }
 
 /* Board */
@@ -187,7 +374,7 @@ static int live_apply(struct an_source *src, const struct an_settings *set, char
     }
     if (set->freq_hz != now->freq_hz) {
         rc = m2sdr_set_rx_frequency(src->dev, (uint64_t)llround(set->freq_hz));
-        if (rc == M2SDR_ERR_OK && src->tx_tone)
+        if (rc == M2SDR_ERR_OK && (src->tx_tone || an_source_tx_running(src)))
             rc = m2sdr_set_tx_frequency(src->dev, (uint64_t)llround(set->freq_hz));
         if (rc != M2SDR_ERR_OK) {
             snprintf(err, err_len, "frequency %.0f refused: %s", set->freq_hz, m2sdr_strerror(rc));
@@ -227,6 +414,12 @@ static int live_capture(struct an_source *src, const struct an_settings *set, fl
 
     if (live_apply(src, set, err, err_len) != 0)
         return -1;
+    if (live_tx_update(src, set, err, err_len) != 0)
+        return -1;
+    if (src->tx && src->tx->running && src->tx->err[0]) {
+        snprintf(err, err_len, "%s", src->tx->err);
+        return -1;
+    }
     if (source_raw_reserve(src, bufs * per_buf * 2 * sizeof(int16_t)) != 0) {
         snprintf(err, err_len, "out of memory");
         return -1;
@@ -273,6 +466,44 @@ static int live_capture(struct an_source *src, const struct an_settings *set, fl
     if (x2)
         raw_to_complex(raw, count, 2, 12, 4, 1 - set->channel, x2);
     return 0;
+}
+
+/* The stimulus of the lab mode on, one period, to a file: SC16 Q11, the same samples on two
+ * channels, as m2sdr_play sends them; and what the tests feed their devices with. */
+int lab_stimulus_write(const struct an_settings *set, const char *path)
+{
+    int m;
+
+    for (m = 0; an_modes[m]; m++) {
+        const struct an_mode *mode = an_modes[m];
+        float complex *x;
+        size_t period = 0, i;
+        FILE *f;
+        int rc = 0;
+
+        if (!mode->stimulus || !an_mode_on(mode, set))
+            continue;
+        x = mode->stimulus(set, &period);
+        if (!x)
+            return -1;
+        f = fopen(path, "wb");
+        if (!f) {
+            free(x);
+            return -1;
+        }
+        for (i = 0; i < period && rc == 0; i++) {
+            const int16_t re = (int16_t)lrintf(fminf(fmaxf(crealf(x[i]), -1.0f), 1.0f) * 2047.0f);
+            const int16_t im = (int16_t)lrintf(fminf(fmaxf(cimagf(x[i]), -1.0f), 1.0f) * 2047.0f);
+            const int16_t v[4] = { re, im, re, im };
+            if (fwrite(v, sizeof(v), 1, f) != 1)
+                rc = -1;
+        }
+        free(x);
+        if (fclose(f) != 0)
+            rc = -1;
+        return rc;
+    }
+    return -1;
 }
 
 /* File */
@@ -447,6 +678,7 @@ int source_capture_two(struct an_source *src, const struct an_settings *set, flo
 void source_close(struct an_source *src)
 {
     if (src->dev) {
+        an_source_tx_stop(src);
         (void)m2sdr_stream_deactivate(src->dev, M2SDR_RX);
         /* The test tone is not left on the air. */
         if (src->tx_tone && src->configured)
@@ -455,5 +687,8 @@ void source_close(struct an_source *src)
     }
     if (src->file)
         fclose(src->file);
+    if (src->tx)
+        free(src->tx->iq);
+    free(src->tx);
     free(src->raw);
 }

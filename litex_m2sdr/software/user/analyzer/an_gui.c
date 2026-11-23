@@ -159,6 +159,8 @@ static void *worker_main(void *arg)
         pthread_mutex_unlock(&sh->lock);
         if (quit || !run) {
             job_finish(sh, &jobs[cur ^ 1]);
+            if (sh->src->live)
+                an_source_tx_stop(sh->src);      /* Nothing on the air while stopped. */
             if (quit)
                 break;
             usleep(20000);
