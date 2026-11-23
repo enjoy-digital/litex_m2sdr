@@ -238,10 +238,21 @@ static int live_capture(struct an_source *src, const struct an_settings *set, fl
         (void)m2sdr_sync_rx_flush(src->dev);
         lost = live_loss_count(src->dev);
         for (b = 0; b < bufs; b++) {
-            rc = m2sdr_sync_rx(src->dev, raw + b * per_buf * 2, per_buf, NULL, 2000);
+            struct m2sdr_metadata meta = { 0 };
+
+            rc = m2sdr_sync_rx(src->dev, raw + b * per_buf * 2, per_buf, b == 0 ? &meta : NULL, 2000);
             if (rc != M2SDR_ERR_OK) {
                 snprintf(err, err_len, "RX failed: %s", m2sdr_strerror(rc));
                 return -1;
+            }
+            /* Time of the capture: the timestamp of its first buffer, else the host clock at its
+             * arrival less its duration (two channels per sample period). */
+            if (b == 0 && (meta.flags & M2SDR_META_FLAG_HAS_TIME)) {
+                src->capture.t_s   = 1e-9 * (double)meta.timestamp;
+                src->capture.clock = AN_CLOCK_BOARD;
+            } else if (b == 0) {
+                src->capture.t_s   = 1e-3 * now_ms() - 0.5 * per_buf / set->sample_rate;
+                src->capture.clock = AN_CLOCK_HOST;
             }
         }
         if (live_loss_count(src->dev) == lost)
@@ -399,6 +410,8 @@ static int file_capture(struct an_source *src, const struct an_settings *set, fl
     }
     raw_to_complex(src->raw, count, src->sample_bytes, src->nbits, 2 * src->nchannels,
                    set->channel < src->nchannels ? set->channel : 0, x);
+    src->capture.t_s   = (double)src->position / set->sample_rate;
+    src->capture.clock = AN_CLOCK_SAMPLES;
     src->position += count;
     return 0;
 }

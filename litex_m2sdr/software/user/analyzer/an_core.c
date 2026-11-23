@@ -411,7 +411,8 @@ int run_report(struct an_source *src, const struct an_settings *set, bool json, 
         fprintf(stderr, "Capture failed: %s\n", err);
         goto out;
     }
-    res->lost = rc > 0;
+    res->lost    = rc > 0;
+    res->capture = src->capture;
     if (analyse(x, count, set, res) != 0) {
         fprintf(stderr, "Analysis failed\n");
         goto out;
@@ -524,6 +525,7 @@ int run_watch(struct an_source *src, const struct an_settings *base, bool json)
             fprintf(stderr, "Capture failed: %s\n", err);
             goto out;
         }
+        res->capture = src->capture;
         if (analyse(x, count, &set, res) != 0) {
             fprintf(stderr, "Analysis failed\n");
             goto out;

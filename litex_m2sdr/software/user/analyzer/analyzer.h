@@ -170,6 +170,19 @@ extern const char *const window_names[];  /* enum m2sdr_window. */
 /* Source */
 /*--------*/
 
+/* Time of the first sample of a capture, and what it is read from. */
+enum an_clock {
+    AN_CLOCK_NONE    = 0,
+    AN_CLOCK_SAMPLES = 1,          /* File: its sample count, exact; consecutive captures are contiguous. */
+    AN_CLOCK_BOARD   = 2,          /* Board: the timestamp of its DMA header. */
+    AN_CLOCK_HOST    = 3,          /* Board without timestamps: the host clock, within a millisecond or so. */
+};
+
+struct an_capture_time {
+    double t_s;
+    enum an_clock clock;
+};
+
 struct an_source {
     bool   live;
     char   name[1024];
@@ -201,6 +214,7 @@ struct an_source {
     void  *raw;
     size_t raw_bytes;
     unsigned lost;                 /* Captures with samples lost, since the start. */
+    struct an_capture_time capture;  /* Of the last capture. */
 };
 
 int  file_open(struct an_source *src, const char *path, int capture_index, char *err, size_t err_len);
@@ -260,6 +274,7 @@ struct an_result {
     bool   adsb_valid;             /* Measured: the sample rate was 2 MSPS or more. */
     struct m2sdr_lora_result lora;
     bool   lora_valid;             /* Measured: a LoRa bandwidth divides the sample rate by a power of two. */
+    struct an_capture_time capture;  /* Set from the source before the analysis. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */

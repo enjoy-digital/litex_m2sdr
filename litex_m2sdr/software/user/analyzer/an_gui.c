@@ -191,6 +191,7 @@ static void *worker_main(void *arg)
         t0 = now_ms();
         j->capture_rc = source_capture(sh->src, &set, j->x, j->count, j->err, sizeof(j->err));
         j->capture_ms = now_ms() - t0;
+        j->res->capture = sh->src->capture;
         /* The analysis of the capture before, then this one in the background. */
         job_finish(sh, &jobs[cur ^ 1]);
         if (j->capture_rc < 0) {
