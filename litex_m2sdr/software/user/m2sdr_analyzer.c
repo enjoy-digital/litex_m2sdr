@@ -68,7 +68,7 @@
 #define AN_LTE_SECONDS          0.045         /* Capture of an LTE analysis: a whole frame wherever it starts. */
 #define AN_DVBT_SECONDS         0.15          /* Capture of a DVB-T analysis: a TPS frame wherever it starts. */
 #define AN_DVBT_FAST_SECONDS    0.04          /* Once the TPS is read: the MER and the channel. */
-#define AN_DVBT_FULL_EVERY      8             /* Live, one capture in this many reads the TPS again. */
+#define AN_DVBT_FULL_EVERY      300           /* Live, one capture in this many (about 30 s) reads the TPS again. */
 #define AN_DVBT_RATE            (64e6 / 7.0)  /* Elementary rate of an 8 MHz DVB-T channel. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
@@ -99,7 +99,8 @@ struct an_settings {
     struct m2sdr_demod_config demod;
     bool   lte_on;                 /* LTE downlink carrier. */
     bool   dvbt_on;                /* DVB-T multiplex. */
-    /* Set by the worker for a live multiplex whose TPS it read: short captures. */
+    /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
+     * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
     struct m2sdr_dvbt_config dvbt_hint;
 };
@@ -676,7 +677,7 @@ static int analyse(const float complex *x, size_t count, const struct an_setting
         const size_t n = (size_t)(AN_DVBT_SECONDS * set->sample_rate);
 
         res->dvbt_valid = m2sdr_dvbt_analyse(x, count < n ? count : n, set->sample_rate,
-                                             set->dvbt_fast ? &set->dvbt_hint : NULL, &res->dvbt) == 0;
+                                             set->dvbt_hint.fft_len ? &set->dvbt_hint : NULL, &res->dvbt) == 0;
     }
     res->time_count = count < AN_TIME_POINTS ? count : AN_TIME_POINTS;
     memcpy(res->time, x, res->time_count * sizeof(*x));
@@ -1440,11 +1441,12 @@ static void *worker_main(void *arg)
             continue;
         }
 
+        /* A known multiplex: the TPS read again now and then, with its mode given. */
         set.dvbt_fast = false;
+        memset(&set.dvbt_hint, 0, sizeof(set.dvbt_hint));
         if (set.dvbt_on && dvbt_ok && sh->src->live && set.freq_hz == dvbt_known.freq_hz &&
-            set.sample_rate == dvbt_known.sample_rate && set.channel == dvbt_known.channel &&
-            ++dvbt_since % AN_DVBT_FULL_EVERY != 0) {
-            set.dvbt_fast = true;
+            set.sample_rate == dvbt_known.sample_rate && set.channel == dvbt_known.channel) {
+            set.dvbt_fast = ++dvbt_since % AN_DVBT_FULL_EVERY != 0;
             set.dvbt_hint = dvbt_known.dvbt_hint;
         }
         count = capture_samples(&set);
