@@ -90,6 +90,10 @@
 /* Monitoring. */
 #define AN_PULSE_SECONDS        0.05          /* Capture of a pulse analysis: 3 pulses of PRIs up to 16 ms. */
 #define AN_PULSE_ENV_POINTS     2048          /* Envelope of the capture kept for the view (peak per point). */
+#define AN_EMC_DEFAULT_LOG2     18            /* Samples of an EMC capture: 2^18, more when the RBW needs them. */
+#define AN_EMC_MIN_LOG2         12
+#define AN_EMC_MAX_LOG2         22
+#define AN_EMC_DEFAULT_CHANNELS 201           /* Default span: 100 RBW (C/D: 12 MHz), for a live speed. */
 
 /* Settings */
 /*----------*/
@@ -121,10 +125,14 @@ struct an_settings {
     bool   fm_on;                  /* FM broadcast station. */
     double fm_tone_hz;             /* Its known test tone (stereo separation); 0: none. */
     int    fm_deemph_us;           /* De-emphasis of its audio SNR: 0: 50 us, -1: none. */
-    /* Monitoring: pulses. */
+    /* Monitoring: pulses and EMC pre-compliance. */
     bool   pulse_on;               /* Pulsed signals. */
     double pulse_threshold_db;     /* Over the noise floor; 0: the default of libm2sdr. */
     double pulse_seconds;          /* Capture; 0: AN_PULSE_SECONDS. */
+    bool   emc_on;                 /* EMC pre-compliance. */
+    int    emc_log2;               /* Its capture: 2^emc_log2 samples; 0: the default. */
+    double emc_span_hz;            /* Channels over this span around the centre; 0: the default, < 0: all. */
+    struct m2sdr_emc_config emc;   /* Band, unit offset, factors and limit lines (centre and channels set per capture). */
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -213,6 +221,8 @@ struct an_result {
     bool   pulse_valid;            /* Measured; pulse.found says whether there were pulses. */
     float  pulse_env_db[AN_PULSE_ENV_POINTS];   /* Highest power per point of the capture, dBFS. */
     double pulse_env_s;            /* Time of the capture over them. */
+    struct m2sdr_emc_result emc;
+    bool   emc_valid;              /* Measured: the band fits the sample rate and the capture. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
