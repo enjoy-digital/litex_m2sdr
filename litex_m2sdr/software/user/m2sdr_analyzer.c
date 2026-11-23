@@ -69,7 +69,7 @@
 #define AN_LTE_SECONDS          0.045         /* Capture of an LTE analysis: a whole frame wherever it starts. */
 #define AN_DVBT_SECONDS         0.15          /* Capture of a DVB-T analysis: a TPS frame wherever it starts. */
 #define AN_DVBT_FAST_SECONDS    0.04          /* Once the TPS is read: the MER and the channel. */
-#define AN_DVBT_FULL_EVERY      300           /* Live, one capture in this many (about 30 s) reads the TPS again. */
+#define AN_DVBT_FULL_EVERY      300           /* Live, one capture in this many (about 15 s) reads the TPS again. */
 #define AN_WATCH_HEADER_EVERY   20            /* Lines of --watch between two headers of the columns. */
 #define AN_DVBT_RATE            (64e6 / 7.0)  /* Elementary rate of an 8 MHz DVB-T channel. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
@@ -1351,6 +1351,10 @@ static int run_watch(struct an_source *src, const struct an_settings *base, bool
         } else if (!t->found || !t->pilots) {
             ok = false;
         }
+        if (ok && t->found && t->pilots) {
+            known.offset_known   = true;
+            known.carrier_offset = t->carrier_offset;
+        }
         needed = dvbt_needed_db(tps);
         if (json) {
             printf("{\"time_s\": %.3f, \"found\": %s", now, t->found && t->pilots ? "true" : "false");
@@ -1482,7 +1486,9 @@ static const ImU32 lte_mod_colors[M2SDR_MOD_COUNT] = {
 #define LTE_SCALE_W        52.0f     /* Room of the scale, right of the grid. */
 #define LTE_NARROW_W       700.0f    /* Under this width of the view, the constellation goes under the grid. */
 #define AN_LTE_HOLD        10        /* Captures a frame stays shown without a cell, or its symbols without data. */
-#define AN_DVBT_HISTORY    120       /* Captures of the MER trace. */
+#define AN_DVBT_HISTORY    300       /* Captures of the MER trace: about 13 s. */
+#define AN_DVBT_MER_MEAN   10        /* Captures in the MER shown in figures: about 0.5 s. */
+#define AN_DVBT_TRACE_AVG  0.125f    /* Weight of a capture in the averaged traces: about 8 captures. */
 #define DVBT_UHF_BASE_HZ   306e6     /* European UHF channel n is centred at 306 + 8 n MHz (21 to 69). */
 #define DVBT_COL_MER       0xff40c0ffu
 #define DVBT_COL_CHANNEL   0xffffb040u
@@ -1551,6 +1557,9 @@ struct an_ui {
     int    dvbt_nmer;
     /* Last capture whose TPS was read: the short ones between carry none. */
     struct m2sdr_dvbt_result *dvbt_tps;
+    /* Traces averaged over the captures of the same tuning, and how many. */
+    float  dvbt_mer_bin[M2SDR_DVBT_BINS], dvbt_channel_bin[M2SDR_DVBT_BINS], dvbt_echo[M2SDR_DVBT_ECHO_BINS];
+    int    dvbt_navg;
     double dvbt_freq_hz, dvbt_rate;
     int    dvbt_channel;
     float  wf_floor_db, wf_ceil_db;
@@ -1577,33 +1586,127 @@ static int result_copy(struct an_result *dst, const struct an_result *src)
     return 0;
 }
 
+/* A capture and its analysis. The worker captures into one job while the other is analysed in
+ * its own thread: a result every max(capture, analysis) instead of their sum. */
+struct an_job {
+    pthread_t thread;
+    bool   busy;
+    float complex *x;
+    size_t x_count;                /* Room in x. */
+    size_t count;
+    struct an_settings set;
+    struct an_result *res;
+    int    capture_rc;             /* > 0: samples lost. */
+    char   err[256];
+    double capture_ms, analysis_ms;
+    int    rc;
+};
+
+/* DVB-T: the multiplex of the last TPS read, and the captures since. */
+struct an_dvbt_track {
+    struct an_settings known;
+    bool   ok;
+    unsigned since;
+};
+
+static void *job_main(void *arg)
+{
+    struct an_job *j = arg;
+    const double t = now_ms();
+
+    j->rc = analyse(j->x, j->count, &j->set, j->res);
+    j->res->lost   = j->capture_rc > 0;
+    j->analysis_ms = now_ms() - t;
+    return NULL;
+}
+
+/* The result of an analysed job to the UI, and the DVB-T state from it. */
+static void job_publish(struct an_shared *sh, struct an_job *j, struct an_dvbt_track *dv)
+{
+    if (j->rc != 0) {
+        pthread_mutex_lock(&sh->lock);
+        snprintf(sh->status, sizeof(sh->status), "analysis failed");
+        sh->run = sh->single = false;
+        pthread_mutex_unlock(&sh->lock);
+        return;
+    }
+    if (j->set.dvbt_on && j->res->dvbt_valid) {
+        const struct m2sdr_dvbt_result *t = &j->res->dvbt;
+
+        if (t->tps) {
+            dv->known = j->set;
+            dv->known.dvbt_hint.fft_len    = t->fft_len;
+            dv->known.dvbt_hint.guard      = t->guard;
+            dv->known.dvbt_hint.modulation = t->tps_modulation;
+            dv->ok    = true;
+            dv->since = 0;
+        } else if (!t->found || !t->pilots) {
+            dv->ok = false;
+        }
+        /* The offset follows every result of the same tuning. */
+        if (dv->ok && t->found && t->pilots && j->set.freq_hz == dv->known.freq_hz) {
+            dv->known.dvbt_hint.offset_known   = true;
+            dv->known.dvbt_hint.carrier_offset = t->carrier_offset;
+        }
+    }
+    pthread_mutex_lock(&sh->lock);
+    if (result_copy(&sh->res, j->res) == 0)
+        sh->seq++;
+    snprintf(sh->status, sizeof(sh->status), "%s", j->capture_rc > 0 ? j->err : "");
+    sh->capture_ms  = j->capture_ms;
+    sh->analysis_ms = j->analysis_ms;
+    pthread_mutex_unlock(&sh->lock);
+}
+
+/* Wait for the analysis of a job, if one runs, and publish it. */
+static void job_finish(struct an_shared *sh, struct an_job *j, struct an_dvbt_track *dv)
+{
+    if (!j->busy)
+        return;
+    pthread_join(j->thread, NULL);
+    j->busy = false;
+    job_publish(sh, j, dv);
+}
+
+static void job_free(struct an_job *j)
+{
+    if (j->res) {
+        m2sdr_psd_free(&j->res->psd);
+        m2sdr_psd_free(&j->res->tone_psd);
+    }
+    free(j->res);
+    free(j->x);
+}
+
 static void *worker_main(void *arg)
 {
     struct an_shared *sh = arg;
-    struct an_result *res = calloc(1, sizeof(*res));
-    float complex *x = NULL;
-    size_t x_count = 0;
-    /* DVB-T: the multiplex of the last TPS read, and the captures since. */
-    struct an_settings dvbt_known = { 0 };
-    bool dvbt_ok = false;
-    unsigned dvbt_since = 0;
+    struct an_job jobs[2];
+    struct an_dvbt_track dv;
+    double last = 0;
+    int cur = 0;
 
-    while (res) {
+    memset(jobs, 0, sizeof(jobs));
+    memset(&dv, 0, sizeof(dv));
+    jobs[0].res = calloc(1, sizeof(*jobs[0].res));
+    jobs[1].res = calloc(1, sizeof(*jobs[1].res));
+    while (jobs[0].res && jobs[1].res) {
+        struct an_job *j = &jobs[cur];
         struct an_settings set;
-        size_t count;
-        char err[256];
-        double t0, t1, t2;
+        double t0;
         bool run, quit;
-        int rc;
 
         pthread_mutex_lock(&sh->lock);
         set  = sh->set;
         run  = sh->run || sh->single;
         quit = sh->quit;
+        /* A single capture is taken once; its result arrives when it is analysed. */
+        sh->single = false;
         pthread_mutex_unlock(&sh->lock);
-        if (quit)
-            break;
-        if (!run) {
+        if (quit || !run) {
+            job_finish(sh, &jobs[cur ^ 1], &dv);
+            if (quit)
+                break;
             usleep(20000);
             continue;
         }
@@ -1611,70 +1714,57 @@ static void *worker_main(void *arg)
         /* A known multiplex: the TPS read again now and then, with its mode given. */
         set.dvbt_fast = false;
         memset(&set.dvbt_hint, 0, sizeof(set.dvbt_hint));
-        if (set.dvbt_on && dvbt_ok && sh->src->live && set.freq_hz == dvbt_known.freq_hz &&
-            set.sample_rate == dvbt_known.sample_rate && set.channel == dvbt_known.channel) {
-            set.dvbt_fast = ++dvbt_since % AN_DVBT_FULL_EVERY != 0;
-            set.dvbt_hint = dvbt_known.dvbt_hint;
+        if (set.dvbt_on && dv.ok && sh->src->live && set.freq_hz == dv.known.freq_hz &&
+            set.sample_rate == dv.known.sample_rate && set.channel == dv.known.channel) {
+            set.dvbt_fast = ++dv.since % AN_DVBT_FULL_EVERY != 0;
+            set.dvbt_hint = dv.known.dvbt_hint;
         }
-        count = capture_samples(&set);
-        if (count > x_count) {
-            float complex *grown = realloc(x, count * sizeof(*x));
+        j->set   = set;
+        j->count = capture_samples(&set);
+        if (j->count > j->x_count) {
+            float complex *grown = realloc(j->x, j->count * sizeof(*j->x));
+
             if (!grown) {
+                job_finish(sh, &jobs[cur ^ 1], &dv);
                 pthread_mutex_lock(&sh->lock);
-                snprintf(sh->status, sizeof(sh->status), "out of memory for %zu samples", count);
-                sh->run = sh->single = false;
+                snprintf(sh->status, sizeof(sh->status), "out of memory for %zu samples", j->count);
+                sh->run = false;
                 pthread_mutex_unlock(&sh->lock);
                 continue;
             }
-            x       = grown;
-            x_count = count;
-        }
-        t0 = now_ms();
-        rc = source_capture(sh->src, &set, x, count, err, sizeof(err));
-        t1 = now_ms();
-        if (rc < 0 || analyse(x, count, &set, res) != 0) {
-            pthread_mutex_lock(&sh->lock);
-            snprintf(sh->status, sizeof(sh->status), "%s", rc < 0 ? err : "analysis failed");
-            sh->run = sh->single = false;
-            pthread_mutex_unlock(&sh->lock);
-            continue;
-        }
-        res->lost = rc > 0;
-        t2 = now_ms();
-        if (set.dvbt_on && res->dvbt_valid) {
-            const struct m2sdr_dvbt_result *t = &res->dvbt;
-
-            if (t->tps) {
-                dvbt_known = set;
-                dvbt_known.dvbt_hint.fft_len    = t->fft_len;
-                dvbt_known.dvbt_hint.guard      = t->guard;
-                dvbt_known.dvbt_hint.modulation = t->tps_modulation;
-                dvbt_ok    = true;
-                dvbt_since = 0;
-            } else if (!t->found || !t->pilots) {
-                dvbt_ok = false;
-            }
+            j->x       = grown;
+            j->x_count = j->count;
         }
 
         /* A file is read faster than it can be looked at. */
-        if (t2 - t0 < AN_MIN_PERIOD_MS)
-            usleep((useconds_t)(1e3 * (AN_MIN_PERIOD_MS - (t2 - t0))));
+        if (now_ms() - last < AN_MIN_PERIOD_MS)
+            usleep((useconds_t)(1e3 * (AN_MIN_PERIOD_MS - (now_ms() - last))));
+        last = now_ms();
 
-        pthread_mutex_lock(&sh->lock);
-        if (result_copy(&sh->res, res) == 0)
-            sh->seq++;
-        snprintf(sh->status, sizeof(sh->status), "%s", rc > 0 ? err : "");
-        sh->capture_ms  = t1 - t0;
-        sh->analysis_ms = t2 - t1;
-        sh->single      = false;
-        pthread_mutex_unlock(&sh->lock);
+        t0 = now_ms();
+        j->capture_rc = source_capture(sh->src, &set, j->x, j->count, j->err, sizeof(j->err));
+        j->capture_ms = now_ms() - t0;
+        /* The analysis of the capture before, then this one in the background. */
+        job_finish(sh, &jobs[cur ^ 1], &dv);
+        if (j->capture_rc < 0) {
+            pthread_mutex_lock(&sh->lock);
+            snprintf(sh->status, sizeof(sh->status), "%s", j->err);
+            sh->run = false;
+            pthread_mutex_unlock(&sh->lock);
+            continue;
+        }
+        if (pthread_create(&j->thread, NULL, job_main, j) != 0) {
+            job_main(j);           /* No thread: analysed here, in turn. */
+            job_publish(sh, j, &dv);
+            continue;
+        }
+        j->busy = true;
+        cur ^= 1;
     }
-    if (res) {
-        m2sdr_psd_free(&res->psd);
-        m2sdr_psd_free(&res->tone_psd);
-    }
-    free(res);
-    free(x);
+    job_finish(sh, &jobs[0], &dv);
+    job_finish(sh, &jobs[1], &dv);
+    job_free(&jobs[0]);
+    job_free(&jobs[1]);
     return NULL;
 }
 
@@ -2907,8 +2997,23 @@ static void dvbt_keep(struct an_ui *ui)
         ui->dvbt_rate    = res->set.sample_rate;
         ui->dvbt_channel = res->set.channel;
         ui->dvbt_nmer    = 0;
+        ui->dvbt_navg    = 0;
         if (ui->dvbt_tps)
             ui->dvbt_tps->tps = false;
+    }
+    if (res->dvbt.found && res->dvbt.pilots) {
+        const struct m2sdr_dvbt_result *t = &res->dvbt;
+        /* The first ones weigh more, so the traces settle at once after a change. */
+        const float w = ui->dvbt_navg < 8 ? 1.0f / (float)(ui->dvbt_navg + 1) : AN_DVBT_TRACE_AVG;
+        int i;
+
+        for (i = 0; i < M2SDR_DVBT_BINS; i++) {
+            ui->dvbt_mer_bin[i]     += w * (t->mer_bin_db[i] - ui->dvbt_mer_bin[i]);
+            ui->dvbt_channel_bin[i] += w * (t->channel_bin_db[i] - ui->dvbt_channel_bin[i]);
+        }
+        for (i = 0; i < M2SDR_DVBT_ECHO_BINS; i++)
+            ui->dvbt_echo[i] += w * (t->echo_db[i] - ui->dvbt_echo[i]);
+        ui->dvbt_navg++;
     }
     if (res->dvbt.tps) {
         if (!ui->dvbt_tps)
@@ -2929,6 +3034,20 @@ static const struct m2sdr_dvbt_result *dvbt_tps_of(const struct an_ui *ui)
     const struct m2sdr_dvbt_result *t = &ui->res.dvbt;
 
     return t->tps || !ui->dvbt_tps || !ui->dvbt_tps->tps ? t : ui->dvbt_tps;
+}
+
+/* MER of the last captures, in dB: the figure shown, steadier than one short capture. */
+static double dvbt_mer_shown(const struct an_ui *ui)
+{
+    const int n = ui->dvbt_nmer < AN_DVBT_MER_MEAN ? ui->dvbt_nmer : AN_DVBT_MER_MEAN;
+    double sum = 0;
+    int i;
+
+    if (n == 0)
+        return ui->res.dvbt.mer_db;
+    for (i = ui->dvbt_nmer - n; i < ui->dvbt_nmer; i++)
+        sum += ui->dvbt_mer[i];
+    return sum / n;
 }
 
 static void dvbt_retune(struct an_ui *ui, double freq_hz, bool *changed)
@@ -3010,19 +3129,19 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
     y0 = igGetCursorPosY();
     igPushFont(NULL, 2.4f * igGetStyle()->FontSizeBase);
     if (t->found && t->pilots)
-        igTextColored(isfinite(needed) && t->mer_db < needed ? (ImVec4){ 1.0f, 0.45f, 0.35f, 1.0f } : (ImVec4){ 0.4f, 1.0f, 0.5f, 1.0f },
-                      "MER %.1f dB", t->mer_db);
+        igTextColored(isfinite(needed) && dvbt_mer_shown(ui) < needed ? (ImVec4){ 1.0f, 0.45f, 0.35f, 1.0f } :
+                      (ImVec4){ 0.4f, 1.0f, 0.5f, 1.0f }, "MER %.1f dB", dvbt_mer_shown(ui));
     else
         igTextColored((ImVec4){ 1.0f, 0.45f, 0.35f, 1.0f }, "MER --");
     igPopFont();
     if (isfinite(needed))
         igText("Needed for %s %s: %.1f dB (Gaussian channel), margin %+.1f dB", m2sdr_modulation_name(tp->tps_modulation),
-               tp->code_rate_hp, needed, t->found && t->pilots ? t->mer_db - needed : -needed);
+               tp->code_rate_hp, needed, t->found && t->pilots ? dvbt_mer_shown(ui) - needed : -needed);
     else
         igTextUnformatted(t->found && t->pilots ? "TPS not read: no reference for the MER needed." : " ", NULL);
     h = sq.y - (igGetCursorPosY() - y0);
     if (m2sdr_plot_begin(&plot, "##dvbtmer", (ImVec2){ left_w, h > 80.0f ? h : 80.0f },
-                         -(double)(AN_DVBT_HISTORY - 1), 0.0, M2SDR_PLOT_PLAIN, 0.0, 40.0, "MER (dB), last captures")) {
+                         -(double)(AN_DVBT_HISTORY - 1), 0.0, M2SDR_PLOT_PLAIN, 0.0, 40.0, "MER (dB), one point per capture (about 20 a second)")) {
         if (isfinite(needed))
             m2sdr_plot_hline(&plot, needed, DVBT_COL_NEEDED);
         if (ui->dvbt_nmer > 0)
@@ -3058,22 +3177,22 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
     /* Channel response and MER per group of carriers, across the multiplex. */
     igGetContentRegionAvail(&avail);
     half_hz = 0.5 * (t->carriers - 1) * res->set.sample_rate / t->fft_len;
-    legend_item(DVBT_COL_CHANNEL, "channel (dB from its mean)", avail.x);
-    legend_item(DVBT_COL_MER, "MER (dB)", avail.x);
+    legend_item(DVBT_COL_CHANNEL, "channel (dB from its mean), averaged", avail.x);
+    legend_item(DVBT_COL_MER, "MER (dB), averaged", avail.x);
     igNewLine();
     if (m2sdr_plot_begin(&plot, "##dvbtchan", (ImVec2){ 0.5f * avail.x - 4.0f, 0.0f }, -half_hz, half_hz, M2SDR_PLOT_FREQ,
                          -20.0, 40.0, "")) {
         m2sdr_plot_hline(&plot, 0.0, 0x40ffffffu);
         if (isfinite(needed))
             m2sdr_plot_hline(&plot, needed, DVBT_COL_NEEDED);
-        m2sdr_plot_trace(&plot, t->channel_bin_db, (size_t)t->bins, -half_hz, half_hz, DVBT_COL_CHANNEL);
-        m2sdr_plot_trace(&plot, t->mer_bin_db, (size_t)t->bins, -half_hz, half_hz, DVBT_COL_MER);
+        m2sdr_plot_trace(&plot, ui->dvbt_channel_bin, (size_t)t->bins, -half_hz, half_hz, DVBT_COL_CHANNEL);
+        m2sdr_plot_trace(&plot, ui->dvbt_mer_bin, (size_t)t->bins, -half_hz, half_hz, DVBT_COL_MER);
         if (plot.hovered) {
             int b = (int)((plot.mouse_x + half_hz) / (2.0 * half_hz) * t->bins);
 
             b = b < 0 ? 0 : b >= t->bins ? t->bins - 1 : b;
-            snprintf(text, sizeof(text), "%+.3f MHz: channel %+.1f dB, MER %.1f dB", plot.mouse_x / 1e6, t->channel_bin_db[b],
-                     t->mer_bin_db[b]);
+            snprintf(text, sizeof(text), "%+.3f MHz: channel %+.1f dB, MER %.1f dB", plot.mouse_x / 1e6, ui->dvbt_channel_bin[b],
+                     ui->dvbt_mer_bin[b]);
             m2sdr_plot_text(&plot, 8.0f, 4.0f, text, 0xffffffffu);
         }
         m2sdr_plot_end(&plot);
@@ -3085,15 +3204,15 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
         const double x0 = t->echo_start_us * 1e-6, x1 = (t->echo_start_us + M2SDR_DVBT_ECHO_BINS * t->echo_step_us) * 1e-6;
 
         if (m2sdr_plot_begin(&plot, "##dvbtecho", (ImVec2){ 0.0f, 0.0f }, x0, x1, M2SDR_PLOT_TIME, -40.0, 0.0,
-                             "Echoes (dB from the strongest path)")) {
+                             "Echoes (dB from the strongest path), averaged")) {
             m2sdr_plot_band(&plot, 0.0, t->guard_us * 1e-6 < x1 ? t->guard_us * 1e-6 : x1, 0x2040ff40u);
-            m2sdr_plot_trace(&plot, t->echo_db, M2SDR_DVBT_ECHO_BINS, x0, x1, DVBT_COL_MER);
+            m2sdr_plot_trace(&plot, ui->dvbt_echo, M2SDR_DVBT_ECHO_BINS, x0, x1, DVBT_COL_MER);
             if (plot.hovered) {
                 int b = (int)((plot.mouse_x - x0) / (x1 - x0) * M2SDR_DVBT_ECHO_BINS);
 
                 b = b < 0 ? 0 : b >= M2SDR_DVBT_ECHO_BINS ? M2SDR_DVBT_ECHO_BINS - 1 : b;
                 snprintf(text, sizeof(text), "%+.2f us (%.0f m): %.1f dB", 1e6 * plot.mouse_x, 299.792458 * 1e6 * plot.mouse_x,
-                         t->echo_db[b]);
+                         ui->dvbt_echo[b]);
                 m2sdr_plot_text(&plot, 8.0f, 4.0f, text, 0xffffffffu);
             }
             m2sdr_plot_end(&plot);
@@ -3129,9 +3248,9 @@ static void draw_dvbt_results(struct an_ui *ui)
             } else {
                 label_value("TPS", "not read");
             }
-            label_value("MER", "%.1f dB", t->mer_db);
+            label_value("MER", "%.1f dB (last %.1f)", dvbt_mer_shown(ui), t->mer_db);
             if (isfinite(needed))
-                label_value("Margin", "%+.1f dB", t->mer_db - needed);
+                label_value("Margin", "%+.1f dB", dvbt_mer_shown(ui) - needed);
             if (t->echo_level_db > -99.0)
                 label_value("Strongest echo", "%+.2f us, %.1f dB", t->echo_delay_us, t->echo_level_db);
             label_value("Symbols", "%d%s", t->symbols, t->tps ? "" : " (TPS of an earlier capture)");

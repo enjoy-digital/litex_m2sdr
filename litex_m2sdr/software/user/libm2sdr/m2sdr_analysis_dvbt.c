@@ -12,13 +12,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The samples and the products here are finite: complex products without the NaN and infinity
+ * handling of C99 (__mulsc3), a third of the time of an analysis. */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC optimize("cx-limited-range")
+#endif
+
 #include "m2sdr_analysis.h"
 #include "m2sdr_fft.h"
 
 #define MIN_SYNC_QUALITY   0.08    /* Correlation of the guard intervals of a multiplex; noise reads about 0.01. */
 #define MIN_PILOT_QUALITY  0.15    /* Coherence of the continual pilots; noise reads about 0.05. */
 #define MAX_SYMBOLS        160
-#define SYNC_SYMBOLS       40      /* 8k symbols of the longest guard the guard search looks at. */     /* Analysed in a capture: a TPS frame (68) and its sync word wherever it starts. */
+#define SYNC_SYMBOLS       40      /* 8k symbols of the longest guard the guard search looks at. */
+#define OFFSET_AROUND      3       /* Carriers searched on each side of a known offset. */     /* Analysed in a capture: a TPS frame (68) and its sync word wherever it starts. */
 #define SP_SPACING         12      /* Scattered pilots of a symbol. */
 #define SP_GRID            3       /* Scattered pilots of four symbols together. */
 #define ECHO_FFT           4096    /* Points of the impulse response, a power of two over 6817 / 3. */
@@ -79,7 +86,8 @@ static void pilot_prbs(uint8_t *w, int k)
 static double guard_search(const float complex *x, size_t count, int n, int g, size_t *t0, double *eps)
 {
     const int gl = n / g, l = n + gl;
-    double complex *fold, m = 0, best_m = 0;
+    float complex *fold;
+    double complex m = 0, best_m = 0;
     double pw = 0, best = -1;
     size_t nsym, s;
     int i, t, best_t = 0;
@@ -92,11 +100,14 @@ static double guard_search(const float complex *x, size_t count, int n, int g, s
         return -1;
     for (s = 0; s < nsym; s++) {
         const float complex *a = x + s * (size_t)l;
+        float p = 0;
 
         for (i = 0; i < l; i++) {
             fold[i] += a[i] * conjf(a[i + n]);
-            pw += 0.5 * (crealf(a[i] * conjf(a[i])) + crealf(a[i + n] * conjf(a[i + n])));
+            p += crealf(a[i]) * crealf(a[i]) + cimagf(a[i]) * cimagf(a[i]) +
+                 crealf(a[i + n]) * crealf(a[i + n]) + cimagf(a[i + n]) * cimagf(a[i + n]);
         }
+        pw += 0.5 * p;
     }
     for (i = 0; i < gl; i++)
         m += fold[i];
@@ -162,40 +173,54 @@ static int carrier_bin(const struct dvbt_dims *d, int c, int off)
 }
 
 /* Integer carrier offset: the continual pilots are the same from symbol to symbol. */
-static int pilot_offset(const float complex *y, int nsym, const struct dvbt_dims *d, const uint8_t *kind, double *quality)
+static int pilot_offset(const float complex *y, int nsym, const struct dvbt_dims *d, const uint8_t *kind,
+                        const struct m2sdr_dvbt_config *cfg, double *quality)
 {
     double complex *dsum = calloc((size_t)d->n, sizeof(*dsum));
     double *asum = calloc((size_t)d->n, sizeof(*asum));
+    int *cp = malloc((size_t)d->k * sizeof(*cp));
+    uint8_t *used = calloc((size_t)d->n, 1);
     const int max_off = (d->n - d->k) / 2 - 1;
+    const bool around = cfg && cfg->offset_known && abs(cfg->carrier_offset) <= max_off - OFFSET_AROUND;
+    const int lo = around ? cfg->carrier_offset - OFFSET_AROUND : -max_off;
+    const int hi = around ? cfg->carrier_offset + OFFSET_AROUND : max_off;
     double best = -1;
-    int s, b, c, off, ncp = 0, best_off = 0;
+    int s, b, c, i, off, ncp = 0, best_off = 0;
 
-    if (!dsum || !asum) {
+    if (!dsum || !asum || !cp || !used) {
         free(dsum);
         free(asum);
+        free(cp);
+        free(used);
         *quality = 0;
         return 0;
     }
+    for (c = 0; c < d->k; c++)
+        if (kind[c] == KIND_CP)
+            cp[ncp++] = c;
+    /* The bins the offsets tried put a continual pilot in: all of them, or a few around a known
+     * offset. */
+    for (off = lo; off <= hi; off++)
+        for (i = 0; i < ncp; i++)
+            used[carrier_bin(d, cp[i], off)] = 1;
     for (s = 1; s < nsym; s++) {
         const float complex *a = y + (size_t)s * (size_t)d->n, *p = a - d->n;
 
         for (b = 0; b < d->n; b++) {
-            const float complex v = a[b] * conjf(p[b]);
+            if (used[b]) {
+                const float complex v = a[b] * conjf(p[b]);
 
-            dsum[b] += v;
-            asum[b] += cabsf(v);
+                dsum[b] += v;
+                asum[b] += cabsf(v);
+            }
         }
     }
-    for (c = 0; c < d->k; c++)
-        ncp += kind[c] == KIND_CP;
-    for (off = -max_off; off <= max_off; off++) {
+    for (off = lo; off <= hi; off++) {
         double q = 0;
 
-        for (c = 0; c < d->k; c++) {
-            if (kind[c] == KIND_CP) {
-                b = carrier_bin(d, c, off);
-                q += asum[b] > 0 ? cabs(dsum[b]) / asum[b] : 0;
-            }
+        for (i = 0; i < ncp; i++) {
+            b = carrier_bin(d, cp[i], off);
+            q += asum[b] > 0 ? cabs(dsum[b]) / asum[b] : 0;
         }
         q /= ncp;
         if (q > best) {
@@ -205,6 +230,8 @@ static int pilot_offset(const float complex *y, int nsym, const struct dvbt_dims
     }
     free(dsum);
     free(asum);
+    free(cp);
+    free(used);
     *quality = best;
     return best_off;
 }
@@ -326,7 +353,9 @@ static float complex qam_slice(float complex z, int m, float scale)
     int i;
 
     for (i = 0; i < 2; i++) {
-        float q = 2.0f * floorf(0.5f * v[i]) + 1.0f;
+        /* Nearest odd level: floor without a call, for |v| < 64. */
+        const int f = (int)(0.5f * v[i] + 64.0f) - 64;
+        const float q = (float)(2 * f + 1);
 
         v[i] = q > m - 1 ? (float)(m - 1) : q < 1 - m ? (float)(1 - m) : q;
     }
@@ -431,8 +460,12 @@ int m2sdr_dvbt_analyse(const float complex *x, size_t count, double sample_rate,
         rc = 0;
         goto out;
     }
-    off = pilot_offset(y, nsym, &d, kind, &res->pilot_quality);
-    res->freq_error_hz = (off - best_eps) * d.df;
+    off = pilot_offset(y, nsym, &d, kind, cfg, &res->pilot_quality);
+    /* A known offset that no longer fits (a change of the tuning): the whole search. */
+    if (cfg && cfg->offset_known && res->pilot_quality < 2.0 * MIN_PILOT_QUALITY)
+        off = pilot_offset(y, nsym, &d, kind, NULL, &res->pilot_quality);
+    res->carrier_offset = off;
+    res->freq_error_hz  = (off - best_eps) * d.df;
     res->symbols = nsym;
     if (res->pilot_quality < MIN_PILOT_QUALITY) {
         rc = 0;

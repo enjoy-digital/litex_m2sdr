@@ -1108,7 +1108,7 @@ static void test_dvbt(void)
     /* 40 ms with what an earlier capture found: the MER without the TPS. */
     {
         const struct dvbt_signal sig = { 8192, 8, 2, 2, 30, 0.0, 22.0, 0.0, -99.0 };
-        const struct m2sdr_dvbt_config cfg = { 8192, 8, M2SDR_MOD_64QAM };
+        const struct m2sdr_dvbt_config cfg = { 8192, 8, M2SDR_MOD_64QAM, true, 0 };
         const size_t count = make_dvbt(x, max, fs, &sig);
 
         (void)count;
@@ -1116,6 +1116,28 @@ static void test_dvbt(void)
         CHECK("analyse", m2sdr_dvbt_analyse(x, (size_t)(0.04 * fs), fs, &cfg, res) == 0 && res->pilots);
         CHECK("64QAM", res->modulation == M2SDR_MOD_64QAM);
         CHECK_NEAR("MER (dB)", res->mer_db, 21.0, 1.5);
+    }
+    /* A known offset: searched around it only, the 1/6 MHz one found again. */
+    {
+        const struct dvbt_signal sig = { 8192, 8, 2, 2, 10, 166667.0, 25.0, 0.0, -99.0 };
+        const size_t count = make_dvbt(x, max, fs, &sig);
+
+        CHECK("analyse", m2sdr_dvbt_analyse(x, count, fs, NULL, res) == 0 && res->pilots);
+        {
+            const struct m2sdr_dvbt_config cfg = { 8192, 8, M2SDR_MOD_64QAM, true, res->carrier_offset };
+
+            printf(" 40 ms, offset known (%d carriers)\n", cfg.carrier_offset);
+            CHECK("analyse", m2sdr_dvbt_analyse(x, (size_t)(0.04 * fs), fs, &cfg, res) == 0 && res->pilots);
+            CHECK_NEAR("carrier offset (Hz)", res->freq_error_hz, sig.freq_hz, 20.0);
+            CHECK_NEAR("MER (dB)", res->mer_db, 24.0, 1.5);
+        }
+        {
+            const struct m2sdr_dvbt_config cfg = { 8192, 8, M2SDR_MOD_64QAM, true, 0 };
+
+            printf(" 40 ms, a wrong known offset\n");
+            CHECK("analyse", m2sdr_dvbt_analyse(x, (size_t)(0.04 * fs), fs, &cfg, res) == 0 && res->pilots);
+            CHECK_NEAR("carrier offset (Hz)", res->freq_error_hz, sig.freq_hz, 20.0);
+        }
     }
     memset(x, 0, max * sizeof(*x));
     add_noise(x, max, 0.01);
