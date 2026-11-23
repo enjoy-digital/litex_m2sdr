@@ -65,7 +65,8 @@ const struct an_mode an_mode_statistics = {
 #endif
 };
 
-/* Registry: the tabs, in their order. */
+/* Registry: the views and modes, in the order of the tabs (a mode: one line here, see
+ * analyzer/analyzer.h). */
 const struct an_mode *const an_modes[] = {
     &an_mode_spectrum,
     &an_mode_time,

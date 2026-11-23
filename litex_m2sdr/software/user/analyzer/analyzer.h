@@ -2,6 +2,27 @@
  *
  * M2SDR Signal Analyzer Utility: types shared by its files.
  *
+ * m2sdr_analyzer.c   main, command line, help and the registry of the views and modes.
+ * an_source.c        Samples from the RX of a board or from a capture file.
+ * an_core.c          Analysis of a capture, reports (text, JSON), --report and --watch.
+ * an_gui.c           Window: worker, traces, waterfall, controls, views of the spectrum, tabs.
+ * an_trend.c         What the OFDM views share: MER and traces over the results of a tuning.
+ * mode_*.c           One measurement mode each: analysis, report sections, view, figures.
+ *
+ * Adding a mode
+ * -------------
+ * 1. analyzer/mode_xxx.c: its hooks, static, and its entry `const struct an_mode an_mode_xxx`
+ *    (--view key, tab title, category, flag, result flag, report rank): see mode_dab.c.
+ * 2. Here: its flag (and its options) in struct an_settings, its result and result flag in
+ *    struct an_result, the state of its view in struct an_ui if it keeps one, and
+ *    `extern const struct an_mode an_mode_xxx`.
+ * 3. m2sdr_analyzer.c: &an_mode_xxx in an_modes[], in the order of the tabs; its option, that
+ *    sets its flag, and its help.
+ * 4. Makefile: analyzer/mode_xxx.o in M2SDR_ANALYZER_CORE_OBJS.
+ * The core then captures what it needs, analyses while it is on, prints its sections in the
+ * reports after the ones of the spectrum, and shows its tab in its category, the mode on while
+ * its view is shown.
+ *
  * This file is part of LiteX-M2SDR.
  *
  * Copyright (c) 2026 Enjoy-Digital <enjoy-digital.fr>
