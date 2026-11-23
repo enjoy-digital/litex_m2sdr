@@ -3,6 +3,7 @@
  * M2SDR signal analysis: cellular and professional radio downlinks.
  *
  * - 5G NR: synchronisation signal blocks (3GPP TS 38.211, 38.213, 38.215).
+ * - GSM: frequency correction and synchronisation bursts (3GPP TS 45.002, 45.003, 45.004).
  *
  * As in m2sdr_analysis.h, the functions take a block of samples scaled to full scale 1.0 and
  * keep no state besides their arguments.
@@ -109,6 +110,83 @@ int m2sdr_nr_analyse(const float complex *x, size_t count, double sample_rate, c
 void m2sdr_nr_pss(int n_id_2, float *d);
 void m2sdr_nr_sss(int n_id_1, int n_id_2, float *d);
 void m2sdr_nr_pbch_dmrs(int pci, int i_ssb_bar, float complex *r);
+
+/* GSM */
+/*-----*/
+
+#define M2SDR_GSM_SYMBOL_RATE   (1625000.0 / 6.0)
+#define M2SDR_GSM_MAX_SCH       16
+#define M2SDR_GSM_BURST_BITS    148
+#define M2SDR_GSM_MAX_POINTS    1024
+
+struct m2sdr_gsm_config {
+    double max_offset_hz;       /* Carrier searched within this of the centre; 0: 20 kHz. */
+};
+
+/* One synchronisation burst. */
+struct m2sdr_gsm_sch {
+    double start;               /* Sample of its bit 0 (the middle of its phase transition). */
+    double time_s;
+    bool   crc;                 /* Decoded, its parity right: the fields below are valid. */
+    int    bsic, ncc, bcc;
+    int    t1, t2, t3;          /* T3 from T3': 1, 11, 21, 31 or 41. */
+    int    fn;                  /* TDMA frame number of the burst. */
+    double power_db;            /* Mean power over the burst, dBFS. */
+    double freq_hz;             /* Carrier over the burst, from the centre of the capture. */
+    double phase_err_rms_deg;   /* Against the GMSK of its bits (decoded or decided). */
+    double phase_err_peak_deg;
+    double evm;                 /* Waveform error over the burst, against the same. */
+};
+
+/* A GSM downlink carrier with a BCCH (C0), tuned near its centre: the frequency correction
+ * bursts (FCCH) and the synchronisation bursts (SCH) that follow them one frame later.
+ *
+ * The sample rate is 0.5 to 8 MSPS (1.92 MSPS as m2sdr_cal). The capture is filtered to
+ * 170 kHz and resampled to 4 samples a bit. The FCCH is found as in m2sdr_cal_gsm_estimate():
+ * a tone 67.7 kHz above the carrier that lasts a burst, here from the square of the turn of
+ * the phase over a bit (random bits leave no mean of it), timed and measured over its 148
+ * bits against itself 6 bits earlier. The SCH, 1250 bits later, is timed on its 64 bits of
+ * training, demodulated
+ * coherently (the GMSK taken as its main Laurent pulse: one tap, no equaliser), decoded
+ * (convolutional code and parity) and modulated again: the phase error is that of the
+ * received burst against this ideal GMSK, after its frequency and its phase are taken off, as
+ * in TS 45.005 but through the receive filter. A capture of 55 ms holds an FCCH and its SCH
+ * wherever it starts.
+ *
+ * Not measured: the BCCH and the other channels are not decoded; with multipath (no
+ * equaliser) the SCH decodes worse and the phase error includes the channel. */
+struct m2sdr_gsm_result {
+    bool   found;               /* An SCH decoded with its parity right. */
+    bool   fcch;                /* Frequency correction bursts found. */
+    int    fcch_bursts;
+    double fcch_quality;        /* Coherence of the tone over the burst, 0 to 1. */
+    double freq_error_hz;       /* Carrier from the centre of the capture: the SCH, else the FCCH. */
+    double power_dbfs;          /* Of the capture. */
+    int    nsch;                /* SCH bursts demodulated. */
+    struct m2sdr_gsm_sch sch[M2SDR_GSM_MAX_SCH];
+    /* Of the first SCH decoded. */
+    int    bsic, ncc, bcc, fn;
+    /* Over the SCH bursts decoded, else demodulated. */
+    double burst_power_db;
+    double phase_err_rms_deg, phase_err_peak_deg;
+    double evm;
+    double snr_db;              /* The one the EVM gives. */
+    /* Phase error of each bit of the first burst of the figures, degrees. */
+    float  phase_err_deg[M2SDR_GSM_BURST_BITS];
+    /* Bits of the SCH bursts at their instants, derotated onto the real axis (+-1). */
+    int    npoints;
+    float complex points[M2SDR_GSM_MAX_POINTS];
+};
+
+/* Returns 0, or -1 on a bad argument (sample rate, less than two TDMA frames of samples) or an
+ * allocation failure. Without an FCCH, fcch = false. cfg may be NULL. */
+int m2sdr_gsm_analyse(const float complex *x, size_t count, double sample_rate, const struct m2sdr_gsm_config *cfg,
+                      struct m2sdr_gsm_result *res);
+
+/* SCH information (BSIC and the reduced frame number of fn) to the 78 coded bits of the burst,
+ * and the 148 bits of the burst: for the tests. */
+void m2sdr_gsm_sch_encode(int bsic, int fn, uint8_t *coded);
+void m2sdr_gsm_sch_burst(const uint8_t *coded, uint8_t *bits);
 
 #ifdef __cplusplus
 }
