@@ -179,6 +179,8 @@ struct an_floor {
     char   path[1024];
 };
 
+int  floor_save(struct an_floor *fl, const char *path, const struct an_result *res);
+
 /* Modes */
 /*-------*/
 
@@ -260,6 +262,11 @@ static inline bool an_mode_on(const struct an_mode *m, const struct an_settings 
 {
     return m->on != AN_NONE && *(const bool *)((const char *)set + m->on);
 }
+
+/* Reports */
+/*---------*/
+
+void print_json_number(const char *name, double value, bool last);
 
 /* GUI */
 /*-----*/
@@ -352,6 +359,11 @@ struct an_ui {
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
 };
+
+/* Widgets of the views. */
+void label_value(const char *label, const char *fmt, ...);
+bool input_scaled(const char *label, double *value, double scale, const char *fmt);
+void same_line_or_wrap(float spacing, float width);
 
 #endif /* M2SDR_ANALYZER_GUI */
 

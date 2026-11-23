@@ -351,7 +351,7 @@ m2sdr_cal: $(LIBM2SDR_STATIC) m2sdr_cal.o
 
 # m2sdr_analyzer always has its report mode; its window needs SDL2 and cimgui. Its code is in
 # analyzer/, besides main and the command line.
-M2SDR_ANALYZER_CORE_OBJS := m2sdr_analyzer.o analyzer/an_source.o
+M2SDR_ANALYZER_CORE_OBJS := m2sdr_analyzer.o analyzer/an_source.o analyzer/mode_pn.o
 ifeq ($(and $(filter 1,$(HAVE_SDL2)),$(filter 1,$(HAVE_CIMGUI))),1)
 M2SDR_ANALYZER_CFLAGS := -DM2SDR_ANALYZER_GUI -I. $(SDL2_CFLAGS)
 M2SDR_ANALYZER_OBJS   := $(SCAN_UI_DIR)/m2sdr_plot.o $(M2SDR_IMGUI_OBJS)
