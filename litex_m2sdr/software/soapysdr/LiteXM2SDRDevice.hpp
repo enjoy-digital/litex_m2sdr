@@ -584,6 +584,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         /* First estimate of a burst (just after its stamp, so on time): reference for the
          * next checks, which then only see the drift (the estimate has a fixed bias). */
         bool hw_check_ref_valid = false;
+        bool hw_catchup = false;          /* dropping samples until slightly early */
         long long hw_check_ref_ns = 0;
         long long hw_next_ns = 0;
         long long hw_burst_time_ns = 0;
