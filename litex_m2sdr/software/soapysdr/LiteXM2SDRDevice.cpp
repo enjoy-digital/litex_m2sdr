@@ -1240,7 +1240,8 @@ void SoapyLiteXM2SDR::channel_configure(const int direction, const size_t channe
         this->setFrequency(SOAPY_SDR_RX,  channel, "RF", _rx_stream.frequency);
         this->setBandwidth(SOAPY_SDR_RX,  channel, _rx_stream.bandwidth);
         this->setGainMode(SOAPY_SDR_RX,   channel, _rx_stream.gainMode[channel]);
-        if (!_rx_stream.gainMode[channel])
+        /* rx_agc_mode=mgc makes the automatic mode manual too: reapply the gain then as well. */
+        if (!_rx_stream.gainMode[channel] || _rx_agc_mode[channel] == M2SDR_RX_GAIN_MODE_MANUAL)
             this->setGain(SOAPY_SDR_RX, channel, _rx_stream.gain[channel]);
         this->setIQBalance(SOAPY_SDR_RX,  channel, _rx_stream.iqbalance[channel]);
     }
@@ -1513,12 +1514,15 @@ void SoapyLiteXM2SDR::setGain(
 #if USE_LITEETH
         LiteEthRfOpTimeout timeout("setGain(RX)");
 #endif
+        /* An explicit gain selects manual gain, also when the RFIC already is in manual mode
+         * (rx_agc_mode=mgc): channel_configure() reapplies the gain after an RFIC re-init
+         * (channel mode change in setupStream) only in manual mode. */
+        _rx_stream.gainMode[channel] = false;
         int rc = m2sdr_get_rx_gain_mode(_dev, channel, &gc_mode);
         if (rc == M2SDR_ERR_OK && gc_mode != M2SDR_RX_GAIN_MODE_MANUAL) {
             rc = m2sdr_set_rx_gain_mode(_dev, channel, M2SDR_RX_GAIN_MODE_MANUAL);
             if (rc != M2SDR_ERR_OK)
                 SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_mode failed: %s", m2sdr_strerror(rc));
-            _rx_stream.gainMode[channel] = false;
         }
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: %.3f dB Gain", channel, value);
         rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
@@ -1573,12 +1577,15 @@ void SoapyLiteXM2SDR::setGain(
 #if USE_LITEETH
         LiteEthRfOpTimeout timeout("setGain(RX)");
 #endif
+        /* An explicit gain selects manual gain, also when the RFIC already is in manual mode
+         * (rx_agc_mode=mgc): channel_configure() reapplies the gain after an RFIC re-init
+         * (channel mode change in setupStream) only in manual mode. */
+        _rx_stream.gainMode[channel] = false;
         int rc = m2sdr_get_rx_gain_mode(_dev, channel, &gc_mode);
         if (rc == M2SDR_ERR_OK && gc_mode != M2SDR_RX_GAIN_MODE_MANUAL) {
             rc = m2sdr_set_rx_gain_mode(_dev, channel, M2SDR_RX_GAIN_MODE_MANUAL);
             if (rc != M2SDR_ERR_OK)
                 SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_mode failed: %s", m2sdr_strerror(rc));
-            _rx_stream.gainMode[channel] = false;
         }
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: RF %.3f dB Gain", channel, value);
         rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
