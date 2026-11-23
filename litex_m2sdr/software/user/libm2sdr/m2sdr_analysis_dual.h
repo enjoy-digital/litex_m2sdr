@@ -182,6 +182,69 @@ int m2sdr_df_analyse(const float complex *x1, const float complex *x2, size_t co
  * measured phase less the one of the geometry, -180 to 180. Broadside (0) needs no spacing. */
 double m2sdr_df_calibration(const struct m2sdr_df_result *res, double known_angle_deg);
 
+/* LTE 2x2 channel */
+/*-----------------*/
+
+#define M2SDR_MIMO_MAX_RB M2SDR_LTE_MAX_ANALYSED_RB
+
+/* Channel matrix of an LTE downlink cell of two antenna ports (FDD, normal cyclic prefix),
+ * received on RX1 and RX2: H[rx][port], from the cell-specific reference signals of ports 0
+ * and 1 (TS 36.211 6.10.1).
+ *
+ * The cell, its frame and its carrier offset come from m2sdr_lte_analyse() on RX1 (on RX2 when
+ * RX1 has no cell); both channels then go through the same FFTs. Per resource block of the
+ * cell whole in the band analysed, H is the mean over the frame of the least-squares estimates
+ * at its pilots (four per port, per slot), each slot first turned onto a common phase: what is
+ * left of the carrier offset turns all of H alike. H is that of the block's centre, the scale
+ * that of a resource element (dBFS as RSRP); its phase is relative.
+ *
+ * From H: the singular values s1 >= s2, the condition number s1 / s2 in dB (20 log10, the
+ * eigenvalue ratio of H^H H in 10 log10), and the rank indicator that a receiver with ideal
+ * precoding would pick: two layers when log2(1 + r s1^2) + log2(1 + r s2^2) beats
+ * log2(1 + 2 r s1^2), r the signal to noise ratio of an element, each port sent at the power
+ * of its reference signals. It is an estimate, not the CQI/PMI/RI of a UE (TS 36.213 tables).
+ * The noise is that of the pilots, from how a block's estimate changes from slot to slot: a
+ * channel that moves within the frame reads as noise.
+ *
+ * Ports 2 and 3 of a cell of four are not looked at: H is that of ports 0 and 1. A cell of
+ * one port gives the first column only: mimo = false. */
+struct m2sdr_mimo_result {
+    bool   found;               /* A cell found and its reference signals read on both channels. */
+    bool   mimo;                /* Two ports or more: the 2x2 figures are valid. */
+    int    rx;                  /* Channel the cell was found on: 0 (RX1) or 1 (RX2). */
+    int    cell_id;
+    int    ports;               /* Of the MIB; 0 when it was not read (then from the pilots of port 1). */
+    int    n_rb;                /* Of the MIB, else the blocks analysed. */
+    double freq_error_hz;
+    size_t frame_offset;
+    /* Blocks of the cell whole in the band: rb of them, the first one block first_rb of the cell. */
+    int    rb, first_rb;
+    double snr_db;              /* Of a pilot: mean |H|^2 over the noise of an element. */
+    double path_db[2][2];       /* [rx][port]: mean |H|^2, dBFS. */
+    double sv_db[2];            /* Mean over the blocks of s1^2, s2^2, in dB. */
+    double cond_db;             /* Mean over the blocks. */
+    double cond_max_db;
+    int    rank;                /* 1 or 2: over the band, from the capacities summed. */
+    int    rank2_rb;            /* Blocks that pick two layers. */
+    double capacity[2];         /* Mean over the blocks, bit/s/Hz, with one and two layers. */
+    double correlation_rx;      /* |rho| between the rows of H (the two receivers), mean over the blocks. */
+    double correlation_tx;      /* Between its columns (the two ports). */
+    /* Per block, the lowest one first. */
+    float complex h[M2SDR_MIMO_MAX_RB][2][2];
+    float  path_rb_db[M2SDR_MIMO_MAX_RB][2][2];
+    float  sv_rb_db[M2SDR_MIMO_MAX_RB][2];
+    float  cond_rb_db[M2SDR_MIMO_MAX_RB];
+    uint8_t rank_rb[M2SDR_MIMO_MAX_RB];
+};
+
+/* Returns 0, or -1 on a bad argument (as m2sdr_lte_analyse()) or an allocation failure.
+ * Without a cell, found = false. */
+int m2sdr_mimo_analyse(const float complex *x1, const float complex *x2, size_t count, double sample_rate,
+                       struct m2sdr_mimo_result *res);
+
+/* Singular values of a 2x2 matrix, s[0] >= s[1]. */
+void m2sdr_svd2(const float complex h[2][2], double s[2]);
+
 #ifdef __cplusplus
 }
 #endif
