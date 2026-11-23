@@ -407,6 +407,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     double _rf_freq_offset_hz[2] = {0.0, 0.0}; /* [SOAPY_SDR_TX, SOAPY_SDR_RX] */
     /* tx_scale: digital gain applied to CF32 TX samples before the conversion (1.0 = none). */
     double _tx_cf32_scale = 1.0;
+    /* rf_bandwidth_scale: automatic RF bandwidth = sample rate x this scale (1.0 = the sample rate). */
+    double _auto_bw_scale = 1.0;
     /* tx_gating: TX of the RFIC on only around the samples to send (TDD), from the gateware
      * (M2SDR_FEATURE_TXNRX_AUTO), while the TX stream is active. Lead before a timed burst and
      * hold after the last non-zero sample, in ns. */

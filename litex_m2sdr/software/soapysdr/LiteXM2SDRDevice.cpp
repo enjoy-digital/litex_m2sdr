@@ -950,6 +950,11 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         SoapySDR::logf(SOAPY_SDR_INFO, "CF32 TX samples scaled by %.3f (%.1f dB)",
             _tx_cf32_scale, 20.0 * std::log10(_tx_cf32_scale));
     }
+    if (args.count("rf_bandwidth_scale") > 0) {
+        _auto_bw_scale = std::stod(args.at("rf_bandwidth_scale"));
+        if (!(_auto_bw_scale >= 0.5 && _auto_bw_scale <= 4.0))
+            throw std::runtime_error("rf_bandwidth_scale out of range [0.5, 4]");
+    }
     if (args.count("tx_gating") > 0)
         _tx_gating = (args.at("tx_gating") == "1" || args.at("tx_gating") == "true");
     if (args.count("tx_gating_lead_ns") > 0)
@@ -2035,7 +2040,7 @@ void SoapyLiteXM2SDR::setSampleRate(
         _sampleRateHwFirProfile == _ad9361_fir_profile) {
         setSampleMode();
         if (_autoBandwidth)
-            setBandwidthUnlocked(direction, auto_bandwidth_from_sample_rate(rate));
+            setBandwidthUnlocked(direction, auto_bandwidth_from_sample_rate(rate * _auto_bw_scale));
         if (direction == SOAPY_SDR_RX && _rx_stream.opened) {
             _rx_stream.time0_ns = this->getHardwareTime("");
             _rx_stream.time0_count = _rx_stream.user_count;
@@ -2160,7 +2165,7 @@ void SoapyLiteXM2SDR::setSampleRate(
 #endif
 
     if (_autoBandwidth && sample_rate_applied)
-        setBandwidthUnlocked(direction, auto_bandwidth_from_sample_rate(rate));
+        setBandwidthUnlocked(direction, auto_bandwidth_from_sample_rate(rate * _auto_bw_scale));
 
     /* Finally, update the sample mode (bit depth) based on the new configuration. */
     setSampleMode();
