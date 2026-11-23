@@ -189,6 +189,7 @@ M2SDR_IMGUI_OBJS := $(M2SDR_IMGUI_SRCS:.cpp=.o)
 
 all: $(PROGS)
 TEST_PROGS += tests/test_m2sdr_eth_flow
+TEST_PROGS += tests/test_m2sdr_analysis_dvbt2
 
 core-tools: $(CORE_BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp test-analyzer test-fm
@@ -202,6 +203,7 @@ test-libm2sdr: $(TEST_PROGS)
 	./tests/test_m2sdr_cal
 	./tests/test_m2sdr_fm
 	./tests/test_m2sdr_analysis
+	./tests/test_m2sdr_analysis_dvbt2
 
 # Report mode of m2sdr_analyzer on capture files of known content: the spectrum here, and one
 # target per mode in its analyzer/mode_xxx.mk, declared there with its own recipe as
@@ -370,6 +372,9 @@ m2sdr_analyzer: $(LIBM2SDR_STATIC) $(M2SDR_ANALYZER_CORE_OBJS) $(M2SDR_ANALYZER_
 
 tests/test_m2sdr_analysis: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+
+tests/test_m2sdr_analysis_dvbt2: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_dvbt2.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_dvbt2.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
 tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_cal.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
