@@ -787,12 +787,13 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | Modulation | Constellation, eye diagrams and error of each symbol of a PSK or QAM signal |
 | LTE | Cell, resource grid, data blocks and constellations of an LTE downlink carrier |
 | DVB-T | MER and its trace, constellation, channel, MER per carrier and echoes of a DVB-T multiplex |
+| DVB-T2 | Pilot and data MER and their trace, P1, mode and pilot pattern, constellation (rotated or not), channel and echoes of a DVB-T2 multiplex |
 | DAB | MER and its trace, SNR, constellation, channel, MER per carrier and echoes of a DAB/DAB+ ensemble |
 
 The tabs of the window group the views by category: Spectrum (Spectrum, Time, Statistics),
-Signal (Phase noise, Modulation), Cellular (LTE) and Broadcast (DVB-T, DAB). `--view` selects
-one of them by its name: `spectrum`, `time`, `statistics`, `phase-noise`, `modulation`, `lte`,
-`dvbt` or `dab`.
+Signal (Phase noise, Modulation), Cellular (LTE) and Broadcast (DVB-T, DVB-T2, DAB). `--view`
+selects one of them by its name: `spectrum`, `time`, `statistics`, `phase-noise`, `modulation`,
+`lte`, `dvbt`, `dvbt2` or `dab`.
 
 The figures are next to the views, and `--report` prints the same ones for one capture:
 
@@ -995,6 +996,43 @@ The MER needed is the C/N of EN 300 744 (annex A) for the constellation and code
 TPS in a Gaussian channel: 18.0 dB for 64QAM 3/4. A real receiver needs a few dB more. An
 echo inside the guard interval does no harm by itself, but the notches it leaves in the
 channel lower the MER of their carriers.
+
+#### DVB-T2 reception {#sw-analyzer-dvbt2}
+
+The DVB-T2 view, and `--dvbt2` with `--report` (and `--watch`), check the reception of a
+DVB-T2 multiplex (EN 302 755, SISO), 1k to 32k, normal or extended carriers, as a meter does,
+without its signalling: the S1/S2 fields of the P1 and the L1 signalling (code rate, PLPs,
+cell) are not decoded, and the view says so. The sample rates, the channel buttons and the
+centring on the multiplex are those of DVB-T. A capture is 250 ms, a whole T2 frame; once the
+mode and the pilot pattern are known, the next ones are 80 ms with them given, and a whole one
+comes back every 100 captures, after a change of the tuning, and when the multiplex is lost.
+
+```sh
+m2sdr_analyzer --freq 650e6 --view dvbt2
+m2sdr_analyzer --freq 650e6 --report --dvbt2
+m2sdr_analyzer --freq 650e6 --report --dvbt2 --watch
+```
+
+| Figure | From |
+|---------------------------|---------------------------------------------------------------------|
+| P1, T2 frame | C-A-B structure of the P1 (two copies of its main part shifted by one 1k carrier); the frame from one P1 to the next |
+| FFT size, guard interval | Correlation of the guard intervals, the best of 1k to 32k and 1/128 to 1/4 |
+| Normal or extended | Width of the spectrum |
+| Pilot pattern | Scattered pilots, which repeat every Dy symbols: PP1 to PP8 |
+| Carrier offset | Phase of the guard correlation, then the PRBS of the pilots for whole carriers |
+| Channel, echoes | Scattered pilots of the last Dy symbols; the echoes from its impulse response |
+| Pilot MER | Continual and edge pilots, found as the carriers that stay the same: their noise over the channel |
+| Constellation | Best fit of the data cells among QPSK to 256QAM, square or rotated |
+| MER | Equalised data cells against that constellation, when it is a square one |
+
+A rotated constellation (as used in the UK and France) carries the Q of a cell in another
+cell: it is not sliced without the deinterleaving that the L1 signalling describes. It is
+detected, gets no data MER, and the MER shown is then the pilot MER, which reads the same
+noise. A rotated 64QAM or 256QAM spreads its cells almost evenly, without a grid: it is
+recognised by the absence of one where the pilot MER says it should show, and its order is
+not known. The MER needed is not given: it depends on the code rate, which is in L1. The P1
+and the frame length need a P1 in the capture: they are held from the last capture that had
+one. MISO, FEF parts and several PLPs are not told apart.
 
 #### DAB reception {#sw-analyzer-dab}
 
