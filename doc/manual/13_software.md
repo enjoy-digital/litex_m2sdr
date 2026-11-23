@@ -786,6 +786,7 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | Modulation | Constellation, eye diagrams and error of each symbol of a PSK or QAM signal |
 | LTE | Cell, resource grid, data blocks and constellations of an LTE downlink carrier |
 | DVB-T | MER and its trace, constellation, channel, MER per carrier and echoes of a DVB-T multiplex |
+| DAB | MER and its trace, SNR, constellation, channel, MER per carrier and echoes of a DAB/DAB+ ensemble |
 
 The figures are next to the views, and `--report` prints the same ones for one capture:
 
@@ -988,6 +989,34 @@ The MER needed is the C/N of EN 300 744 (annex A) for the constellation and code
 TPS in a Gaussian channel: 18.0 dB for 64QAM 3/4. A real receiver needs a few dB more. An
 echo inside the guard interval does no harm by itself, but the notches it leaves in the
 channel lower the MER of their carriers.
+
+#### DAB reception {#sw-analyzer-dab}
+
+The DAB view, and `--dab` with `--report` (and `--watch`), check the reception of a DAB/DAB+
+ensemble (EN 300 401), transmission mode I, as a meter does: the FIC and the audio are not
+looked at.
+
+```sh
+m2sdr_analyzer --freq 223.936e6 --view dab
+m2sdr_analyzer --freq 223.936e6 --report --dab
+m2sdr_analyzer --freq 223.936e6 --report --dab --watch
+```
+
+The sample rate is 2.048 MSPS (the default with `--dab`) and a capture is 200 ms, a whole 96 ms
+frame wherever it starts. The view selects the band III block (5A to 13F) and centres the
+capture on the ensemble.
+
+| Figure | From |
+|---------------------------|---------------------------------------------------------------------|
+| Frame | Null symbol: the least power over its length, the power folded on the frame |
+| Timing, fractional offset | Correlation of the guard intervals of the symbols of each whole frame |
+| Carrier offset | Phase reference symbol against the one of the standard, carrier to carrier |
+| Channel, echoes | Phase reference symbol, then all 76 symbols of the frame once their points are decided |
+| MER | Data symbols (pi/4-DQPSK) equalised, their common phase removed, against the four points of their symbol |
+| SNR on the carriers | Channel power against what the null symbols leave on the carriers |
+
+The MER is below the SNR on the carriers by what the transmitter and the receiver add (phase
+noise, distortion): the two read alike on a clean signal.
 
 #### Phase noise {#sw-analyzer-pn}
 
