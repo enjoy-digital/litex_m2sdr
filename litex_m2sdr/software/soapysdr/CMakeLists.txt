@@ -151,3 +151,11 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         -Wno-unused-parameter
     )
 endif()
+
+########################################################################
+## Test of the sample conversions (no SoapySDR, no board): ctest
+########################################################################
+
+enable_testing()
+add_executable(test_sample_conv test_sample_conv.cpp)
+add_test(NAME sample_conv COMMAND test_sample_conv)
