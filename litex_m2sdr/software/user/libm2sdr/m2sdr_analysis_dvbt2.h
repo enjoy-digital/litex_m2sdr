@@ -54,11 +54,14 @@ extern "C" {
  * - Cells that are not data are not told apart besides the pilots: several PLPs of different
  *   constellations, dummy cells, the carriers of tone reservation all count in the data MER.
  * - FEF parts (S1) are not identified: a capture with them may read no multiplex.
+ * A DVB-T multiplex has the pilots of PP1 and the same PRBS: it is told by its own continual
+ * pilots (dvbt true, found false); the figures before the pilots (mode, guard) stay.
  *
  * A capture needs at least Dy + 2 symbols after or before a P1 (PP8: 18 symbols), and more for
  * the continual pilots (8): 150 ms suit every mode. */
 struct m2sdr_dvbt2_result {
-    bool   found;               /* Guard intervals found: an OFDM signal. */
+    bool   found;               /* Guard intervals found: an OFDM signal, and not one of DVB-T. */
+    bool   dvbt;                /* A DVB-T multiplex (its continual pilots, PP1): found is false. */
     int    fft_len;             /* 1024 to 32768. */
     bool   extended;            /* Extended carrier mode (8k, 16k, 32k). */
     int    carriers;

@@ -67,6 +67,16 @@ static const struct t2_pattern patterns[8] = {
     { 12,  4, 7.0f / 3.0f }, { 24,  2, 7.0f / 3.0f }, { 24, 4, 7.0f / 3.0f }, {  6, 16, 7.0f / 3.0f },
 };
 
+/* Continual pilots of DVB-T (EN 300 744) in 2k, repeated every 1704 carriers in 8k, as in
+ * m2sdr_analysis_dvbt.c. DVB-T has the scattered pilots of PP1 and the same PRBS: what tells a
+ * DVB-T multiplex from a T2 one of PP1 without a P1 is this set of continual pilots. */
+static const int dvbt_cp_2k[] = {
+       0,   48,   54,   87,  141,  156,  192,  201,  255,  279,  282,  333,  432,  450,  483,
+     525,  531,  618,  636,  714,  759,  765,  780,  804,  873,  888,  918,  939,  942,  969,
+     984, 1050, 1101, 1107, 1110, 1137, 1140, 1146, 1206, 1269, 1323, 1377, 1491, 1683, 1704,
+};
+#define DVBT_CP_SHARE       0.7     /* Of the DVB-T continual pilots found as such: a DVB-T multiplex. */
+
 static const enum m2sdr_modulation model_mod[4] = { M2SDR_MOD_QPSK, M2SDR_MOD_16QAM, M2SDR_MOD_64QAM, M2SDR_MOD_256QAM };
 /* Rotation of the rotated constellations, degrees: 256QAM is atan(1/16). */
 static const double model_angle[4] = { 29.0, 16.8, 8.6, 3.576334 };
@@ -1014,6 +1024,27 @@ int m2sdr_dvbt2_analyse(const float complex *x, size_t count, double sample_rate
                     q += noise[c] / (hpow[c] / nused);
                     nacc++;
                 }
+        }
+        /* DVB-T: 2k or 8k, PP1, and its continual pilots where the pilots stay the same. */
+        if ((d.n == 2048 || d.n == 8192) && !res->extended && res->pattern == 1) {
+            int ndv = 0, hit = 0, b;
+
+            for (b = 0; b < d.k; b += 1704)
+                for (i = 0; i < (int)(sizeof(dvbt_cp_2k) / sizeof(dvbt_cp_2k[0])); i++)
+                    if (b + dvbt_cp_2k[i] < d.k) {
+                        ndv++;
+                        hit += cp[b + dvbt_cp_2k[i]];
+                    }
+            if (hit >= DVBT_CP_SHARE * ndv) {
+                res->dvbt    = true;
+                res->found   = false;
+                res->pilots  = false;
+                res->pattern = 0;
+                res->pilot_mer_valid  = false;
+                res->continual_pilots = 0;
+                rc = 0;
+                goto out;
+            }
         }
         cp[0] = cp[d.k - 1] = 1;
         res->continual_pilots = nacc;
