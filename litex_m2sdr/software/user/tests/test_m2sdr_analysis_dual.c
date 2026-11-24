@@ -9,12 +9,8 @@
  *
  */
 
-#include <complex.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#define TEST_NAME "test_m2sdr_analysis_dual"
+#include "test_analysis_helpers.h"
 
 #include "../libm2sdr/m2sdr_analysis_dual.h"
 #include "../libm2sdr/m2sdr_fft.h"
@@ -22,53 +18,8 @@
 
 #define COUNT (1u << 18)
 
-static int failures;
-
-#define CHECK_NEAR(name, value, expected, tol) do { \
-    const double v_ = (value), e_ = (expected); \
-    const int ok_ = fabs(v_ - e_) <= (tol); \
-    printf("  %-34s %12.4f (expected %10.4f +-%g) %s\n", name, v_, e_, (double)(tol), ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
-#define CHECK(name, cond) do { \
-    const int ok_ = (cond); \
-    printf("  %-34s %s\n", name, ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
 /* Signals */
 /*---------*/
-
-static unsigned long long rng_state = 0x2545f4914f6cdd1dull;
-
-static double rng_uniform(void)
-{
-    rng_state ^= rng_state << 13;
-    rng_state ^= rng_state >> 7;
-    rng_state ^= rng_state << 17;
-    return ((double)(rng_state >> 11) + 0.5) / 9007199254740992.0;
-}
-
-/* Complex Gaussian noise of power `power`. */
-static void add_noise(float complex *x, size_t count, double power)
-{
-    size_t i;
-
-    for (i = 0; i < count; i++) {
-        const double r = sqrt(-power * log(rng_uniform()));
-        const double a = 2.0 * M_PI * rng_uniform();
-        x[i] += (float)(r * cos(a)) + I * (float)(r * sin(a));
-    }
-}
-
-static void add_tone(float complex *x, size_t count, double freq_hz, double fs, double amp, double phase)
-{
-    size_t i;
-
-    for (i = 0; i < count; i++)
-        x[i] += (float complex)(amp * cexp(I * (2.0 * M_PI * freq_hz * (double)i / fs + phase)));
-}
 
 /* y = gain * exp(j phase) * (x delayed by tau samples, plus echo * x delayed by tau + echo_tau),
  * circularly, by the FFT of the whole block (count a power of two). */
@@ -103,14 +54,6 @@ static int delay_copy(const float complex *x, float complex *y, size_t count, do
 static double norm2(double complex z)
 {
     return creal(z) * creal(z) + cimag(z) * cimag(z);
-}
-
-static double now_ms(void)
-{
-    struct timespec ts;
-
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec * 1e3 + ts.tv_nsec * 1e-6;
 }
 
 /* Coherence */
@@ -855,25 +798,6 @@ out:
 /* Capture files */
 /*---------------*/
 
-/* Two channels as SC16 (12 bits) interleaved, RX1 first: what the board streams. */
-static int write_two(const char *path, const float complex *x1, const float complex *x2, size_t count)
-{
-    FILE *f = fopen(path, "wb");
-    size_t i;
-
-    if (!f)
-        return 1;
-    for (i = 0; i < count; i++) {
-        const short v[4] = { (short)lrintf(crealf(x1[i]) * 2047.0f), (short)lrintf(cimagf(x1[i]) * 2047.0f),
-                             (short)lrintf(crealf(x2[i]) * 2047.0f), (short)lrintf(cimagf(x2[i]) * 2047.0f) };
-        if (fwrite(v, sizeof(v), 1, f) != 1) {
-            fclose(f);
-            return 1;
-        }
-    }
-    return fclose(f) == 0 ? 0 : 1;
-}
-
 #define FILE_COUNT (1u << 19)
 
 /* Coherence: the wideband source of test_coherence(), 10 MSPS. */
@@ -889,7 +813,7 @@ static int write_coherence(const char *path)
         goto out;
     add_noise(x1, FILE_COUNT, 1e-4);
     add_noise(x2, FILE_COUNT, 1e-4 * pow(10.0, -0.15));
-    rc = write_two(path, x1, x2, FILE_COUNT);
+    rc = write_sc16(path, x1, x2, FILE_COUNT);
 out:
     free(x1);
     free(x2);
@@ -908,7 +832,7 @@ static int write_df(const char *path, double angle)
     add_wave(x1, x2, FILE_COUNT, 150e3, 0.1, angle, lambda / 2, 40.0);
     add_noise(x1, FILE_COUNT, 1e-4);
     add_noise(x2, FILE_COUNT, 1e-4);
-    rc = write_two(path, x1, x2, FILE_COUNT);
+    rc = write_sc16(path, x1, x2, FILE_COUNT);
 out:
     free(x1);
     free(x2);
@@ -933,61 +857,20 @@ static int write_mimo(const char *path)
     ch.h[1][0] = 0.3 * cexp(-I * 2.0);
     ch.h[1][1] = 0.8 * cexp(I * 0.5);
     count = make_cell(x, max, &cell, &ch);
-    rc    = write_two(path, x[0], x[1], count);
+    rc    = write_sc16(path, x[0], x[1], count);
 out:
     free(x[0]);
     free(x[1]);
     return rc;
 }
 
-/* Number after "name": in the object `section` of a JSON text. */
-static double json_number(const char *json, const char *section, const char *name)
-{
-    char key[64];
-    const char *p;
-
-    snprintf(key, sizeof(key), "\"%s\": {", section);
-    p = strstr(json, key);
-    if (!p)
-        return NAN;
-    p += strlen(key);
-    snprintf(key, sizeof(key), "\"%s\":", name);
-    p = strstr(p, key);
-    return p ? strtod(p + strlen(key), NULL) : NAN;
-}
-
-static int read_report(const char *path, char *json, size_t len)
-{
-    FILE *f = fopen(path, "rb");
-    size_t n;
-
-    if (!f) {
-        printf("test_m2sdr_analysis_dual: cannot open %s\n", path);
-        return -1;
-    }
-    n = fread(json, 1, len - 1, f);
-    fclose(f);
-    json[n] = '\0';
-    return 0;
-}
-
-static int check_done(const char *what)
-{
-    if (failures) {
-        printf("test_m2sdr_analysis_dual: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis_dual: %s report checked\n", what);
-    return 0;
-}
-
 /* The tolerances are those of the tests above, with the 12 bits of the file added: their
  * noise is 60 dB below a full-scale sample, far under the noise of the signals. */
 static int check_coherence(const char *path)
 {
-    static char json[65536];
+    const char *json = read_report(path);
 
-    if (read_report(path, json, sizeof(json)) != 0)
+    if (!json)
         return 1;
     printf("Coherence report of m2sdr_analyzer:\n");
     CHECK("two channels, found", strstr(json, "\"two_channels\": true") && strstr(json, "\"found\": true"));
@@ -995,28 +878,28 @@ static int check_coherence(const char *path)
     CHECK_NEAR("gain (dB)", json_number(json, "coherence", "gain_db"), -1.5, 0.02);
     CHECK_NEAR("phase (deg)", json_number(json, "coherence", "phase_deg"), 37.0, 0.05);
     CHECK_NEAR("delay (ns)", json_number(json, "coherence", "delay_ns"), 230.0, 0.3);
-    return check_done("coherence");
+    return report_done("coherence");
 }
 
 static int check_df(const char *path, double cal, double angle)
 {
-    static char json[65536];
+    const char *json = read_report(path);
 
-    if (read_report(path, json, sizeof(json)) != 0)
+    if (!json)
         return 1;
     printf("Direction finding report of m2sdr_analyzer:\n");
     CHECK("found", strstr(json, "\"found\": true") != NULL);
     CHECK_NEAR("calibration (deg)", json_number(json, "df", "calibration_deg"), cal, 0.05);
     CHECK_NEAR("angle (deg)", json_number(json, "df", "angle_deg"), angle, 0.05);
     CHECK_NEAR("MUSIC peak (deg)", json_number(json, "df", "music_peak_deg"), angle, 0.05);
-    return check_done("direction finding");
+    return report_done("direction finding");
 }
 
 static int check_mimo(const char *path)
 {
-    static char json[65536];
+    const char *json = read_report(path);
 
-    if (read_report(path, json, sizeof(json)) != 0)
+    if (!json)
         return 1;
     printf("LTE 2x2 report of m2sdr_analyzer:\n");
     CHECK("found, two ports", strstr(json, "\"found\": true") && strstr(json, "\"mimo\": true"));
@@ -1025,7 +908,7 @@ static int check_mimo(const char *path)
     /* 20 log10(s1 / s2) of the channel of the file. */
     CHECK_NEAR("condition (dB)", json_number(json, "mimo", "condition_db"), 5.3854, 0.15);
     CHECK_NEAR("rank", json_number(json, "mimo", "rank"), 2, 0);
-    return check_done("LTE 2x2");
+    return report_done("LTE 2x2");
 }
 
 int main(int argc, char **argv)
@@ -1048,10 +931,5 @@ int main(int argc, char **argv)
     test_coherence();
     test_df();
     test_mimo();
-    if (failures) {
-        printf("test_m2sdr_analysis_dual: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis_dual: all tests passed\n");
-    return 0;
+    return tests_done();
 }

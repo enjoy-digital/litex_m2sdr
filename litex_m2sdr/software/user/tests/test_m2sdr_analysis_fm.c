@@ -10,57 +10,16 @@
  *
  */
 
-#include <complex.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#define TEST_NAME "test_m2sdr_analysis_fm"
+#include "test_analysis_helpers.h"
 
 #include "../libm2sdr/m2sdr_analysis_fm.h"
 
 #define FS     960000.0
 #define REF2   (19000.0 * 19000.0 / 2.0)   /* BS.412 0 dBr, Hz^2. */
 
-static int failures;
-
-#define CHECK_NEAR(name, value, expected, tol) do { \
-    const double v_ = (value), e_ = (expected); \
-    const int ok_ = fabs(v_ - e_) <= (tol); \
-    printf("  %-34s %12.4f (expected %10.4f +-%g) %s\n", name, v_, e_, (double)(tol), ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
-#define CHECK(name, cond) do { \
-    const int ok_ = (cond); \
-    printf("  %-34s %s\n", name, ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
 /* Signals */
 /*---------*/
-
-static unsigned long long rng_state = 0x2545f4914f6cdd1dull;
-
-static double rng_uniform(void)
-{
-    rng_state ^= rng_state << 13;
-    rng_state ^= rng_state >> 7;
-    rng_state ^= rng_state << 17;
-    return ((double)(rng_state >> 11) + 0.5) / 9007199254740992.0;
-}
-
-/* Complex Gaussian noise of power `power`. */
-static void add_noise(float complex *x, size_t count, double power)
-{
-    size_t i;
-
-    for (i = 0; i < count; i++) {
-        const double r = sqrt(-power * log(rng_uniform()));
-        const double a = 2.0 * M_PI * rng_uniform();
-        x[i] += (float)(r * cos(a)) + I * (float)(r * sin(a));
-    }
-}
 
 /* A multiplex of tones: deviation amp_hz * cos(2 pi f t + phase). */
 struct tone {
@@ -132,14 +91,6 @@ static size_t make_tx(float complex *x, size_t count, const struct m2sdr_fm_conf
     free(iq);
     m2sdr_fm_tx_free(tx);
     return frames * interp;
-}
-
-static double now_s(void)
-{
-    struct timespec ts;
-
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + 1e-9 * (double)ts.tv_nsec;
 }
 
 /* Tests */
@@ -537,10 +488,10 @@ static int write_fm(const char *path)
     const size_t max = (size_t)(1.2 * FS);
     float complex *x = malloc(max * sizeof(*x));
     struct m2sdr_fm_config cfg;
-    FILE *f = fopen(path, "wb");
     size_t n, i;
+    int rc;
 
-    if (!x || !f)
+    if (!x)
         return 1;
     m2sdr_fm_config_init(&cfg);
     cfg.sample_rate = FS;
@@ -555,49 +506,23 @@ static int write_fm(const char *path)
     n = make_tx(x, max, &cfg, 1000.0, 0.5);
     if (n == 0)
         return 1;
-    for (i = 0; i < n; i++) {
-        const float complex v = 0.9f * x[i] * (float complex)cexp(I * 2.0 * M_PI * FILE_OFFSET_HZ * (double)i / FS);
-        const short s[4] = { (short)lrintf(crealf(v) * 2047.0f), (short)lrintf(cimagf(v) * 2047.0f),
-                             (short)lrintf(crealf(v) * 2047.0f), (short)lrintf(cimagf(v) * 2047.0f) };
-
-        if (fwrite(s, sizeof(s), 1, f) != 1)
-            return 1;
-    }
+    for (i = 0; i < n; i++)
+        x[i] = 0.9f * x[i] * (float complex)cexp(I * 2.0 * M_PI * FILE_OFFSET_HZ * (double)i / FS);
+    rc = write_sc16(path, x, x, n);
     free(x);
-    return fclose(f) == 0 ? 0 : 1;
-}
-
-static double json_number(const char *json, const char *section, const char *name)
-{
-    char key[64];
-    const char *p;
-
-    snprintf(key, sizeof(key), "\"%s\"", section);
-    p = strstr(json, key);
-    if (!p)
-        return NAN;
-    snprintf(key, sizeof(key), "\"%s\":", name);
-    p = strstr(p, key);
-    return p ? strtod(p + strlen(key), NULL) : NAN;
+    return rc;
 }
 
 /* The report of the file of write_fm(), run with --fm --fm-tone 1000. The figures are those of
  * test_tx_stereo_rds(); 12 bits instead of 16 only lower the noise floor. */
 static int check_fm(const char *path)
 {
-    static char json[32768];
+    const char *json = read_report(path);
     const double tone = 0.5 * 0.86 * 75000.0 / 2.0;
     const double ms   = tone * tone * 0.75 + 7500.0 * 7500.0 / 2.0 + 3000.0 * 3000.0 / 4.0;
-    FILE *f = fopen(path, "rb");
-    size_t n;
 
-    if (!f) {
-        printf("test_m2sdr_analysis_fm: cannot open %s\n", path);
+    if (!json)
         return 1;
-    }
-    n = fread(json, 1, sizeof(json) - 1, f);
-    fclose(f);
-    json[n] = '\0';
     printf("FM report of m2sdr_analyzer:\n");
     CHECK("station, pilot and RDS", strstr(json, "\"found\": true") && strstr(json, "\"pilot\": true") &&
                                     strstr(json, "\"rds\": true"));

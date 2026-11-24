@@ -9,63 +9,14 @@
  *
  */
 
-#include <complex.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#define TEST_NAME "test_m2sdr_analysis_monitoring"
+#include "test_analysis_helpers.h"
 
 #include "../libm2sdr/m2sdr_analysis_monitoring.h"
 #include "../libm2sdr/m2sdr_fft.h"
 
-static int failures;
-
-#define CHECK_NEAR(name, value, expected, tol) do { \
-    const double v_ = (value), e_ = (expected); \
-    const int ok_ = fabs(v_ - e_) <= (tol); \
-    printf("  %-34s %12.4f (expected %10.4f +-%g) %s\n", name, v_, e_, (double)(tol), ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
-#define CHECK(name, cond) do { \
-    const int ok_ = (cond); \
-    printf("  %-34s %s\n", name, ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
 /* Signals */
 /*---------*/
-
-static unsigned long long rng_state = 0x2545f4914f6cdd1dull;
-
-static double rng_uniform(void)
-{
-    rng_state ^= rng_state << 13;
-    rng_state ^= rng_state >> 7;
-    rng_state ^= rng_state << 17;
-    return ((double)(rng_state >> 11) + 0.5) / 9007199254740992.0;
-}
-
-/* Complex Gaussian noise of power `power`. */
-static void add_noise(float complex *x, size_t count, double power)
-{
-    size_t i;
-
-    for (i = 0; i < count; i++) {
-        const double r = sqrt(-power * log(rng_uniform()));
-        const double a = 2.0 * M_PI * rng_uniform();
-        x[i] += (float)(r * cos(a)) + I * (float)(r * sin(a));
-    }
-}
-
-static double now_s(void)
-{
-    struct timespec ts;
-
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + 1e-9 * (double)ts.tv_nsec;
-}
 
 /* Pulse of amplitude amp whose leading edge crosses 50 % at t0, width w between the 50 %
  * points, raised cosine edges of tr (from 0 to 100 %: 10 to 90 % in 0.5903 tr). Frequency f0
@@ -559,66 +510,6 @@ static void test_emc(void)
 /* Captures for m2sdr_analyzer */
 /*------------------------------*/
 
-/* SC16, one channel, 12 bits: what make test-analyzer gives m2sdr_analyzer --file. */
-static int write_sc16(const char *path, const float complex *x, size_t n)
-{
-    FILE *f = fopen(path, "wb");
-    size_t i;
-
-    if (!f)
-        return 1;
-    for (i = 0; i < n; i++) {
-        const short v[2] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
-
-        if (fwrite(v, sizeof(v), 1, f) != 1) {
-            fclose(f);
-            return 1;
-        }
-    }
-    return fclose(f) == 0 ? 0 : 1;
-}
-
-static char *read_text(const char *path)
-{
-    static char text[1 << 20];
-    FILE *f = fopen(path, "rb");
-    size_t n;
-
-    if (!f) {
-        printf("test_m2sdr_analysis_monitoring: cannot open %s\n", path);
-        return NULL;
-    }
-    n = fread(text, 1, sizeof(text) - 1, f);
-    fclose(f);
-    text[n] = '\0';
-    return text;
-}
-
-/* Number after "name": in the section "section" of a JSON report. */
-static double json_number(const char *json, const char *section, const char *name)
-{
-    char key[64];
-    const char *p;
-
-    snprintf(key, sizeof(key), "\"%s\"", section);
-    p = strstr(json, key);
-    if (!p)
-        return NAN;
-    snprintf(key, sizeof(key), "\"%s\":", name);
-    p = strstr(p, key);
-    return p ? strtod(p + strlen(key), NULL) : NAN;
-}
-
-static int report_done(const char *what)
-{
-    if (failures) {
-        printf("test_m2sdr_analysis_monitoring: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis_monitoring: %s report checked\n", what);
-    return 0;
-}
-
 /* Pulses: LFM pulses of 20 us sweeping 1 MHz, 1 MHz over the centre, staggered PRI
  * 800/1000/1300 us, 30 dB of SNR, 60 ms at 10 MSPS (the analyzer takes 50). */
 static int write_pulse(const char *path)
@@ -632,14 +523,14 @@ static int write_pulse(const char *path)
     if (!x)
         return 1;
     make_train(x, n, PFS, &p, pri, 3, 30.0);
-    rc = write_sc16(path, x, n);
+    rc = write_sc16(path, x, NULL, n);
     free(x);
     return rc;
 }
 
 static int check_pulse_report(const char *path)
 {
-    const char *json = read_text(path), *p;
+    const char *json = read_report(path), *p;
     double pri[3] = { NAN, NAN, NAN };
     int i;
 
@@ -688,7 +579,7 @@ static int write_emc(const char *path, const char *limit, const char *factors)
         return 1;
     for (i = 0; i < EMC_N; i++)
         x[i] += 0.1f * (float complex)cexp(I * 2.0 * M_PI * EMC_CW_HZ * (double)i / EMC_FS);
-    rc = write_sc16(path, x, EMC_N);
+    rc = write_sc16(path, x, NULL, EMC_N);
     free(x);
     f = fopen(limit, "w");
     if (!f)
@@ -704,7 +595,7 @@ static int write_emc(const char *path, const char *limit, const char *factors)
 
 static int check_emc_report(const char *path)
 {
-    const char *json = read_text(path);
+    const char *json = read_report(path);
     const double bimp = 120e3 * sqrt(M_PI / M_LN2) / 2.0;
     double peak0, qp0;
 
@@ -747,10 +638,5 @@ int main(int argc, char **argv)
     }
     test_pulse();
     test_emc();
-    if (failures) {
-        printf("test_m2sdr_analysis_monitoring: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis_monitoring: all tests passed\n");
-    return 0;
+    return tests_done();
 }

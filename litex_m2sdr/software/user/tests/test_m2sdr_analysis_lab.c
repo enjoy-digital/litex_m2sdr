@@ -9,12 +9,8 @@
  *
  */
 
-#include <complex.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#define TEST_NAME "test_m2sdr_analysis_lab"
+#include "test_analysis_helpers.h"
 
 #include "../libm2sdr/m2sdr_analysis.h"
 #include "../libm2sdr/m2sdr_analysis_lab.h"
@@ -22,53 +18,8 @@
 
 #define FS 1.0e6
 
-static int failures;
-
-#define CHECK_NEAR(name, value, expected, tol) do { \
-    const double v_ = (value), e_ = (expected); \
-    const int ok_ = fabs(v_ - e_) <= (tol); \
-    printf("  %-34s %12.4f (expected %10.4f +-%g) %s\n", name, v_, e_, (double)(tol), ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
-#define CHECK(name, cond) do { \
-    const int ok_ = (cond); \
-    printf("  %-34s %s\n", name, ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
 /* Signals */
 /*---------*/
-
-static unsigned long long rng_state = 0x2545f4914f6cdd1dull;
-
-static double rng_uniform(void)
-{
-    rng_state ^= rng_state << 13;
-    rng_state ^= rng_state >> 7;
-    rng_state ^= rng_state << 17;
-    return ((double)(rng_state >> 11) + 0.5) / 9007199254740992.0;
-}
-
-/* Complex Gaussian noise of power `power`. */
-static void add_noise(float complex *x, size_t count, double power)
-{
-    size_t i;
-
-    for (i = 0; i < count; i++) {
-        const double r = sqrt(-power * log(rng_uniform()));
-        const double a = 2.0 * M_PI * rng_uniform();
-        x[i] += (float)(r * cos(a)) + I * (float)(r * sin(a));
-    }
-}
-
-static double now_ms(void)
-{
-    struct timespec ts;
-
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec * 1e3 + ts.tv_nsec * 1e-6;
-}
 
 static double db(double power)
 {
@@ -729,44 +680,6 @@ static int write_capture_file(const char *path, const float complex *x, size_t c
     return fclose(f) == 0 ? 0 : 1;
 }
 
-static char *read_json(const char *path)
-{
-    static char json[1 << 20];
-    FILE *f = fopen(path, "rb");
-    size_t n;
-
-    if (!f)
-        return NULL;
-    n = fread(json, 1, sizeof(json) - 1, f);
-    fclose(f);
-    json[n] = '\0';
-    return json;
-}
-
-static double json_number(const char *json, const char *section, const char *name)
-{
-    char key[64];
-    const char *p;
-
-    snprintf(key, sizeof(key), "\"%s\"", section);
-    p = strstr(json, key);
-    if (!p)
-        return NAN;
-    snprintf(key, sizeof(key), "\"%s\":", name);
-    p = strstr(p, key);
-    return p ? strtod(p + strlen(key), NULL) : NAN;
-}
-
-static int report_done(const char *what)
-{
-    if (failures) {
-        printf("test_m2sdr_analysis_lab: %s report, %d FAILED\n", what, failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis_lab: %s report checked\n", what);
-    return 0;
-}
-
 /* Sweep: a thru (the radio: -3 dB, 40 degrees, 23 samples) and the one-pole filter behind it,
  * captured at other offsets of the stimulus. */
 static int write_sweep(const char *stim_path, const char *thru_path, const char *dut_path)
@@ -792,7 +705,7 @@ static int write_sweep(const char *stim_path, const char *thru_path, const char 
 
 static int check_sweep(const char *path)
 {
-    const char *json = read_json(path);
+    const char *json = read_report(path);
     double gd_lo = 1e9, gd_hi = -1e9, f;
 
     if (!json)
@@ -837,7 +750,7 @@ static int write_compression(const char *stim_path, const char *out_path)
 
 static int check_compression(const char *path)
 {
-    const char *json = read_json(path);
+    const char *json = read_report(path);
     const double g0 = 20.0 * log10(RAPP_G);
     const double p1 = 20.0 * log10(RAPP_SAT / RAPP_G * pow(pow(10.0, RAPP_P / 10.0) - 1.0, 1.0 / (2.0 * RAPP_P)));
 
@@ -882,7 +795,7 @@ static int write_imd(const char *stim_path, const char *out_path)
 
 static int check_imd(const char *path)
 {
-    const char *json = read_json(path);
+    const char *json = read_report(path);
     const double A = pow(10.0, -12.0 / 20.0);
     const double tone = 20.0 * log10(fabs(A + 3.0 * FILE_A3 * pow(A, 3) + 10.0 * FILE_A5 * pow(A, 5)));
     const double im3  = 20.0 * log10(fabs(FILE_A3 * pow(A, 3) + 5.0 * FILE_A5 * pow(A, 5)));
@@ -924,7 +837,7 @@ static int write_amam(const char *stim_path, const char *out_path)
 
 static int check_amam(const char *path)
 {
-    const char *json = read_json(path);
+    const char *json = read_report(path);
     const double in = json_number(json ? json : "", "amam", "compression_in_db");
 
     if (!json)
@@ -964,10 +877,5 @@ int main(int argc, char **argv)
     test_compression();
     test_imd();
     test_amam();
-    if (failures) {
-        printf("test_m2sdr_analysis_lab: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis_lab: all tests passed\n");
-    return 0;
+    return tests_done();
 }

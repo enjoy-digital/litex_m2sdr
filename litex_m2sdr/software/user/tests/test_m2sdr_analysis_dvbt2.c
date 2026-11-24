@@ -8,55 +8,14 @@
  *
  */
 
-#include <complex.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#define TEST_NAME "test_m2sdr_analysis_dvbt2"
+#include "test_analysis_helpers.h"
 
 #include "../libm2sdr/m2sdr_analysis_dvbt2.h"
 #include "../libm2sdr/m2sdr_fft.h"
 
-static int failures;
-
-#define CHECK_NEAR(name, value, expected, tol) do { \
-    const double v_ = (value), e_ = (expected); \
-    const int ok_ = fabs(v_ - e_) <= (tol); \
-    printf("  %-34s %12.4f (expected %10.4f +-%g) %s\n", name, v_, e_, (double)(tol), ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
-#define CHECK(name, cond) do { \
-    const int ok_ = (cond); \
-    printf("  %-34s %s\n", name, ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
 /* Signals */
 /*---------*/
-
-static unsigned long long rng_state = 0x2545f4914f6cdd1dull;
-
-static double rng_uniform(void)
-{
-    rng_state ^= rng_state << 13;
-    rng_state ^= rng_state >> 7;
-    rng_state ^= rng_state << 17;
-    return ((double)(rng_state >> 11) + 0.5) / 9007199254740992.0;
-}
-
-/* Complex Gaussian noise of power `power`. */
-static void add_noise(float complex *x, size_t count, double power)
-{
-    size_t i;
-
-    for (i = 0; i < count; i++) {
-        const double r = sqrt(-power * log(rng_uniform()));
-        const double a = 2.0 * M_PI * rng_uniform();
-        x[i] += (float)(r * cos(a)) + I * (float)(r * sin(a));
-    }
-}
 
 /* DVB-T2 */
 /*--------*/
@@ -221,128 +180,6 @@ static size_t make_dvbt2(float complex *x, size_t max, double fs, const struct d
     free(w);
     free(cp);
     return count;
-}
-
-/* DVB-T */
-/*-------*/
-
-/* A DVB-T multiplex, as test_m2sdr_analysis.c builds it, sets its pilots and TPS, with random data in place of
- * the coded stream: what the analysis reads. */
-struct dvbt_signal {
-    int    n;                   /* 2048 or 8192. */
-    int    g;                   /* Guard interval: 4 to 32. */
-    int    con;                 /* TPS constellation field: 0 QPSK, 1 16QAM, 2 64QAM. */
-    int    hp;                  /* TPS code rate field: 0 (1/2) to 4 (7/8). */
-    int    start;               /* Symbol of the frame the capture starts with. */
-    double freq_hz;             /* Carrier offset. */
-    double snr_db;
-    double echo_us, echo_db;    /* A second path; echo_db -99 for none. */
-};
-
-static const int dvbt_cp[] = {
-       0,   48,   54,   87,  141,  156,  192,  201,  255,  279,  282,  333,  432,  450,  483,
-     525,  531,  618,  636,  714,  759,  765,  780,  804,  873,  888,  918,  939,  942,  969,
-     984, 1050, 1101, 1107, 1110, 1137, 1140, 1146, 1206, 1269, 1323, 1377, 1491, 1683, 1704,
-};
-static const int dvbt_tps[] = {
-      34,   50,  209,  346,  413,  569,  595,  688,  790,  901, 1073, 1219, 1262, 1286, 1469,
-    1594, 1687,
-};
-
-static size_t make_dvbt(float complex *x, size_t max, double fs, const struct dvbt_signal *sig)
-{
-    const int k = sig->n == 8192 ? 6817 : 1705, gl = sig->n / sig->g, l = sig->n + gl;
-    const int side = sig->con == 0 ? 2 : sig->con == 1 ? 4 : 8;
-    const double scale = 1.0 / sqrt(2.0 * (side * side - 1) / 3.0);
-    struct m2sdr_fft *ifft = m2sdr_fft_alloc((size_t)sig->n, true);
-    float complex *f = malloc((size_t)sig->n * sizeof(*f)), *t = malloc((size_t)sig->n * sizeof(*t));
-    uint8_t *w = malloc((size_t)k), *kind = calloc((size_t)k, 1), tps[68];
-    float tps_state = 1.0f;
-    const size_t nsym = max / (size_t)l;
-    const size_t echo = (size_t)lround(sig->echo_us * 1e-6 * fs);
-    const double echo_amp = pow(10.0, sig->echo_db / 20.0);
-    unsigned reg = 0x7ff;
-    size_t s, i, count = nsym * (size_t)l;
-    double power = 0;
-    int c, b;
-
-    for (c = 0; c < k; c++) {
-        w[c] = (uint8_t)((reg >> 10) & 1u);
-        reg = ((reg << 1) | (w[c] ^ ((reg >> 8) & 1u))) & 0x7ffu;
-    }
-    for (b = 0; b < k; b += 1704) {
-        for (c = 0; c < (int)(sizeof(dvbt_cp) / sizeof(dvbt_cp[0])); c++)
-            if (b + dvbt_cp[c] < k)
-                kind[b + dvbt_cp[c]] = 1;
-        for (c = 0; c < (int)(sizeof(dvbt_tps) / sizeof(dvbt_tps[0])); c++)
-            if (b + dvbt_tps[c] < k)
-                kind[b + dvbt_tps[c]] = 2;
-    }
-    memset(x, 0, max * sizeof(*x));
-    for (s = 0; s < nsym; s++) {
-        const int fsym = (int)((s + (size_t)sig->start) % 68), frame = (int)(((s + (size_t)sig->start) / 68) % 4);
-
-        if (fsym == 0 || s == 0) {
-            /* TPS of the frame: s0, the sync word (inverted in even frames), length 23, then the parameters. */
-            const unsigned sync = frame % 2 ? 0xca11u : 0x35eeu;
-            unsigned v[] = { 0x17, (unsigned)frame, (unsigned)sig->con, 0, (unsigned)sig->hp, (unsigned)sig->hp,
-                             (unsigned)(sig->g == 32 ? 0 : sig->g == 16 ? 1 : sig->g == 8 ? 2 : 3), sig->n == 8192 ? 1u : 0u };
-            const int bits[] = { 6, 2, 2, 3, 3, 3, 2, 2 };
-            int pos = 17, j;
-
-            memset(tps, 0, sizeof(tps));
-            for (j = 0; j < 16; j++)
-                tps[1 + j] = (uint8_t)((sync >> (15 - j)) & 1u);
-            for (j = 0; j < 8; j++) {
-                int q;
-
-                for (q = bits[j] - 1; q >= 0; q--)
-                    tps[pos++] = (uint8_t)((v[j] >> q) & 1u);
-            }
-        }
-        tps_state = fsym == 0 ? 1.0f : tps[fsym] ? -tps_state : tps_state;
-        memset(f, 0, (size_t)sig->n * sizeof(*f));
-        for (c = 0; c < k; c++) {
-            float complex v;
-
-            if (kind[c] == 1 || (c >= 3 * (fsym % 4) && (c - 3 * (fsym % 4)) % 12 == 0))
-                v = (4.0f / 3.0f) * (w[c] ? -1.0f : 1.0f);
-            else if (kind[c] == 2)
-                v = tps_state * (w[c] ? -1.0f : 1.0f);
-            else
-                v = (float complex)(scale * ((2 * (int)(rng_uniform() * side) - side + 1) +
-                                             I * (2 * (int)(rng_uniform() * side) - side + 1)));
-            f[(c - (k - 1) / 2 + sig->n) % sig->n] = v;
-        }
-        m2sdr_fft_run(ifft, f, t);
-        for (i = 0; i < (size_t)l; i++)
-            x[s * (size_t)l + i] = t[(i + (size_t)sig->n - (size_t)gl) % (size_t)sig->n];
-    }
-    if (sig->echo_db > -99.0)
-        for (i = count; i-- > echo;)
-            x[i] += (float)echo_amp * x[i - echo];
-    for (i = 0; i < count; i++) {
-        x[i] *= (float complex)cexp(I * 2.0 * M_PI * sig->freq_hz * (double)i / fs);
-        power += crealf(x[i] * conjf(x[i]));
-    }
-    power /= (double)count;
-    for (i = 0; i < count; i++)
-        x[i] *= (float)(0.1 / sqrt(power));
-    add_noise(x, count, 0.01 * pow(10.0, -sig->snr_db / 10.0));
-    m2sdr_fft_free(ifft);
-    free(f);
-    free(t);
-    free(w);
-    free(kind);
-    return count;
-}
-
-static double now_ms(void)
-{
-    struct timespec ts;
-
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec * 1e3 + ts.tv_nsec * 1e-6;
 }
 
 static enum m2sdr_modulation t2_mod(int side)
@@ -515,47 +352,23 @@ static int write_capture(const char *path, int which)
     const double fs = 64e6 / 7.0;
     const size_t max = (size_t)(0.26 * fs);
     float complex *x = malloc(max * sizeof(*x));
-    FILE *f = fopen(path, "wb");
-    size_t count, i;
+    size_t count;
+    int rc;
 
-    if (!x || !f)
+    if (!x)
         return 1;
     count = make_dvbt2(x, max, fs, &report_signals[which]);
-    for (i = 0; i < count; i++) {
-        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
-                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
-        if (fwrite(v, sizeof(v), 1, f) != 1)
-            return 1;
-    }
+    rc    = write_sc16(path, x, x, count);
     free(x);
-    return fclose(f) == 0 ? 0 : 1;
-}
-
-static double json_number(const char *json, const char *name)
-{
-    char key[64];
-    const char *p = strstr(json, "\"dvbt2\"");
-
-    if (!p)
-        return NAN;
-    snprintf(key, sizeof(key), "\"%s\":", name);
-    p = strstr(p, key);
-    return p ? strtod(p + strlen(key), NULL) : NAN;
+    return rc;
 }
 
 static int check_report(const char *path, int which)
 {
-    static char json[32768];
-    FILE *f = fopen(path, "rb");
-    size_t n;
+    const char *json = read_report(path);
 
-    if (!f) {
-        printf("test_m2sdr_analysis_dvbt2: cannot open %s\n", path);
+    if (!json)
         return 1;
-    }
-    n = fread(json, 1, sizeof(json) - 1, f);
-    fclose(f);
-    json[n] = '\0';
     printf("DVB-T2 report of m2sdr_analyzer (%s):\n", which ? "8k, 64QAM, echo" : "32k extended, rotated 256QAM");
     CHECK("found, pilots", strstr(json, "\"found\": true") && strstr(json, "\"pilots\": true"));
     CHECK("not decoded: S1/S2, L1", strstr(json, "\"s1s2_decoded\": false") && strstr(json, "\"l1_decoded\": false"));
@@ -567,17 +380,17 @@ static int check_report(const char *path, int which)
 
         while ((size_t)sig->lead + (size_t)np1 * frame + 2048 <= span)
             np1++;
-        CHECK_NEAR("P1 count", json_number(json, "p1_count"), np1, 0);
+        CHECK_NEAR("P1 count", json_number(json, "dvbt2", "p1_count"), np1, 0);
         if (np1 >= 2)
-            CHECK_NEAR("frame (ms)", json_number(json, "frame_ms"), frame / (64e6 / 7.0) * 1e3, 0.002);
+            CHECK_NEAR("frame (ms)", json_number(json, "dvbt2", "frame_ms"), frame / (64e6 / 7.0) * 1e3, 0.002);
     }
     if (which == 0) {
         CHECK("32k extended, guard 1/128, PP7", strstr(json, "\"fft_size\": \"32k\"") && strstr(json, "\"extended\": true") &&
                                                strstr(json, "\"guard_interval\": \"1/128\"") && strstr(json, "\"pattern\": \"PP7\""));
         CHECK("rotated, no data MER", strstr(json, "\"rotated\": true") && strstr(json, "\"mer_db\": null"));
         /* 35 dB, less the quantisation of SC16 (a level of 0.1 full scale: 205 steps, -58 dB). */
-        CHECK_NEAR("pilot MER (dB)", json_number(json, "pilot_mer_db"), 35.0, 1.0);
-        CHECK_NEAR("carrier offset (Hz)", json_number(json, "carrier_offset_hz"), 0.0, 20.0);
+        CHECK_NEAR("pilot MER (dB)", json_number(json, "dvbt2", "pilot_mer_db"), 35.0, 1.0);
+        CHECK_NEAR("carrier offset (Hz)", json_number(json, "dvbt2", "carrier_offset_hz"), 0.0, 20.0);
     } else {
         /* An echo of amplitude a leaves (1 - a^2) / (1 + a^2) of the power: -0.9 dB at -10 dB. */
         const double echo_db = 10.0 * log10((1.0 - 0.1) / (1.0 + 0.1));
@@ -585,19 +398,14 @@ static int check_report(const char *path, int which)
         CHECK("8k, guard 1/8, PP2", strstr(json, "\"fft_size\": \"8k\"") && strstr(json, "\"extended\": false") &&
                                     strstr(json, "\"guard_interval\": \"1/8\"") && strstr(json, "\"pattern\": \"PP2\""));
         CHECK("64QAM, not rotated", strstr(json, "\"constellation\": \"64QAM\"") && strstr(json, "\"rotated\": false"));
-        CHECK_NEAR("pilot MER (dB)", json_number(json, "pilot_mer_db"), 28.0 + echo_db, 1.0);
+        CHECK_NEAR("pilot MER (dB)", json_number(json, "dvbt2", "pilot_mer_db"), 28.0 + echo_db, 1.0);
         /* The data cells: the noise of the channel estimate on top, 10 log(1 + 0.7 / (4/3)^2). */
-        CHECK_NEAR("MER (dB)", json_number(json, "mer_db"), 28.0 + echo_db - 1.5, 1.0);
-        CHECK_NEAR("carrier offset (Hz)", json_number(json, "carrier_offset_hz"), 166667.0, 20.0);
-        CHECK_NEAR("echo delay (us)", json_number(json, "echo_delay_us"), 15.0, 0.5);
-        CHECK_NEAR("echo level (dB)", json_number(json, "echo_level_db"), -10.0, 1.5);
+        CHECK_NEAR("MER (dB)", json_number(json, "dvbt2", "mer_db"), 28.0 + echo_db - 1.5, 1.0);
+        CHECK_NEAR("carrier offset (Hz)", json_number(json, "dvbt2", "carrier_offset_hz"), 166667.0, 20.0);
+        CHECK_NEAR("echo delay (us)", json_number(json, "dvbt2", "echo_delay_us"), 15.0, 0.5);
+        CHECK_NEAR("echo level (dB)", json_number(json, "dvbt2", "echo_level_db"), -10.0, 1.5);
     }
-    if (failures) {
-        printf("test_m2sdr_analysis_dvbt2: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis_dvbt2: report checked\n");
-    return 0;
+    return report_done(NULL);
 }
 
 int main(int argc, char **argv)
@@ -607,10 +415,5 @@ int main(int argc, char **argv)
     if (argc == 4 && strcmp(argv[1], "--check") == 0)
         return check_report(argv[3], atoi(argv[2]) != 0);
     test_dvbt2();
-    if (failures) {
-        printf("test_m2sdr_analysis_dvbt2: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis_dvbt2: all tests passed\n");
-    return 0;
+    return tests_done();
 }

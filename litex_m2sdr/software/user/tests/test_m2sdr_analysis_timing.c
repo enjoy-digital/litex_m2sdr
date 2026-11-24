@@ -9,67 +9,16 @@
  *
  */
 
-#include <complex.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+/* Allan deviations and code phases: figures of any magnitude. */
+#define CHECK_NEAR_FMT "%12.4g (expected %10.4g +-%g)"
+
+#define TEST_NAME "test_m2sdr_analysis_timing"
+#include "test_analysis_helpers.h"
 
 #include "../libm2sdr/m2sdr_analysis_timing.h"
 
-static int failures;
-
-#define CHECK_NEAR(name, value, expected, tol) do { \
-    const double v_ = (value), e_ = (expected); \
-    const int ok_ = fabs(v_ - e_) <= (tol); \
-    printf("  %-34s %12.4g (expected %10.4g +-%g) %s\n", name, v_, e_, (double)(tol), ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
-#define CHECK(name, cond) do { \
-    const int ok_ = (cond); \
-    printf("  %-34s %s\n", name, ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
 /* Signals */
 /*---------*/
-
-static unsigned long long rng_state = 0x2545f4914f6cdd1dull;
-
-static double rng_uniform(void)
-{
-    rng_state ^= rng_state << 13;
-    rng_state ^= rng_state >> 7;
-    rng_state ^= rng_state << 17;
-    return ((double)(rng_state >> 11) + 0.5) / 9007199254740992.0;
-}
-
-static double rng_gauss(void)
-{
-    return sqrt(-2.0 * log(rng_uniform())) * cos(2.0 * M_PI * rng_uniform());
-}
-
-/* Complex Gaussian noise of power `power`. */
-static void add_noise(float complex *x, size_t count, double power)
-{
-    size_t i;
-
-    for (i = 0; i < count; i++) {
-        const double r = sqrt(-power * log(rng_uniform()));
-        const double a = 2.0 * M_PI * rng_uniform();
-        x[i] += (float)(r * cos(a)) + I * (float)(r * sin(a));
-    }
-}
-
-static double now_s(void)
-{
-    struct timespec ts;
-
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + 1e-9 * (double)ts.tv_nsec;
-}
 
 /* Allan deviation */
 /*-----------------*/
@@ -585,25 +534,6 @@ static const struct gps_sat file_sats[] = {
     { 12, 43.0, -1650.0, 700.2 },
 };
 
-/* Two channels of SC16 (12 bits), the same samples on both. */
-static int write_sc16(const char *path, const float complex *x, size_t count)
-{
-    FILE *f = fopen(path, "wb");
-    size_t i;
-
-    if (!f)
-        return 1;
-    for (i = 0; i < count; i++) {
-        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
-                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
-        if (fwrite(v, sizeof(v), 1, f) != 1) {
-            fclose(f);
-            return 1;
-        }
-    }
-    return fclose(f) == 0 ? 0 : 1;
-}
-
 static int write_adev(const char *path)
 {
     float complex *x = malloc(FILE_SAMPLES * sizeof(*x));
@@ -616,7 +546,7 @@ static int write_adev(const char *path)
     for (i = 0; i < FILE_SAMPLES; i++)
         x[i] = (float complex)(FILE_ADEV_AMP * cexp(I * (0.7 + 2.0 * M_PI * f * (double)i / FILE_ADEV_FS)));
     add_noise(x, FILE_SAMPLES, FILE_ADEV_N);
-    rc = write_sc16(path, x, FILE_SAMPLES);
+    rc = write_sc16(path, x, x, FILE_SAMPLES);
     free(x);
     return rc;
 }
@@ -633,97 +563,59 @@ static int write_gnss(const char *path)
     make_gps(x, FILE_SAMPLES, FILE_GNSS_FS, file_sats, 2, FILE_GNSS_N);
     for (i = 0; i < FILE_SAMPLES; i++)
         x[i] += (float complex)(amp * cexp(I * 2.0 * M_PI * FILE_GNSS_JHZ * (double)i / FILE_GNSS_FS));
-    rc = write_sc16(path, x, FILE_SAMPLES);
+    rc = write_sc16(path, x, x, FILE_SAMPLES);
     free(x);
     return rc;
 }
 
-static int read_json(const char *path, char *json, size_t len)
-{
-    FILE *f = fopen(path, "rb");
-    size_t n;
-
-    if (!f) {
-        printf("test_m2sdr_analysis_timing: cannot open %s\n", path);
-        return -1;
-    }
-    n = fread(json, 1, len - 1, f);
-    fclose(f);
-    json[n] = '\0';
-    return 0;
-}
-
-/* The number of "name" after the first "after" (a key or any text). */
-static double json_number(const char *json, const char *after, const char *name)
-{
-    char key[64];
-    const char *p = strstr(json, after);
-
-    if (!p)
-        return NAN;
-    snprintf(key, sizeof(key), "\"%s\":", name);
-    p = strstr(p, key);
-    return p ? strtod(p + strlen(key), NULL) : NAN;
-}
-
 static int check_adev_report(const char *path)
 {
-    static char json[65536];
+    const char *json = read_report(path);
     double block, sx;
 
-    if (read_json(path, json, sizeof(json)) != 0)
+    if (!json)
         return 1;
     printf("Carrier stability report of m2sdr_analyzer:\n");
-    CHECK("found", strstr(json, "\"adev\"") && json_number(json, "\"adev\"", "carrier_hz") > 0.0);
-    CHECK_NEAR("carrier offset (Hz)", json_number(json, "\"adev\"", "carrier_offset_hz"),
+    CHECK("found", strstr(json, "\"adev\"") && json_number_after(json, "\"adev\"", "carrier_hz") > 0.0);
+    CHECK_NEAR("carrier offset (Hz)", json_number_after(json, "\"adev\"", "carrier_offset_hz"),
                FILE_ADEV_NOM + FILE_ADEV_ERR - FILE_ADEV_FREQ, 0.01);
     /* 12-bit samples add -77 dBFS of noise to the -40 dBFS given: SNR 29.5 dB. */
-    CHECK_NEAR("offset (ppb)", json_number(json, "\"adev\"", "offset_ppb"), FILE_ADEV_ERR / FILE_ADEV_NOM * 1e9, 0.1);
-    CHECK_NEAR("SNR (dB)", json_number(json, "\"adev\"", "snr_db"), 10.0 * log10(FILE_ADEV_AMP * FILE_ADEV_AMP / FILE_ADEV_N), 0.3);
+    CHECK_NEAR("offset (ppb)", json_number_after(json, "\"adev\"", "offset_ppb"), FILE_ADEV_ERR / FILE_ADEV_NOM * 1e9, 0.1);
+    CHECK_NEAR("SNR (dB)", json_number_after(json, "\"adev\"", "snr_db"), 10.0 * log10(FILE_ADEV_AMP * FILE_ADEV_AMP / FILE_ADEV_N), 0.3);
     /* Short tau: the white phase of the noise, sqrt(3) sigma_x / tau. */
-    block = json_number(json, "\"adev\"", "block_len");
+    block = json_number_after(json, "\"adev\"", "block_len");
     sx    = sqrt(FILE_ADEV_N / (2.0 * block * FILE_ADEV_AMP * FILE_ADEV_AMP)) / (2.0 * M_PI * FILE_ADEV_NOM);
-    CHECK_NEAR("ADEV(tau0) / white PM", json_number(json, "\"short_tau\"", "adev") /
-               (sqrt(3.0) * sx / json_number(json, "\"short_tau\"", "tau_s")), 1.0, 0.15);
-    if (failures) {
-        printf("test_m2sdr_analysis_timing: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis_timing: carrier stability report checked\n");
-    return 0;
+    CHECK_NEAR("ADEV(tau0) / white PM", json_number_after(json, "\"short_tau\"", "adev") /
+               (sqrt(3.0) * sx / json_number_after(json, "\"short_tau\"", "tau_s")), 1.0, 0.15);
+    return report_done("carrier stability");
 }
 
 static int check_gnss_report(const char *path)
 {
-    static char json[65536];
+    const char *json = read_report(path);
     const char *p;
     int n = 0;
     unsigned s;
 
-    if (read_json(path, json, sizeof(json)) != 0)
+    if (!json)
         return 1;
     printf("GPS L1 report of m2sdr_analyzer:\n");
     for (p = strstr(json, "{\"prn\":"); p; p = strstr(p + 1, "{\"prn\":"))
         n++;
-    CHECK("two PRNs detected", n == 2 && json_number(json, "\"gnss\"", "detected") == 2.0);
+    CHECK("two PRNs detected", n == 2 && json_number_after(json, "\"gnss\"", "detected") == 2.0);
     for (s = 0; s < 2; s++) {
         char key[32];
 
         snprintf(key, sizeof(key), "{\"prn\": %d,", file_sats[s].prn);
         CHECK(key, strstr(json, key) != NULL);
-        CHECK_NEAR("  C/N0 (dB-Hz)", json_number(json, key, "cn0_dbhz"), file_sats[s].cn0_dbhz, 2.0);
-        CHECK_NEAR("  Doppler (Hz)", json_number(json, key, "doppler_hz"), file_sats[s].doppler_hz, 40.0);
-        CHECK_NEAR("  code phase (chips)", json_number(json, key, "code_phase_chips"), file_sats[s].code_chips, 0.15);
+        CHECK_NEAR("  C/N0 (dB-Hz)", json_number_after(json, key, "cn0_dbhz"), file_sats[s].cn0_dbhz, 2.0);
+        CHECK_NEAR("  Doppler (Hz)", json_number_after(json, key, "doppler_hz"), file_sats[s].doppler_hz, 40.0);
+        CHECK_NEAR("  code phase (chips)", json_number_after(json, key, "code_phase_chips"), file_sats[s].code_chips, 0.15);
     }
     CHECK("jammed", strstr(json, "\"jammed\": true") != NULL);
-    CHECK_NEAR("line (Hz)", json_number(json, "\"lines\"", "freq_hz"), FILE_GNSS_JHZ, 2000.0);
-    CHECK_NEAR("line J/N (dB)", json_number(json, "\"lines\"", "jn_db"), 10.0 * log10(FILE_GNSS_JN), 1.0);
-    if (failures) {
-        printf("test_m2sdr_analysis_timing: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis_timing: GPS L1 report checked\n");
-    return 0;
+    CHECK_NEAR("line (Hz)", json_number_after(json, "\"lines\"", "freq_hz"), FILE_GNSS_JHZ, 2000.0);
+    CHECK_NEAR("line J/N (dB)", json_number_after(json, "\"lines\"", "jn_db"), 10.0 * log10(FILE_GNSS_JN), 1.0);
+    return report_done("GPS L1");
 }
 
 int main(int argc, char **argv)
