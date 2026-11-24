@@ -49,6 +49,10 @@ int an_registry_init(void)
             fprintf(stderr, "The mode %s analyses without a result_size.\n", an_modes[m]->key);
             return -1;
         }
+        if (an_modes[m]->on != AN_NONE && !an_modes[m]->settings_size) {
+            fprintf(stderr, "The mode %s has a flag without a settings_size.\n", an_modes[m]->key);
+            return -1;
+        }
         if (an_modes[m]->result_size > size)
             size = an_modes[m]->result_size;
         /* The settings, one block after the other, each aligned as a struct may need. */
@@ -89,9 +93,7 @@ void *an_mode_settings(const struct an_mode *m, const struct an_settings *set)
 {
     const int i = an_mode_index(m);
 
-    if (!m->settings_size || i < 0)
-        return (void *)set;
-    return (char *)set->modes + settings_at[i];
+    return (char *)set->modes + (i >= 0 ? settings_at[i] : 0);
 }
 
 bool an_mode_result_flag(const struct an_mode *m, const struct an_result *res, size_t off)

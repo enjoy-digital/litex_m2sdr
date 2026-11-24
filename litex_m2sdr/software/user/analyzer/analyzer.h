@@ -357,7 +357,7 @@ struct an_mode {
     const char *title;             /* Its tab: "DVB-T". */
     enum an_category category;
     /* Its settings: settings_size bytes of a type of its own (in its file) in struct an_settings,
-     * read with an_mode_settings(); 0: its fields are in struct an_settings. */
+     * read with an_mode_settings(). A mode with a flag has some. */
     size_t settings_size;
     size_t on;                     /* offsetof(<its settings>, <flag>); AN_NONE: always measured. */
     /* Its result: result_size bytes of a type of its own (in its file), flat (copied with
@@ -459,7 +459,7 @@ int    an_mode_index(const struct an_mode *m);
 void  *an_mode_result(const struct an_mode *m, const struct an_result *res);
 /* A flag of the result of a mode, at an offset of its result (valid, found). */
 bool   an_mode_result_flag(const struct an_mode *m, const struct an_result *res, size_t off);
-/* The settings of a mode in set: its block (set itself for a mode without settings_size). */
+/* The settings of a mode in set: its block. */
 void  *an_mode_settings(const struct an_mode *m, const struct an_settings *set);
 
 /* The flag of a mode in settings; NULL for a view of the spectrum. */
