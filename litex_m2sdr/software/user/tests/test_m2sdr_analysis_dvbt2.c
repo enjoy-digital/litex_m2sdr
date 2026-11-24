@@ -223,6 +223,120 @@ static size_t make_dvbt2(float complex *x, size_t max, double fs, const struct d
     return count;
 }
 
+/* DVB-T */
+/*-------*/
+
+/* A DVB-T multiplex, as test_m2sdr_analysis.c builds it, sets its pilots and TPS, with random data in place of
+ * the coded stream: what the analysis reads. */
+struct dvbt_signal {
+    int    n;                   /* 2048 or 8192. */
+    int    g;                   /* Guard interval: 4 to 32. */
+    int    con;                 /* TPS constellation field: 0 QPSK, 1 16QAM, 2 64QAM. */
+    int    hp;                  /* TPS code rate field: 0 (1/2) to 4 (7/8). */
+    int    start;               /* Symbol of the frame the capture starts with. */
+    double freq_hz;             /* Carrier offset. */
+    double snr_db;
+    double echo_us, echo_db;    /* A second path; echo_db -99 for none. */
+};
+
+static const int dvbt_cp[] = {
+       0,   48,   54,   87,  141,  156,  192,  201,  255,  279,  282,  333,  432,  450,  483,
+     525,  531,  618,  636,  714,  759,  765,  780,  804,  873,  888,  918,  939,  942,  969,
+     984, 1050, 1101, 1107, 1110, 1137, 1140, 1146, 1206, 1269, 1323, 1377, 1491, 1683, 1704,
+};
+static const int dvbt_tps[] = {
+      34,   50,  209,  346,  413,  569,  595,  688,  790,  901, 1073, 1219, 1262, 1286, 1469,
+    1594, 1687,
+};
+
+static size_t make_dvbt(float complex *x, size_t max, double fs, const struct dvbt_signal *sig)
+{
+    const int k = sig->n == 8192 ? 6817 : 1705, gl = sig->n / sig->g, l = sig->n + gl;
+    const int side = sig->con == 0 ? 2 : sig->con == 1 ? 4 : 8;
+    const double scale = 1.0 / sqrt(2.0 * (side * side - 1) / 3.0);
+    struct m2sdr_fft *ifft = m2sdr_fft_alloc((size_t)sig->n, true);
+    float complex *f = malloc((size_t)sig->n * sizeof(*f)), *t = malloc((size_t)sig->n * sizeof(*t));
+    uint8_t *w = malloc((size_t)k), *kind = calloc((size_t)k, 1), tps[68];
+    float tps_state = 1.0f;
+    const size_t nsym = max / (size_t)l;
+    const size_t echo = (size_t)lround(sig->echo_us * 1e-6 * fs);
+    const double echo_amp = pow(10.0, sig->echo_db / 20.0);
+    unsigned reg = 0x7ff;
+    size_t s, i, count = nsym * (size_t)l;
+    double power = 0;
+    int c, b;
+
+    for (c = 0; c < k; c++) {
+        w[c] = (uint8_t)((reg >> 10) & 1u);
+        reg = ((reg << 1) | (w[c] ^ ((reg >> 8) & 1u))) & 0x7ffu;
+    }
+    for (b = 0; b < k; b += 1704) {
+        for (c = 0; c < (int)(sizeof(dvbt_cp) / sizeof(dvbt_cp[0])); c++)
+            if (b + dvbt_cp[c] < k)
+                kind[b + dvbt_cp[c]] = 1;
+        for (c = 0; c < (int)(sizeof(dvbt_tps) / sizeof(dvbt_tps[0])); c++)
+            if (b + dvbt_tps[c] < k)
+                kind[b + dvbt_tps[c]] = 2;
+    }
+    memset(x, 0, max * sizeof(*x));
+    for (s = 0; s < nsym; s++) {
+        const int fsym = (int)((s + (size_t)sig->start) % 68), frame = (int)(((s + (size_t)sig->start) / 68) % 4);
+
+        if (fsym == 0 || s == 0) {
+            /* TPS of the frame: s0, the sync word (inverted in even frames), length 23, then the parameters. */
+            const unsigned sync = frame % 2 ? 0xca11u : 0x35eeu;
+            unsigned v[] = { 0x17, (unsigned)frame, (unsigned)sig->con, 0, (unsigned)sig->hp, (unsigned)sig->hp,
+                             (unsigned)(sig->g == 32 ? 0 : sig->g == 16 ? 1 : sig->g == 8 ? 2 : 3), sig->n == 8192 ? 1u : 0u };
+            const int bits[] = { 6, 2, 2, 3, 3, 3, 2, 2 };
+            int pos = 17, j;
+
+            memset(tps, 0, sizeof(tps));
+            for (j = 0; j < 16; j++)
+                tps[1 + j] = (uint8_t)((sync >> (15 - j)) & 1u);
+            for (j = 0; j < 8; j++) {
+                int q;
+
+                for (q = bits[j] - 1; q >= 0; q--)
+                    tps[pos++] = (uint8_t)((v[j] >> q) & 1u);
+            }
+        }
+        tps_state = fsym == 0 ? 1.0f : tps[fsym] ? -tps_state : tps_state;
+        memset(f, 0, (size_t)sig->n * sizeof(*f));
+        for (c = 0; c < k; c++) {
+            float complex v;
+
+            if (kind[c] == 1 || (c >= 3 * (fsym % 4) && (c - 3 * (fsym % 4)) % 12 == 0))
+                v = (4.0f / 3.0f) * (w[c] ? -1.0f : 1.0f);
+            else if (kind[c] == 2)
+                v = tps_state * (w[c] ? -1.0f : 1.0f);
+            else
+                v = (float complex)(scale * ((2 * (int)(rng_uniform() * side) - side + 1) +
+                                             I * (2 * (int)(rng_uniform() * side) - side + 1)));
+            f[(c - (k - 1) / 2 + sig->n) % sig->n] = v;
+        }
+        m2sdr_fft_run(ifft, f, t);
+        for (i = 0; i < (size_t)l; i++)
+            x[s * (size_t)l + i] = t[(i + (size_t)sig->n - (size_t)gl) % (size_t)sig->n];
+    }
+    if (sig->echo_db > -99.0)
+        for (i = count; i-- > echo;)
+            x[i] += (float)echo_amp * x[i - echo];
+    for (i = 0; i < count; i++) {
+        x[i] *= (float complex)cexp(I * 2.0 * M_PI * sig->freq_hz * (double)i / fs);
+        power += crealf(x[i] * conjf(x[i]));
+    }
+    power /= (double)count;
+    for (i = 0; i < count; i++)
+        x[i] *= (float)(0.1 / sqrt(power));
+    add_noise(x, count, 0.01 * pow(10.0, -sig->snr_db / 10.0));
+    m2sdr_fft_free(ifft);
+    free(f);
+    free(t);
+    free(w);
+    free(kind);
+    return count;
+}
+
 static double now_ms(void)
 {
     struct timespec ts;
@@ -249,6 +363,7 @@ static void test_dvbt2(void)
         {  4096, false, 2, 5,  4, false,  80, true,   10000,  12000.0, 22.0,  0.0, -99.0 },
         {  8192, true,  5, 6, 16, false,  60, false,  40000, -166667.0, 34.0,  0.0, -99.0 },
         {  8192, false, 4, 2,  4, false, 200, false, -50000,    500.0, 20.0,  0.0, -99.0 },  /* No P1 in the capture. */
+        {  8192, false, 4, 1,  8, false, 200, false, -50000,  -1200.0, 22.0,  0.0, -99.0 },  /* PP1 like DVB-T, no P1: still T2. */
     };
     const double fs = 64e6 / 7.0;
     const size_t max = (size_t)(0.15 * fs);
@@ -285,7 +400,7 @@ static void test_dvbt2(void)
         t = now_ms();
         CHECK("analyse", m2sdr_dvbt2_analyse(x, count, fs, NULL, res) == 0);
         printf("  %-34s %12.1f\n", "time (ms)", now_ms() - t);
-        CHECK("found, pilots", res->found && res->pilots);
+        CHECK("found, pilots, not DVB-T", res->found && res->pilots && !res->dvbt);
         CHECK_NEAR("FFT length", res->fft_len, sig->n, 0);
         CHECK("carriers", res->extended == sig->ext);
         CHECK("guard interval", res->guard_num == t2_guard[sig->g][0] && res->guard_den == t2_guard[sig->g][1]);
@@ -353,6 +468,25 @@ static void test_dvbt2(void)
         printf(" 40 ms, a wrong known offset\n");
         CHECK("analyse", m2sdr_dvbt2_analyse(x, (size_t)(0.04 * fs), fs, &cfg, res) == 0 && res->pilots);
         CHECK_NEAR("carrier offset (Hz)", res->freq_error_hz, sig.freq_hz, 20.0);
+    }
+
+    /* DVB-T: the pilots of PP1, the same PRBS, no P1: not DVB-T2, told by its continual pilots. */
+    {
+        static const struct dvbt_signal dvbt[] = {
+            /*  n     g  con hp start  freq_hz   snr echo_us echo_db */
+            { 8192,  8,  2,  2,   0,   338.0,  18.0,  1.6, -24.0 },   /* As the multiplex of the check on air. */
+            { 8192,  4,  1,  1,  13, 166667.0, 25.0,  0.0, -99.0 },
+            { 2048, 32,  0,  0,  60, -12000.0, 12.0,  0.0, -99.0 },
+        };
+
+        for (i = 0; i < sizeof(dvbt) / sizeof(dvbt[0]); i++) {
+            const size_t count = make_dvbt(x, max, fs, &dvbt[i]);
+
+            printf(" DVB-T %dk, guard 1/%d, SNR %.0f dB\n", dvbt[i].n / 1024, dvbt[i].g, dvbt[i].snr_db);
+            CHECK("analyse", m2sdr_dvbt2_analyse(x, count, fs, NULL, res) == 0);
+            CHECK("not found, DVB-T", !res->found && res->dvbt && !res->pilots && res->pattern == 0);
+            CHECK("no pilot MER", !res->pilot_mer_valid && !res->mer_valid);
+        }
     }
 
     memset(x, 0, max * sizeof(*x));
