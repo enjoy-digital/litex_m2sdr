@@ -26,6 +26,18 @@
 
 static const char *const dvbt2_not_read = "S1/S2 and L1 (code rate, PLPs, cell) are not decoded.";
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct dvbt2_res {
+    bool   dvbt2_valid;            /* Measured: the sample rate was one of DVB-T2; dvbt2.found says the rest. */
+    struct m2sdr_dvbt2_result dvbt2;
+};
+
+extern const struct an_mode an_mode_dvbt2;
+#define RES(res) ((struct dvbt2_res *)an_mode_result(&an_mode_dvbt2, (res)))
+
 /* Analysis */
 /*----------*/
 
@@ -38,8 +50,8 @@ static void dvbt2_analyse(const float complex *x, size_t count, const struct an_
 {
     const size_t n = (size_t)(DVBT2_SECONDS * set->sample_rate);
 
-    res->dvbt2_valid = m2sdr_dvbt2_analyse(x, count < n ? count : n, set->sample_rate,
-                                           set->dvbt2_hint.fft_len ? &set->dvbt2_hint : NULL, &res->dvbt2) == 0;
+    RES(res)->dvbt2_valid = m2sdr_dvbt2_analyse(x, count < n ? count : n, set->sample_rate,
+                                                set->dvbt2_hint.fft_len ? &set->dvbt2_hint : NULL, &RES(res)->dvbt2) == 0;
 }
 
 static const char *dvbt2_constellation(const struct m2sdr_dvbt2_result *t, char *text, size_t len)
@@ -57,11 +69,11 @@ static const char *dvbt2_constellation(const struct m2sdr_dvbt2_result *t, char 
 static void dvbt2_report_text(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_dvbt2_result *t = &res->dvbt2;
+    const struct m2sdr_dvbt2_result *t = &RES(res)->dvbt2;
     char text[64];
 
     printf("\nDVB-T2:\n");
-    if (!res->dvbt2_valid) {
+    if (!RES(res)->dvbt2_valid) {
         printf("  The sample rate must be the one of the channel: 9.142857 MSPS (8 MHz), 8 MSPS (7 MHz)\n"
                "  or 6.857143 MSPS (6 MHz).\n");
         return;
@@ -111,12 +123,12 @@ static void dvbt2_report_text(const struct an_result *res, const struct an_repor
 static void dvbt2_report_json(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_dvbt2_result *t = &res->dvbt2;
-    const bool ok = res->dvbt2_valid && t->found;
+    const struct m2sdr_dvbt2_result *t = &RES(res)->dvbt2;
+    const bool ok = RES(res)->dvbt2_valid && t->found;
 
     printf("  \"dvbt2\": {\n");
-    print_json_number("sync_quality", res->dvbt2_valid ? t->sync_quality : 0.0, false);
-    printf("    \"dvbt\": %s,\n", res->dvbt2_valid && t->dvbt ? "true" : "false");
+    print_json_number("sync_quality", RES(res)->dvbt2_valid ? t->sync_quality : 0.0, false);
+    printf("    \"dvbt\": %s,\n", RES(res)->dvbt2_valid && t->dvbt ? "true" : "false");
     printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
     if (!ok) {
         printf("  }");
@@ -181,11 +193,11 @@ static void dvbt2_watch_prepare(struct an_settings *set)
 
 static int dvbt2_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_dvbt2_result *t = &res->dvbt2, *l = &dvbt2_watch.last;
+    const struct m2sdr_dvbt2_result *t = &RES(res)->dvbt2, *l = &dvbt2_watch.last;
     const bool ok = t->found && t->pilots;
     char text[64];
 
-    if (!res->dvbt2_valid) {
+    if (!RES(res)->dvbt2_valid) {
         fprintf(stderr, "The sample rate is not one of DVB-T2.\n");
         return -1;
     }
@@ -307,9 +319,9 @@ static void dvbt2_worker_prepare(struct an_settings *set, bool live)
 
 static void dvbt2_worker_result(const struct an_settings *set, const struct an_result *res)
 {
-    const struct m2sdr_dvbt2_result *t = &res->dvbt2;
+    const struct m2sdr_dvbt2_result *t = &RES(res)->dvbt2;
 
-    if (!set->dvbt2_on || !res->dvbt2_valid)
+    if (!set->dvbt2_on || !RES(res)->dvbt2_valid)
         return;
     if (!t->found || !t->pilots) {
         dvbt2_track.ok = false;
@@ -342,11 +354,11 @@ static void dvbt2_keep(struct an_ui *ui)
 {
     static float no_mer[M2SDR_DVBT2_BINS];
     const struct an_result *res = &ui->res;
-    const struct m2sdr_dvbt2_result *t = &res->dvbt2;
+    const struct m2sdr_dvbt2_result *t = &RES(res)->dvbt2;
     const bool ok = t->found && t->pilots && isfinite(dvbt2_mer(t));
     int i;
 
-    if (!res->set.dvbt2_on || !res->dvbt2_valid)
+    if (!res->set.dvbt2_on || !RES(res)->dvbt2_valid)
         return;
     /* No data MER: its trace below the plot. */
     for (i = 0; i < M2SDR_DVBT2_BINS; i++)
@@ -371,7 +383,7 @@ static void dvbt2_close(struct an_ui *ui)
 /* Result whose P1 is shown: this one, or the last one with a P1 (the short captures often have none). */
 static const struct m2sdr_dvbt2_result *dvbt2_p1_of(const struct an_ui *ui)
 {
-    const struct m2sdr_dvbt2_result *t = &ui->shown->dvbt2;
+    const struct m2sdr_dvbt2_result *t = &RES(ui->shown)->dvbt2;
 
     return t->p1_count || !ui->dvbt2_p1 || !ui->dvbt2_p1->p1_count ? t : ui->dvbt2_p1;
 }
@@ -381,7 +393,7 @@ static void draw_dvbt2(struct an_ui *ui, bool live, bool *changed)
     static const double rates[3] = { 64e6 / 7.0, 8e6, 48e6 / 7.0 };
     static const char *const rate_names[3] = { "8 MHz", "7 MHz", "6 MHz" };
     const struct an_result *res = &ui->res;
-    const struct m2sdr_dvbt2_result *t = &res->dvbt2, *p1;
+    const struct m2sdr_dvbt2_result *t = &RES(res)->dvbt2, *p1;
     const bool ok = t->found && t->pilots;
     ImVec2 avail, sq;
     float side;
@@ -403,7 +415,7 @@ static void draw_dvbt2(struct an_ui *ui, bool live, bool *changed)
         igSetNextItemWidth(100.0f);
         if (igInputInt("##uhf2", &ch, 1, 1, 0) && ch >= 21 && ch <= 69)
             view_retune(ui, DVBT2_UHF_BASE_HZ + 8e6 * ch, changed);
-        if (ok && res->dvbt2_valid && fabs(t->freq_error_hz) > 500.0) {
+        if (ok && RES(res)->dvbt2_valid && fabs(t->freq_error_hz) > 500.0) {
             igSameLine(0.0f, 16.0f);
             snprintf(text, sizeof(text), "Centre on the multiplex (%+.1f kHz)", t->freq_error_hz / 1e3);
             if (igSmallButton(text))
@@ -414,7 +426,7 @@ static void draw_dvbt2(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->dvbt2_valid) {
+    if (!RES(res)->dvbt2_valid) {
         igPushTextWrapPos(0.0f);
         igTextUnformatted("The sample rate must be the one of the channel: 9.142857 MSPS for 8 MHz, 8 MSPS for 7 MHz, "
                           "6.857143 MSPS for 6 MHz.", NULL);
@@ -469,12 +481,12 @@ static void draw_dvbt2(struct an_ui *ui, bool live, bool *changed)
 static void draw_dvbt2_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_dvbt2_result *t = &res->dvbt2, *p1 = dvbt2_p1_of(ui);
+    const struct m2sdr_dvbt2_result *t = &RES(res)->dvbt2, *p1 = dvbt2_p1_of(ui);
     char cons[64];
 
     igSeparatorText("DVB-T2");
-    if (!res->dvbt2_valid || !t->found) {
-        igTextUnformatted(res->dvbt2_valid && t->dvbt ? "Not DVB-T2: a DVB-T multiplex." : "No multiplex.", NULL);
+    if (!RES(res)->dvbt2_valid || !t->found) {
+        igTextUnformatted(RES(res)->dvbt2_valid && t->dvbt ? "Not DVB-T2: a DVB-T multiplex." : "No multiplex.", NULL);
         return;
     }
     if (igBeginTable("##dvbt2", 2, ImGuiTableFlags_SizingStretchProp, (ImVec2){ 0.0f, 0.0f }, 0.0f)) {
@@ -521,8 +533,9 @@ const struct an_mode an_mode_dvbt2 = {
     .title          = "DVB-T2",
     .category       = AN_CAT_BROADCAST,
     .on             = offsetof(struct an_settings, dvbt2_on),
-    .valid          = offsetof(struct an_result, dvbt2_valid),
-    .found          = offsetof(struct an_result, dvbt2.found),
+    .result_size    = sizeof(struct dvbt2_res),
+    .valid          = offsetof(struct dvbt2_res, dvbt2_valid),
+    .found          = offsetof(struct dvbt2_res, dvbt2.found),
     .report_rank    = 21,
     .default_rate   = AN_DVBT_RATE,
     .psd_short      = true,

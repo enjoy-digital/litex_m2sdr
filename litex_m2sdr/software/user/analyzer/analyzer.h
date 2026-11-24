@@ -319,12 +319,6 @@ struct an_result {
     double obw_lo_hz, obw_hi_hz;
     bool   obw_valid;
     double noise_db_hz;
-    struct m2sdr_dvbt_result dvbt;
-    bool   dvbt_valid;             /* Measured: the sample rate was one of DVB-T; dvbt.found says the rest. */
-    struct m2sdr_dab_result dab;
-    bool   dab_valid;              /* Measured: the sample rate was 2.048 MSPS; dab.found says the rest. */
-    struct m2sdr_fm_result fm;
-    bool   fm_valid;               /* Measured: the sample rate was 240 kSPS or more; fm.found says the rest. */
     struct m2sdr_pulse_result pulse;
     bool   pulse_valid;            /* Measured; pulse.found says whether there were pulses. */
     float  pulse_env_db[AN_PULSE_ENV_POINTS];   /* Highest power per point of the capture, dBFS. */
@@ -372,8 +366,6 @@ struct an_result {
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
-    struct m2sdr_dvbt2_result dvbt2;
-    bool   dvbt2_valid;            /* Measured: the sample rate was one of DVB-T2; dvbt2.found says the rest. */
     /* Result of each mode on, by its index in an_modes[], NULL for the others: a block of the
      * result_size of the mode, of a type of its own, read with an_mode_result(). */
     void  *mode[AN_MODES_MAX];

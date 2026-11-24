@@ -20,6 +20,18 @@
 
 #include "analyzer.h"
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct dab_res {
+    bool   dab_valid;              /* Measured: the sample rate was 2.048 MSPS; dab.found says the rest. */
+    struct m2sdr_dab_result dab;
+};
+
+extern const struct an_mode an_mode_dab;
+#define RES(res) ((struct dab_res *)an_mode_result(&an_mode_dab, (res)))
+
 /* Analysis */
 /*----------*/
 
@@ -32,7 +44,7 @@ static void dab_analyse(const float complex *x, size_t count, const struct an_se
 {
     const size_t n = (size_t)(AN_DAB_SECONDS * set->sample_rate);
 
-    res->dab_valid = m2sdr_dab_analyse(x, count < n ? count : n, set->sample_rate, &res->dab) == 0;
+    RES(res)->dab_valid = m2sdr_dab_analyse(x, count < n ? count : n, set->sample_rate, &RES(res)->dab) == 0;
 }
 
 /* Reports */
@@ -43,10 +55,10 @@ static void dab_report_text(const struct an_result *res, const struct an_report 
     const struct an_settings *set = &res->set;
     const double off = rep->off;
     const char *unit = rep->unit;
-    const struct m2sdr_dab_result *t = &res->dab;
+    const struct m2sdr_dab_result *t = &RES(res)->dab;
 
     printf("\nDAB:\n");
-    if (!res->dab_valid) {
+    if (!RES(res)->dab_valid) {
         printf("  The sample rate must be 2.048 MSPS, with at least 110 ms of samples.\n");
     } else if (!t->found) {
         printf("  No ensemble found (null symbol %.1f dB, guard interval correlation %.3f).\n", t->null_depth_db,
@@ -72,11 +84,11 @@ static void dab_report_json(const struct an_result *res, const struct an_report 
 {
     const struct an_settings *set = &res->set;
     const double off = rep->off;
-    const struct m2sdr_dab_result *t = &res->dab;
-    const bool ok = res->dab_valid && t->found;
+    const struct m2sdr_dab_result *t = &RES(res)->dab;
+    const bool ok = RES(res)->dab_valid && t->found;
 
     printf("  \"dab\": {\n");
-    print_json_number("sync_quality", res->dab_valid ? t->sync_quality : 0.0, false);
+    print_json_number("sync_quality", RES(res)->dab_valid ? t->sync_quality : 0.0, false);
     printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
     if (ok) {
         print_json_number("power_db", t->power_dbfs + off, false);
@@ -103,10 +115,10 @@ static unsigned dab_watch_lines;
 
 static int dab_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_dab_result *d = &res->dab;
-    const bool dok = res->dab_valid && d->found && d->prs;
+    const struct m2sdr_dab_result *d = &RES(res)->dab;
+    const bool dok = RES(res)->dab_valid && d->found && d->prs;
 
-    if (!res->dab_valid) {
+    if (!RES(res)->dab_valid) {
         fprintf(stderr, "The sample rate is not the one of DAB (2.048 MSPS).\n");
         return -1;
     }
@@ -186,9 +198,9 @@ static const struct {
 static void dab_keep(struct an_ui *ui)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_dab_result *t = &res->dab;
+    const struct m2sdr_dab_result *t = &RES(res)->dab;
 
-    if (!res->set.dab_on || !res->dab_valid)
+    if (!res->set.dab_on || !RES(res)->dab_valid)
         return;
     trend_add(&ui->dab, &res->set, t->found && t->prs, t->mer_db, t->mer_bin_db, t->channel_bin_db, t->bins, t->echo_db,
               M2SDR_DAB_ECHO_BINS);
@@ -197,7 +209,7 @@ static void dab_keep(struct an_ui *ui)
 static void draw_dab(struct an_ui *ui, bool live, bool *changed)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_dab_result *t = &res->dab;
+    const struct m2sdr_dab_result *t = &RES(res)->dab;
     const bool ok = t->found && t->prs;
     ImVec2 avail, sq;
     float side;
@@ -233,7 +245,7 @@ static void draw_dab(struct an_ui *ui, bool live, bool *changed)
             if (igSmallButton("2.048 MSPS"))
                 view_rate(ui, M2SDR_DAB_SAMPLE_RATE, changed);
         }
-        if (ok && res->dab_valid && fabs(t->freq_error_hz) > 500.0) {
+        if (ok && RES(res)->dab_valid && fabs(t->freq_error_hz) > 500.0) {
             igSameLine(0.0f, 16.0f);
             snprintf(text, sizeof(text), "Centre on the ensemble (%+.1f kHz)", t->freq_error_hz / 1e3);
             if (igSmallButton(text))
@@ -244,7 +256,7 @@ static void draw_dab(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->dab_valid) {
+    if (!RES(res)->dab_valid) {
         igTextUnformatted("The sample rate must be 2.048 MSPS.", NULL);
         return;
     }
@@ -276,10 +288,10 @@ static void draw_dab(struct an_ui *ui, bool live, bool *changed)
 static void draw_dab_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_dab_result *t = &res->dab;
+    const struct m2sdr_dab_result *t = &RES(res)->dab;
 
     igSeparatorText("DAB");
-    if (!res->dab_valid || !t->found) {
+    if (!RES(res)->dab_valid || !t->found) {
         igTextUnformatted("No ensemble.", NULL);
         return;
     }
@@ -313,8 +325,9 @@ const struct an_mode an_mode_dab = {
     .title        = "DAB",
     .category     = AN_CAT_BROADCAST,
     .on           = offsetof(struct an_settings, dab_on),
-    .valid        = offsetof(struct an_result, dab_valid),
-    .found        = offsetof(struct an_result, dab.found),
+    .result_size  = sizeof(struct dab_res),
+    .valid        = offsetof(struct dab_res, dab_valid),
+    .found        = offsetof(struct dab_res, dab.found),
     .report_rank  = 30,
     .default_rate = M2SDR_DAB_SAMPLE_RATE,
     .psd_short    = true,
