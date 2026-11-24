@@ -818,6 +818,12 @@ The figures are next to the views, and `--report` prints the same ones for one c
 | Channel | Power of a channel (`--channel-bw`, `--channel-offset`), ACPR, occupied bandwidth (99 %), noise density |
 | Time domain | Mean and peak power, PAPR, DC offset, I/Q gain imbalance and quadrature error, clipping |
 
+The figures of a mode (every view but Spectrum, Time and Statistics) are refreshed four times a
+second, so that they can be read; the views themselves follow every result. A view that finds something (a multiplex, a cell, a
+station, a carrier) keeps its last result found, greyed out, through up to 2 s of captures
+without one, so that a capture that misses does not empty the figures: the Status says how long
+it has been held. After 2 s it says what the last capture found.
+
 A capture is one block of contiguous samples, `--fft-len` and `--averages` set its length and
 the resolution bandwidth. The window is Hann by default; a flat-top window reads the level of a
 tone within 0.01 dB, a Blackman-Harris window shows weak signals next to strong ones. The tone

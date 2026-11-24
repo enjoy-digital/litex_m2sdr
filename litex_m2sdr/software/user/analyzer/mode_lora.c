@@ -320,7 +320,7 @@ static void draw_lora(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_lora_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_lora_result *l = &res->lora;
 
     igSeparatorText("LoRa");

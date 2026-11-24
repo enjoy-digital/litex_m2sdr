@@ -290,7 +290,7 @@ static void draw_coherence(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_coherence_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_coherence_result *c = &res->coherence;
 
     igSeparatorText("Coherence");
@@ -326,6 +326,7 @@ const struct an_mode an_mode_coherence = {
     .category     = AN_CAT_TWO_CHANNEL,
     .on           = offsetof(struct an_settings, coherence_on),
     .valid        = offsetof(struct an_result, coherence_valid),
+    .found        = offsetof(struct an_result, coherence.found),
     .report_rank  = 70,
     .samples      = coherence_samples,
     .two_channels = true,

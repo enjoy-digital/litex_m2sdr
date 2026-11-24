@@ -270,10 +270,10 @@ static void lte_close(struct an_ui *ui)
 static const struct m2sdr_lte_result *lte_shown(const struct an_ui *ui, bool *held)
 {
     *held = false;
-    if (!ui->res.set.lte_on || !ui->res.lte_valid)
+    if (!ui->shown->set.lte_on || !ui->shown->lte_valid)
         return NULL;
-    if (ui->res.lte.found)
-        return &ui->res.lte;
+    if (ui->shown->lte.found)
+        return &ui->shown->lte;
     if (ui->lte_last_ok && ui->seq - ui->lte_last_seq <= AN_LTE_HOLD) {
         *held = true;
         return ui->lte_last;
@@ -517,7 +517,7 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
 static void draw_lte_results(struct an_ui *ui)
 {
     static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_lte_result *l;
     bool held;
 
@@ -610,6 +610,7 @@ const struct an_mode an_mode_lte = {
     .category    = AN_CAT_CELLULAR,
     .on          = offsetof(struct an_settings, lte_on),
     .valid       = offsetof(struct an_result, lte_valid),
+    .found       = offsetof(struct an_result, lte.found),
     .report_rank = 10,
     .samples     = lte_samples,
     .analyse     = lte_analyse,

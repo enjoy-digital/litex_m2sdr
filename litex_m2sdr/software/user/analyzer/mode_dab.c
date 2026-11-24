@@ -275,7 +275,7 @@ static void draw_dab(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_dab_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_dab_result *t = &res->dab;
 
     igSeparatorText("DAB");
@@ -314,6 +314,7 @@ const struct an_mode an_mode_dab = {
     .category     = AN_CAT_BROADCAST,
     .on           = offsetof(struct an_settings, dab_on),
     .valid        = offsetof(struct an_result, dab_valid),
+    .found        = offsetof(struct an_result, dab.found),
     .report_rank  = 30,
     .default_rate = M2SDR_DAB_SAMPLE_RATE,
     .psd_short    = true,

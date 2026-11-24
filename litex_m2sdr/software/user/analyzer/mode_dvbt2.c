@@ -371,7 +371,7 @@ static void dvbt2_close(struct an_ui *ui)
 /* Result whose P1 is shown: this one, or the last one with a P1 (the short captures often have none). */
 static const struct m2sdr_dvbt2_result *dvbt2_p1_of(const struct an_ui *ui)
 {
-    const struct m2sdr_dvbt2_result *t = &ui->res.dvbt2;
+    const struct m2sdr_dvbt2_result *t = &ui->shown->dvbt2;
 
     return t->p1_count || !ui->dvbt2_p1 || !ui->dvbt2_p1->p1_count ? t : ui->dvbt2_p1;
 }
@@ -468,7 +468,7 @@ static void draw_dvbt2(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_dvbt2_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_dvbt2_result *t = &res->dvbt2, *p1 = dvbt2_p1_of(ui);
     char cons[64];
 
@@ -522,6 +522,7 @@ const struct an_mode an_mode_dvbt2 = {
     .category       = AN_CAT_BROADCAST,
     .on             = offsetof(struct an_settings, dvbt2_on),
     .valid          = offsetof(struct an_result, dvbt2_valid),
+    .found          = offsetof(struct an_result, dvbt2.found),
     .report_rank    = 21,
     .default_rate   = AN_DVBT_RATE,
     .psd_short      = true,

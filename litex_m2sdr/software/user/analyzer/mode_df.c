@@ -576,7 +576,7 @@ static void draw_df(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_df_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_df_result *d = &res->df;
     char text[96];
     int i, n = 0;
@@ -614,6 +614,7 @@ const struct an_mode an_mode_df = {
     .category     = AN_CAT_TWO_CHANNEL,
     .on           = offsetof(struct an_settings, df_on),
     .valid        = offsetof(struct an_result, df_valid),
+    .found        = offsetof(struct an_result, df.found),
     .report_rank  = 71,
     .samples      = df_samples,
     .two_channels = true,

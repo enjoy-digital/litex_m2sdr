@@ -308,7 +308,7 @@ static void draw_imd(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_imd_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_imd_result *d = &res->imd;
     const char *iu = lab_input_unit(&res->set);
     int i;

@@ -347,7 +347,7 @@ static void draw_amam(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_amam_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_amam_result *a = &res->amam;
     int i;
 
