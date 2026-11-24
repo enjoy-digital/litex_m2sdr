@@ -67,6 +67,8 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added the compression to `m2sdr_analyzer`: gain against the input level from a staircase of tone levels in one capture, small-signal gain, P1dB and P3dB (`--compression`).
 - Added the two-tone IMD to `m2sdr_analyzer`: IM3 and IM5, OIP3, IIP3, IP5 and spurs (`--imd`).
 - Added the AM/AM to `m2sdr_analyzer`: AM/AM and AM/PM curves and scatter, EVM and ACLR of a device driven by OFDM-like noise or QAM (`--amam`). The lab measurements are in libm2sdr (`m2sdr_analysis_lab.h`).
+- `m2sdr_analyzer --report` now fails (exit 1) when `--df-cal-store` or `--sweep-thru-save` could not store, as `--pn-floor-save` does.
+- The signal processing of `libm2sdr` is built with `-fcx-limited-range`: the pragma used so far was ignored by GCC (5G NR report 183 to 117 ms, GPS 350 to 201 ms).
 - Added `m2sdr_gen --signal qam`: random PSK or QAM symbols under a root raised cosine, as a test source. `m2sdr_gen` now sends at the sample rate over Ethernet, where it used to send as fast as the host could and the board dropped most of the datagrams, and reports the TX underflows counted by the FPGA.
 
 **FM Utilities**

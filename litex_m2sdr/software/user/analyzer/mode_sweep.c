@@ -72,6 +72,7 @@ static pthread_mutex_t cal_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct m2sdr_sweep_cal cal;
 static char cal_path[1024];
 static bool sweep_stored;          /* --sweep-thru-save: done once. */
+static bool sweep_store_failed;    /* It was asked and not done: --report then fails. */
 
 int sweep_cal_default_path(uint64_t dna, char *path, size_t len)
 {
@@ -234,13 +235,23 @@ static void sweep_analyse(const float complex *x, size_t count, const struct an_
     /* --sweep-thru-save: the first sweep found, from its raw response, calibrated or not. */
     if (set->lab.sweep_store && !sweep_stored) {
         sweep_stored = true;
+        sweep_store_failed = true;
         if (!res->sweep_valid || !res->sweep.found)
             fprintf(stderr, "No stimulus in the capture: no thru stored.\n");
         else if (sweep_cal_store(&res->sweep) != 0 || sweep_cal_save(NULL) != 0)
             fprintf(stderr, "Could not write the thru to %s.\n", cal_path);
-        else
+        else {
             fprintf(stderr, "Sweep stored as the thru in %s.\n", cal_path);
+            sweep_store_failed = false;
+        }
     }
+}
+
+/* --report --sweep-thru-save: the command fails when the thru was not stored. */
+static int sweep_report_done(const struct an_result *res)
+{
+    (void)res;
+    return sweep_store_failed ? -1 : 0;
 }
 
 /* Command line */
@@ -658,6 +669,7 @@ const struct an_mode an_mode_sweep = {
     .stimulus     = sweep_stimulus,
     .report_text  = sweep_report_text,
     .report_json  = sweep_report_json,
+    .report_done  = sweep_report_done,
 #ifdef M2SDR_ANALYZER_GUI
     .draw         = draw_sweep,
     .results      = draw_sweep_results,

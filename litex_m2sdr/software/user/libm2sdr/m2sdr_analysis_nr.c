@@ -16,12 +16,6 @@
 #include "m2sdr_fft.h"
 #include "m2sdr_lte_seq.h"
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3). */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
-
 #define NR_SEQ          127                 /* Subcarriers of the PSS and of the SSS. */
 #define NR_SYNC_FIRST   56                  /* Their first subcarrier in the SSB. */
 #define NR_SSREF        120                 /* Subcarrier of the SSB at SSREF. */

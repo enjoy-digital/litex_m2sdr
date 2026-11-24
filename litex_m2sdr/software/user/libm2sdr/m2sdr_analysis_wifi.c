@@ -15,12 +15,6 @@
 #include "m2sdr_analysis_wireless.h"
 #include "m2sdr_fft.h"
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3). */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
-
 #define NFFT               64
 #define SYM_LEN            80      /* 16 of guard interval and 64: 4 us. */
 #define T1_OFF             192     /* First L-LTF symbol from the start of the L-STF. */

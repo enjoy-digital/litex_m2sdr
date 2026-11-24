@@ -117,7 +117,7 @@ void draw_trend_points(const char *id, ImVec2 size, const float complex *points,
     char label[96];
     int i;
 
-    snprintf(label, sizeof(label), "Q against I, equalised data carriers; crosses: %s", m2sdr_modulation_name(mod));
+    snprintf(label, sizeof(label), "Q against I, equalised symbols; crosses: %s", m2sdr_modulation_name(mod));
     if (!m2sdr_plot_begin(&plot, id, size, -1.6, 1.6, M2SDR_PLOT_PLAIN, -1.6, 1.6, label))
         return;
     n = n < 4096 ? n : 4096;

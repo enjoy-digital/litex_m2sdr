@@ -16,12 +16,6 @@
 #include "m2sdr_analysis_cellular.h"
 #include "m2sdr_resample.h"
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3). */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
-
 #define GSM_R            M2SDR_GSM_SYMBOL_RATE
 #define GSM_SPS          4                  /* Samples a bit of the analysis. */
 #define GSM_FS4          (GSM_SPS * GSM_R)

@@ -801,13 +801,19 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | LTE 2x2 | Paths, condition number and singular values per resource block of a 2-port LTE cell |
 | Lab | Sweep, Compression, IMD and AM/AM tabs: the board sends a stimulus on TX and measures a device between TX and RX ([Lab modes](#sw-analyzer-lab)) |
 
-The tabs of the window group the views by category: Spectrum (Spectrum, Time, Statistics),
-Signal (Phase noise, Modulation), Cellular (LTE) and Broadcast (DVB-T, DVB-T2, DAB). `--view`
-selects one of them by its name: `spectrum`, `time`, `statistics`, `phase-noise`, `modulation`,
-`lte`, `dvbt`, `dvbt2` or `dab`.
-Wi-Fi is in the Wireless category (`wifi`), ADS-B and LoRa in Monitoring (`adsb`, `lora`).
-The Two channels category (Coherence, Direction, LTE 2x2: `coherence`, `df`, `mimo`) compares
-RX1 and RX2: see [Two channels](#sw-analyzer-two).
+The tabs of the window group the views by category, and `--view` selects one by its name:
+
+| Category | Views (`--view` name) |
+|--------------|-------------------------------------------------------------------------------|
+| Spectrum | Spectrum (`spectrum`), Time (`time`), Statistics (`statistics`) |
+| Signal | Phase noise (`phase-noise`), Modulation (`modulation`) |
+| Cellular | LTE (`lte`), 5G NR (`nr`), GSM (`gsm`), TETRA (`tetra`) |
+| Broadcast | DVB-T (`dvbt`), DVB-T2 (`dvbt2`), DAB (`dab`), FM (`fm`) |
+| Wireless | Wi-Fi (`wifi`) |
+| Lab | Sweep (`sweep`), Compression (`compression`), IMD (`imd`), AM/AM (`amam`): see [Lab modes](#sw-analyzer-lab) |
+| Two channels | Coherence (`coherence`), Direction (`df`), LTE 2x2 (`mimo`): see [Two channels](#sw-analyzer-two) |
+| Timing | Allan deviation (`adev`), GPS L1 (`gnss`) |
+| Monitoring | Pulses (`pulses`), EMC (`emc`), ADS-B (`adsb`), LoRa (`lora`) |
 
 The figures are next to the views, and `--report` prints the same ones for one capture:
 

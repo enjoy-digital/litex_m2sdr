@@ -15,12 +15,6 @@
 #include "m2sdr_analysis_lab.h"
 #include "m2sdr_analysis_lab_internal.h"
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3). */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
-
 /* Helpers */
 /*---------*/
 

@@ -14,12 +14,6 @@
 
 #include "m2sdr_analysis_fm.h"
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3). */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
-
 #define CHAN_PASS_HZ     100000.0  /* Channel filter: flat to here... */
 #define CHAN_STOP_HZ     140000.0  /* ...60 dB down from here. */
 #define MPX_PASS_HZ       60000.0  /* Multiplex low-pass of the deviation figures: RDS ends at 59.4 kHz. */
