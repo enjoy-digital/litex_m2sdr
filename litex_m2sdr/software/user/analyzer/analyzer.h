@@ -471,6 +471,10 @@ struct an_mode {
     const struct option *options;
     int    (*option)(int id, const char *arg, struct an_cli *cli);
     void   (*help)(void);             /* Its block of the help, ending with an empty line. */
+    /* After the options, before the source is opened: < 0 an error (after its message), > 0 the
+     * command is done (exit 0). Then once the source is open: < 0 an error. */
+    int    (*start)(struct an_cli *cli);
+    int    (*opened)(struct an_cli *cli);
     /* Capture and analysis. */
     size_t (*samples)(const struct an_settings *set);             /* Samples it needs. */
     void   (*analyse)(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);
