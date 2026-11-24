@@ -341,7 +341,7 @@ static void dvbt_close(struct an_ui *ui)
 /* Result whose TPS fields are shown: this one, or the last one that read it. */
 static const struct m2sdr_dvbt_result *dvbt_tps_of(const struct an_ui *ui)
 {
-    const struct m2sdr_dvbt_result *t = &ui->res.dvbt;
+    const struct m2sdr_dvbt_result *t = &ui->shown->dvbt;
 
     return t->tps || !ui->dvbt_tps || !ui->dvbt_tps->tps ? t : ui->dvbt_tps;
 }
@@ -421,7 +421,7 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_dvbt_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_dvbt_result *t = &res->dvbt, *tp = dvbt_tps_of(ui);
     const double needed = dvbt_needed_db(tp);
 
@@ -471,6 +471,7 @@ const struct an_mode an_mode_dvbt = {
     .category       = AN_CAT_BROADCAST,
     .on             = offsetof(struct an_settings, dvbt_on),
     .valid          = offsetof(struct an_result, dvbt_valid),
+    .found          = offsetof(struct an_result, dvbt.found),
     .report_rank    = 20,
     .default_rate   = AN_DVBT_RATE,
     .psd_short      = true,

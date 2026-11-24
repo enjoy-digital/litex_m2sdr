@@ -366,7 +366,7 @@ static void draw_adsb(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_adsb_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_adsb_result *a = &res->adsb;
     int i, pos = 0;
 

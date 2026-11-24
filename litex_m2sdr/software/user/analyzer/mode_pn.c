@@ -329,7 +329,7 @@ static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_pn_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_phase_noise *pn = &res->pn;
     const struct an_floor *fl = ui->fl;
     char name[32];

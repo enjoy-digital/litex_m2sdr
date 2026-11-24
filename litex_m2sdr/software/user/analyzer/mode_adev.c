@@ -493,7 +493,7 @@ static void draw_adev(struct an_ui *ui, bool live, bool *changed)
 static void draw_adev_results(struct an_ui *ui)
 {
     static const double taus[] = { 0.1, 1.0, 10.0, 100.0 };
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_carrier_result *c = &res->adev;
     unsigned i;
 
@@ -544,6 +544,7 @@ const struct an_mode an_mode_adev = {
     .category     = AN_CAT_TIMING,
     .on           = offsetof(struct an_settings, adev_on),
     .valid        = offsetof(struct an_result, adev_valid),
+    .found        = offsetof(struct an_result, adev.found),
     .report_rank  = 70,
     .options      = adev_options,
     .option       = adev_option,

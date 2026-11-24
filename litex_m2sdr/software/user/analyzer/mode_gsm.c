@@ -429,7 +429,7 @@ static void draw_gsm(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_gsm_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_gsm_result *g = &res->gsm;
     int band = 0, arfcn = gsm_hz_arfcn(res->set.freq_hz, &band);
 
@@ -475,6 +475,7 @@ const struct an_mode an_mode_gsm = {
     .category     = AN_CAT_CELLULAR,
     .on           = offsetof(struct an_settings, gsm_on),
     .valid        = offsetof(struct an_result, gsm_valid),
+    .found        = offsetof(struct an_result, gsm.found),
     .report_rank  = 12,
     .default_rate = AN_GSM_RATE,
     .psd_short    = true,

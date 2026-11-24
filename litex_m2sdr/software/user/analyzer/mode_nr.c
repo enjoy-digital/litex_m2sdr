@@ -414,7 +414,7 @@ static void draw_nr(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_nr_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_nr_result *r = &res->nr;
     const struct m2sdr_nr_ssb *b;
 
@@ -456,6 +456,7 @@ const struct an_mode an_mode_nr = {
     .category       = AN_CAT_CELLULAR,
     .on             = offsetof(struct an_settings, nr_on),
     .valid          = offsetof(struct an_result, nr_valid),
+    .found          = offsetof(struct an_result, nr.found),
     .report_rank    = 11,
     .default_rate   = AN_NR_RATE,
     .psd_short      = true,

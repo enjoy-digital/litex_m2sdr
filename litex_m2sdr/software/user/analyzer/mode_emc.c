@@ -624,7 +624,7 @@ static void draw_emc(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_emc_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_emc_result *e = &res->emc;
     const struct m2sdr_emc_config *cfg = &res->set.emc;
 

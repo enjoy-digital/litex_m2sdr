@@ -337,7 +337,7 @@ static void draw_tetra(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_tetra_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_tetra_result *t = &res->tetra;
     const struct m2sdr_tetra_result *p = t->sync ? t : tetra_have_sync ? &tetra_last_sync : NULL;
 
@@ -391,6 +391,7 @@ const struct an_mode an_mode_tetra = {
     .category     = AN_CAT_CELLULAR,
     .on           = offsetof(struct an_settings, tetra_on),
     .valid        = offsetof(struct an_result, tetra_valid),
+    .found        = offsetof(struct an_result, tetra.found),
     .report_rank  = 13,
     .default_rate = AN_TETRA_RATE,
     .psd_short    = true,

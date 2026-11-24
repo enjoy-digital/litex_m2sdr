@@ -337,7 +337,7 @@ static void draw_gnss(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_gnss_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_gnss_result *g = &res->gnss;
     const struct m2sdr_gnss_jamming *j = &g->jamming;
 
@@ -372,6 +372,7 @@ const struct an_mode an_mode_gnss = {
     .category     = AN_CAT_TIMING,
     .on           = offsetof(struct an_settings, gnss_on),
     .valid        = offsetof(struct an_result, gnss_valid),
+    .found        = offsetof(struct an_result, gnss.found),
     .report_rank  = 71,
     .default_rate = GNSS_RATE,
     .default_freq = 1575.42e6,

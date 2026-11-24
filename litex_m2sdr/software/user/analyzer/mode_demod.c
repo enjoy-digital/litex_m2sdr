@@ -333,7 +333,7 @@ static void draw_modulation(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_modulation_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_demod_result *d = &res->demod;
 
     igSeparatorText("Modulation");
@@ -372,6 +372,7 @@ const struct an_mode an_mode_demod = {
     .category    = AN_CAT_SIGNAL,
     .on          = offsetof(struct an_settings, demod_on),
     .valid       = offsetof(struct an_result, demod_valid),
+    .found       = offsetof(struct an_result, demod.locked),
     .report_rank = 40,
     .samples     = demod_samples,
     .analyse     = demod_analyse,

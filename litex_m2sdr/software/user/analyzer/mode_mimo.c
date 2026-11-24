@@ -348,7 +348,7 @@ static void draw_mimo(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_mimo_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_mimo_result *m = &res->mimo;
 
     igSeparatorText("LTE 2x2");
@@ -383,6 +383,7 @@ const struct an_mode an_mode_mimo = {
     .category     = AN_CAT_TWO_CHANNEL,
     .on           = offsetof(struct an_settings, mimo_on),
     .valid        = offsetof(struct an_result, mimo_valid),
+    .found        = offsetof(struct an_result, mimo.found),
     .report_rank  = 72,
     .default_rate = 7680000.0,
     .psd_short    = true,

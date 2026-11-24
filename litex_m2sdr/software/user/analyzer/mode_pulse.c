@@ -459,7 +459,7 @@ static void draw_pulse(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_pulse_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_pulse_result *p = &res->pulse;
     char text[128];
     int n = 0, k;
@@ -516,6 +516,7 @@ const struct an_mode an_mode_pulse = {
     .category     = AN_CAT_MONITORING,
     .on           = offsetof(struct an_settings, pulse_on),
     .valid        = offsetof(struct an_result, pulse_valid),
+    .found        = offsetof(struct an_result, pulse.found),
     .report_rank  = 80,
     .psd_short    = true,
     .samples      = pulse_samples,

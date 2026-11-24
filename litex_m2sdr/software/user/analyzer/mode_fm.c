@@ -592,7 +592,7 @@ static void draw_fm(struct an_ui *ui, bool live, bool *changed)
 
 static void draw_fm_results(struct an_ui *ui)
 {
-    const struct an_result *res = &ui->res;
+    const struct an_result *res = ui->shown;
     const struct m2sdr_fm_result *f = &res->fm;
     const struct m2sdr_fm_rds_info *r = &f->rds_info;
     const struct an_fm_ui *v = ui->fm;
@@ -647,6 +647,7 @@ const struct an_mode an_mode_fm = {
     .category     = AN_CAT_BROADCAST,
     .on           = offsetof(struct an_settings, fm_on),
     .valid        = offsetof(struct an_result, fm_valid),
+    .found        = offsetof(struct an_result, fm.found),
     .report_rank  = 40,
     .default_rate = FM_DEFAULT_RATE,
     .psd_short    = true,
