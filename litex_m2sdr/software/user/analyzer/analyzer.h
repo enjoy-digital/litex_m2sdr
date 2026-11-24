@@ -112,6 +112,11 @@
 #define AN_DF_CAL_MAX           64            /* Calibrations stored per board. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
+/* Results panel: its figures are refreshed at most every AN_PANEL_PERIOD_MS, to be read; a mode
+ * that finds something keeps its last result found through AN_PANEL_HOLD_MS of captures without,
+ * so a capture that misses does not change the whole panel. The views stay live. */
+#define AN_PANEL_PERIOD_MS     250.0
+#define AN_PANEL_HOLD_MS      2000.0
 /* Monitoring. */
 #define AN_PULSE_SECONDS        0.05          /* Capture of a pulse analysis: 3 pulses of PRIs up to 16 ms. */
 #define AN_PULSE_ENV_POINTS     2048          /* Envelope of the capture kept for the view (peak per point). */
@@ -460,6 +465,8 @@ struct an_mode {
     enum an_category category;
     size_t on;                     /* offsetof(struct an_settings, <flag>); AN_NONE: always measured. */
     size_t valid;                  /* offsetof(struct an_result, <flag>): cleared before each analysis. */
+    size_t found;                  /* offsetof(struct an_result, <flag>): something was found (a cell, a
+                                    * carrier), see AN_PANEL_HOLD_S; 0: its results are shown as they come. */
     int    report_rank;            /* Place of its section in the reports: lower first. */
     double default_rate;           /* Sample rate when it is on and none is given; 0: none. */
     double default_freq;           /* Centre frequency when it is on and none is given; 0: none. */
@@ -610,6 +617,12 @@ struct an_ui {
     struct an_settings set;        /* Edited by the controls. */
     struct an_result res;          /* Result being drawn. */
     unsigned seq;
+    /* Results panel: the result it shows (res, or the panel copy), see panel_update(). */
+    const struct an_result *shown;  /* res, except while the panel draws its copy. */
+    struct an_result *panel;
+    bool   panel_ok, panel_found, panel_held;
+    int    panel_tab;
+    double panel_t, found_t;       /* now_ms() of its last copy and of the last result found. */
     /* Traces, in dB, of res.psd.bins points. */
     float *trace[UI_TRACES];
     double *avg_lin;

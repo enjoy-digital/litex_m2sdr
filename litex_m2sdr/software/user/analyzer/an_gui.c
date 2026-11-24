@@ -58,6 +58,63 @@ static int result_copy(struct an_result *dst, const struct an_result *src)
     return 0;
 }
 
+/* Results panel */
+/*---------------*/
+
+static bool flag_at(const struct an_result *res, size_t off)
+{
+    return *(const bool *)((const char *)res + off);
+}
+
+/* The mode found something in res: what its panel holds through short misses. */
+static bool mode_found(const struct an_mode *m, const struct an_result *res)
+{
+    if (!m->found)
+        return true;
+    if (m->valid != AN_NONE && !flag_at(res, m->valid))
+        return false;
+    return flag_at(res, m->found);
+}
+
+/* With each new result: the panel takes it at most every AN_PANEL_PERIOD_MS, at once when the
+ * view, the tuning or what is found changes, and keeps the last result found through
+ * AN_PANEL_HOLD_MS of results without. */
+static void panel_update(struct an_ui *ui)
+{
+    const struct an_mode *m = an_modes[ui->tab];
+    const double now = now_ms();
+    bool found, same;
+
+    if (!ui->panel)
+        return;
+    found = mode_found(m, &ui->res);
+    same  = ui->panel_ok && ui->panel_tab == ui->tab &&
+            ui->panel->set.freq_hz == ui->res.set.freq_hz &&
+            ui->panel->set.sample_rate == ui->res.set.sample_rate;
+
+    if (found)
+        ui->found_t = now;
+    ui->panel_held = same && !found && ui->panel_found && now - ui->found_t < AN_PANEL_HOLD_MS;
+    if (ui->panel_held)
+        return;
+    if (same && found == ui->panel_found && now - ui->panel_t < AN_PANEL_PERIOD_MS)
+        return;
+    if (result_copy(ui->panel, &ui->res) != 0) {
+        ui->panel_ok = false;
+        return;
+    }
+    ui->panel_ok    = true;
+    ui->panel_found = found;
+    ui->panel_tab   = ui->tab;
+    ui->panel_t     = now;
+}
+
+/* What the panel of the view shown draws: its copy, or the last result before the first one. */
+static const struct an_result *panel_result(const struct an_ui *ui)
+{
+    return ui->panel_ok && ui->panel_tab == ui->tab ? ui->panel : &ui->res;
+}
+
 /* A capture and its analysis. The worker captures into one job while the other is analysed in
  * its own thread: a result every max(capture, analysis) instead of their sum. */
 struct an_job {
@@ -887,7 +944,14 @@ static void draw_results(struct an_ui *ui, struct an_shared *sh, bool *changed)
 
     /* The figures of the mode shown, or the ones of the spectrum. */
     if (an_modes[ui->tab]->results) {
+        /* A result held is greyed out: no line comes or goes, the Status says why. */
+        ui->shown = panel_result(ui);
+        if (ui->panel_held)
+            igPushStyleColor_Vec4(ImGuiCol_Text, igGetStyle()->Colors[ImGuiCol_TextDisabled]);
         an_modes[ui->tab]->results(ui);
+        if (ui->panel_held)
+            igPopStyleColor(1);
+        ui->shown = &ui->res;
         goto status;
     }
 
@@ -1007,6 +1071,12 @@ status:
         pthread_mutex_unlock(&sh->lock);
         igText("Capture %.0f ms, analysis %.0f ms", capture_ms, analysis_ms);
         igText("%zu samples, %u segments", capture_samples(&res->set), res->psd.segments);
+        if (an_modes[ui->tab]->results && an_modes[ui->tab]->found) {
+            if (ui->panel_held)
+                igTextDisabled("Not found for %.1f s: last result held", (now_ms() - ui->found_t) / 1e3);
+            else
+                igTextDisabled("Results: every %.2f s", AN_PANEL_PERIOD_MS / 1e3);
+        }
         if (status[0]) {
             igPushTextWrapPos(0.0f);
             igTextColored((ImVec4){ 1.0f, 0.4f, 0.3f, 1.0f }, "%s", status);
@@ -1126,6 +1196,7 @@ int run_gui(struct an_source *src, const struct an_settings *set, int first_view
 
     memset(&sh, 0, sizeof(sh));
     memset(&ui, 0, sizeof(ui));
+    ui.shown = &ui.res;
     pthread_mutex_init(&sh.lock, NULL);
     sh.set = *set;
     sh.src = src;
@@ -1179,6 +1250,7 @@ int run_gui(struct an_source *src, const struct an_settings *set, int first_view
         return 1;
     }
     waterfall_init(&ui);
+    ui.panel = calloc(1, sizeof(*ui.panel));   /* NULL: the panel shows each result. */
     if (pthread_create(&worker, NULL, worker_main, &sh) != 0) {
         fprintf(stderr, "Could not start the worker thread\n");
         quit = true;
@@ -1222,6 +1294,7 @@ int run_gui(struct an_source *src, const struct an_settings *set, int first_view
                 if (an_modes[m]->keep)
                     an_modes[m]->keep(&ui);
             }
+            panel_update(&ui);
         } else {
             pthread_mutex_unlock(&sh.lock);
         }
@@ -1292,6 +1365,9 @@ int run_gui(struct an_source *src, const struct an_settings *set, int first_view
             an_modes[m]->close(&ui);
     }
     free(ui.res.psd.power);
+    if (ui.panel)
+        free(ui.panel->psd.power);
+    free(ui.panel);
     free(sh.res.psd.power);
     pthread_mutex_destroy(&sh.lock);
     return 0;
