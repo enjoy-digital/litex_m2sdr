@@ -321,15 +321,6 @@ struct an_result {
     double noise_db_hz;
     struct an_capture_time capture;  /* Set from the source before the analysis. */
     bool   two_channels;           /* The capture had both channels: the modes of two are measured. */
-    struct m2sdr_sweep_result sweep;
-    bool   sweep_valid;            /* Measured: the settings make a sweep; sweep.found says the rest. */
-    struct m2sdr_compression_result compression;
-    bool   compression_valid;
-    double compression_freq_hz;    /* Of its tone. */
-    struct m2sdr_imd_result imd;
-    bool   imd_valid;
-    struct m2sdr_amam_result amam;
-    bool   amam_valid;
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */

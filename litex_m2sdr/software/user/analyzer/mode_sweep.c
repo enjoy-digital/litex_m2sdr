@@ -31,6 +31,18 @@
 #define SWEEP_POINTS       201
 #define SWEEP_LEVEL_DBFS   -10.0
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct sweep_res {
+    bool   sweep_valid;            /* Measured: the settings make a sweep; sweep.found says the rest. */
+    struct m2sdr_sweep_result sweep;
+};
+
+extern const struct an_mode an_mode_sweep;
+#define RES(res) ((struct sweep_res *)an_mode_result(&an_mode_sweep, (res)))
+
 /* Lab, shared */
 /*-------------*/
 
@@ -229,16 +241,16 @@ static void sweep_analyse(const float complex *x, size_t count, const struct an_
         }
     }
     /* A thru of other points or another span is not applied. */
-    res->sweep_valid = m2sdr_sweep_analyse(x, count, set->sample_rate, &cfg, c, &res->sweep) == 0 ||
-                       (c && m2sdr_sweep_analyse(x, count, set->sample_rate, &cfg, NULL, &res->sweep) == 0);
+    RES(res)->sweep_valid = m2sdr_sweep_analyse(x, count, set->sample_rate, &cfg, c, &RES(res)->sweep) == 0 ||
+                       (c && m2sdr_sweep_analyse(x, count, set->sample_rate, &cfg, NULL, &RES(res)->sweep) == 0);
     free(c);
     /* --sweep-thru-save: the first sweep found, from its raw response, calibrated or not. */
     if (set->lab.sweep_store && !sweep_stored) {
         sweep_stored = true;
         sweep_store_failed = true;
-        if (!res->sweep_valid || !res->sweep.found)
+        if (!RES(res)->sweep_valid || !RES(res)->sweep.found)
             fprintf(stderr, "No stimulus in the capture: no thru stored.\n");
-        else if (sweep_cal_store(&res->sweep) != 0 || sweep_cal_save(NULL) != 0)
+        else if (sweep_cal_store(&RES(res)->sweep) != 0 || sweep_cal_save(NULL) != 0)
             fprintf(stderr, "Could not write the thru to %s.\n", cal_path);
         else {
             fprintf(stderr, "Sweep stored as the thru in %s.\n", cal_path);
@@ -422,7 +434,7 @@ static void sweep_gd_stats(const struct m2sdr_sweep_result *s, double *mean, dou
 static void sweep_report_text(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_sweep_result *s = &res->sweep;
+    const struct m2sdr_sweep_result *s = &RES(res)->sweep;
     struct m2sdr_sweep_config cfg;
     double mean, pp;
     int k, kmin = 0, kmax = 0;
@@ -433,7 +445,7 @@ static void sweep_report_text(const struct an_result *res, const struct an_repor
     printf("  Stimulus   : %s, %d points from %+.3f to %+.3f MHz, %.1f dBFS, TX attenuation %d dB\n",
            cfg.stimulus == M2SDR_SWEEP_CHIRP ? "chirp" : "stepped tones", cfg.points, cfg.start_hz / 1e6, cfg.stop_hz / 1e6,
            cfg.level_dbfs, set->lab.tx_att);
-    if (!res->sweep_valid) {
+    if (!RES(res)->sweep_valid) {
         printf("  These settings do not make a sweep (span, points or capture).\n");
         return;
     }
@@ -459,14 +471,14 @@ static void sweep_report_text(const struct an_result *res, const struct an_repor
 
 static void sweep_report_json(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_sweep_result *s = &res->sweep;
-    const bool ok = res->sweep_valid && s->found;
+    const struct m2sdr_sweep_result *s = &RES(res)->sweep;
+    const bool ok = RES(res)->sweep_valid && s->found;
     double mean, pp, gd_ns[M2SDR_SWEEP_MAX_POINTS];
     int k;
 
     (void)rep;
     printf("  \"sweep\": {\n");
-    print_json_number("sync_quality_db", res->sweep_valid ? s->sync_quality : 0.0, false);
+    print_json_number("sync_quality_db", RES(res)->sweep_valid ? s->sync_quality : 0.0, false);
     printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
     if (ok) {
         sweep_gd_stats(s, &mean, &pp);
@@ -515,7 +527,7 @@ static void draw_sweep(struct an_ui *ui, bool live, bool *changed)
     static const char *const kinds[] = { "Stepped tones", "Chirp" };
     static float fx[M2SDR_SWEEP_MAX_POINTS], fy[M2SDR_SWEEP_MAX_POINTS];
     const struct an_result *res = &ui->res;
-    const struct m2sdr_sweep_result *s = &res->sweep;
+    const struct m2sdr_sweep_result *s = &RES(res)->sweep;
     struct m2sdr_plot plot;
     ImVec2 avail;
     double span = ui->set.lab.sweep_span_hz > 0 ? ui->set.lab.sweep_span_hz : 0.8 * ui->set.sample_rate;
@@ -550,7 +562,7 @@ static void draw_sweep(struct an_ui *ui, bool live, bool *changed)
             *changed = true;
         }
     }
-    if (igButton("Store as thru", (ImVec2){ 0.0f, 0.0f }) && res->sweep_valid && s->found) {
+    if (igButton("Store as thru", (ImVec2){ 0.0f, 0.0f }) && RES(res)->sweep_valid && s->found) {
         /* From the raw response of the result, calibrated or not. */
         if (sweep_cal_store(s) == 0) {
             if (sweep_cal_save(NULL) == 0)
@@ -577,10 +589,10 @@ static void draw_sweep(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->sweep_valid || !s->found) {
+    if (!RES(res)->sweep_valid || !s->found) {
         igPushTextWrapPos(0.0f);
         igText("No stimulus in the capture (correlation %.1f dB): TX to RX through the device, the TX attenuation low "
-               "enough, the RX gain high enough.", res->sweep_valid ? s->sync_quality : 0.0);
+               "enough, the RX gain high enough.", RES(res)->sweep_valid ? s->sync_quality : 0.0);
         igPopTextWrapPos();
         return;
     }
@@ -624,11 +636,11 @@ static void draw_sweep(struct an_ui *ui, bool live, bool *changed)
 static void draw_sweep_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_sweep_result *s = &res->sweep;
+    const struct m2sdr_sweep_result *s = &RES(res)->sweep;
     double mean, pp;
 
     igSeparatorText("Sweep");
-    if (!res->sweep_valid || !s->found) {
+    if (!RES(res)->sweep_valid || !s->found) {
         igTextUnformatted("No stimulus.", NULL);
         return;
     }
@@ -655,7 +667,8 @@ const struct an_mode an_mode_sweep = {
     .title        = "Sweep",
     .category     = AN_CAT_LAB,
     .on           = offsetof(struct an_settings, sweep_on),
-    .valid        = offsetof(struct an_result, sweep_valid),
+    .result_size  = sizeof(struct sweep_res),
+    .valid        = offsetof(struct sweep_res, sweep_valid),
     .report_rank  = 40,
     .psd_short    = true,
     .defaults     = sweep_defaults,

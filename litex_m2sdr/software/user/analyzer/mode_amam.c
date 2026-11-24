@@ -27,6 +27,18 @@
 #define AMAM_LEVEL_DBFS -15.0
 #define AMAM_SEED       1           /* The stimulus is the same from capture to capture. */
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct amam_res {
+    bool   amam_valid;
+    struct m2sdr_amam_result amam;
+};
+
+extern const struct an_mode an_mode_amam;
+#define RES(res) ((struct amam_res *)an_mode_result(&an_mode_amam, (res)))
+
 /* Stimulus */
 /*----------*/
 
@@ -71,7 +83,7 @@ static void amam_analyse(const float complex *x, size_t count, const struct an_s
 
     if (!ref)
         return;
-    res->amam_valid = m2sdr_amam_analyse(x, count, set->sample_rate, ref, period, NULL, &res->amam) == 0;
+    RES(res)->amam_valid = m2sdr_amam_analyse(x, count, set->sample_rate, ref, period, NULL, &RES(res)->amam) == 0;
     free(ref);
 }
 
@@ -94,7 +106,7 @@ static const char *amam_stimulus_name(const struct an_settings *set, char *buf, 
 static void amam_report_text(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_amam_result *a = &res->amam;
+    const struct m2sdr_amam_result *a = &RES(res)->amam;
     const double in_off = lab_input_offset(set);
     const char *iu = lab_input_unit(set);
     char name[96];
@@ -103,9 +115,9 @@ static void amam_report_text(const struct an_result *res, const struct an_report
     printf("\nAM/AM:\n");
     printf("  Stimulus   : %s, %.1f dBFS, TX attenuation %d dB\n", amam_stimulus_name(set, name, sizeof(name)),
            set->lab.amam_level_dbfs != 0.0 ? set->lab.amam_level_dbfs : AMAM_LEVEL_DBFS, set->lab.tx_att);
-    if (!res->amam_valid || !a->found) {
+    if (!RES(res)->amam_valid || !a->found) {
         printf("  The stimulus is not in the capture (correlation %.1f dB): TX to RX through the device?\n",
-               res->amam_valid ? a->sync_quality : 0.0);
+               RES(res)->amam_valid ? a->sync_quality : 0.0);
         return;
     }
     printf("  Input      : %.2f %s mean, %.2f %s peak\n", a->input_rms_dbfs + in_off, iu, a->input_peak_dbfs + in_off, iu);
@@ -126,14 +138,14 @@ static void amam_report_text(const struct an_result *res, const struct an_report
 static void amam_report_json(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_amam_result *a = &res->amam;
-    const bool ok = res->amam_valid && a->found;
+    const struct m2sdr_amam_result *a = &RES(res)->amam;
+    const bool ok = RES(res)->amam_valid && a->found;
     const double in_off = lab_input_offset(set);
     double in[M2SDR_AMAM_BINS], gain[M2SDR_AMAM_BINS], phase[M2SDR_AMAM_BINS];
     int b, n = 0, i;
 
     printf("  \"amam\": {\n");
-    print_json_number("sync_quality_db", res->amam_valid ? a->sync_quality : 0.0, false);
+    print_json_number("sync_quality_db", RES(res)->amam_valid ? a->sync_quality : 0.0, false);
     printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
     if (ok) {
         for (b = 0; b < a->bins; b++) {
@@ -260,7 +272,7 @@ static void draw_amam(struct an_ui *ui, bool live, bool *changed)
     static const char *const kinds[] = { "OFDM-like noise", "QAM" };
     static float bx[M2SDR_AMAM_BINS], bg[M2SDR_AMAM_BINS], bp[M2SDR_AMAM_BINS];
     const struct an_result *res = &ui->res;
-    const struct m2sdr_amam_result *a = &res->amam;
+    const struct m2sdr_amam_result *a = &RES(res)->amam;
     struct m2sdr_plot plot;
     ImVec2 avail;
     double v, xmax = 0, glo = 0, ghi = 0, plo = 0, phi = 0;
@@ -302,9 +314,9 @@ static void draw_amam(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->amam_valid || !a->found) {
+    if (!RES(res)->amam_valid || !a->found) {
         igText("The stimulus is not in the capture (correlation %.1f dB): TX to RX through the device.",
-               res->amam_valid ? a->sync_quality : 0.0);
+               RES(res)->amam_valid ? a->sync_quality : 0.0);
         return;
     }
     for (b = 0; b < a->bins; b++) {
@@ -348,11 +360,11 @@ static void draw_amam(struct an_ui *ui, bool live, bool *changed)
 static void draw_amam_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_amam_result *a = &res->amam;
+    const struct m2sdr_amam_result *a = &RES(res)->amam;
     int i;
 
     igSeparatorText("AM/AM");
-    if (!res->amam_valid || !a->found) {
+    if (!RES(res)->amam_valid || !a->found) {
         igTextUnformatted("No stimulus.", NULL);
         return;
     }
@@ -382,7 +394,8 @@ const struct an_mode an_mode_amam = {
     .title        = "AM/AM",
     .category     = AN_CAT_LAB,
     .on           = offsetof(struct an_settings, amam_on),
-    .valid        = offsetof(struct an_result, amam_valid),
+    .result_size  = sizeof(struct amam_res),
+    .valid        = offsetof(struct amam_res, amam_valid),
     .report_rank  = 43,
     .options      = amam_options,
     .option       = amam_option,
