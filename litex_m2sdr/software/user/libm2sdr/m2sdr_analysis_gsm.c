@@ -34,6 +34,11 @@
 
 #define FCCH_WIN         128                /* Bits of the tone summed: it lasts 148. */
 #define FCCH_MIN         0.5                /* Coherence of the tone; noise and data read under 0.1. */
+/* Coherence of the burst over its 148 bits against itself 6 bits earlier: S / (S + N) for a
+ * tone of signal to noise S / N in the receive band, 0.89 at 9 dB, 0.67 at 3 dB (where the SCH
+ * no longer decodes). Other signals pass the test of the runs a few bits at a time: an OFDM or
+ * a WCDMA carrier whose spectrum is not even in the band, around 0.1 and under 0.5 on air. */
+#define FCCH_MIN_BURST   0.6
 #define FCCH_MIN_RUN     10                 /* Bits over the threshold: a burst gives about 150, */
 #define FCCH_MAX_RUN     300                /* a steady tone the whole capture. */
 #define FCCH_LAG         24                 /* Samples of the fine estimate: 6 bits. */
@@ -565,7 +570,8 @@ int m2sdr_gsm_analyse(const float complex *x, size_t count, double sample_rate, 
                 const double complex vm = cs[at_best + w] - cs[at_best];
                 double t, f2, quality;
 
-                if (fcch_refine(y, ny, run0, run, carg(-vm) / (4.0 * M_PI) * GSM_R, &t, &f2, &quality) == 0) {
+                if (fcch_refine(y, ny, run0, run, carg(-vm) / (4.0 * M_PI) * GSM_R, &t, &f2, &quality) == 0 &&
+                    quality >= FCCH_MIN_BURST) {
                     /* One burst seen as two runs: the better one. */
                     if (nf > 0 && fabs(t - fcch_t[nf - 1]) < 100.0 * GSM_SPS) {
                         if (quality > fcch_w[nf - 1]) {

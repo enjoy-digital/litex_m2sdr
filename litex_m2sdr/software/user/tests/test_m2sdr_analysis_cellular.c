@@ -171,6 +171,34 @@ static void make_gsm(float complex *x, size_t count, const struct gsm_signal *si
     add_noise(x, count, GSM_AMP * GSM_AMP * pow(10.0, -sig->snr_db / 10.0) * sig->fs / 340e3);
 }
 
+/* An OFDM carrier at 1.92 MSPS (LTE-like: 128 points, 15 kHz, cyclic prefix of 9), QPSK on
+ * the bins lo to hi, and an echo: no FCCH in it. With an edge of its spectrum in the receive
+ * band, the turn of its phase over a bit has a mean that passed the test of the runs. */
+static void make_ofdm(float complex *x, size_t count, int lo, int hi, double echo_us, double echo_db)
+{
+    struct m2sdr_fft *ifft = m2sdr_fft_alloc(128, true);
+    float complex f[128], t[128];
+    const size_t e = (size_t)lround(echo_us * 1.92);
+    const float a = (float)pow(10.0, echo_db / 20.0);
+    size_t i, at = 0;
+    int k;
+
+    memset(x, 0, count * sizeof(*x));
+    while (ifft && at < count) {
+        memset(f, 0, sizeof(f));
+        for (k = lo; k <= hi; k++)
+            if (k)
+                f[(k + 128) % 128] = 0.05f * ((rng_bit() ? 1.0f : -1.0f) + I * (rng_bit() ? 1.0f : -1.0f));
+        m2sdr_fft_run(ifft, f, t);
+        for (k = 0; k < 137 && at < count; k++, at++)
+            x[at] = t[(k - 9 + 128) % 128];
+    }
+    for (i = count; i-- > e;)
+        x[i] += a * x[i - e];
+    add_noise(x, count, 1e-5);
+    m2sdr_fft_free(ifft);
+}
+
 static void test_gsm(void)
 {
     static const struct gsm_signal signals[] = {
@@ -252,6 +280,21 @@ static void test_gsm(void)
     memset(x, 0, max * sizeof(*x));
     add_noise(x, max, 0.01);
     CHECK("noise", m2sdr_gsm_analyse(x, max, 2.166667e6, NULL, res) == 0 && !res->found && !res->fcch);
+    /* OFDM carriers, their edge in the band, with and without an echo: 40 of these 60 gave
+     * an FCCH before the coherence of the burst was asked for. */
+    {
+        static const int bins[3][2] = { { -60, 60 }, { 0, 40 }, { -40, 0 } };
+        const size_t n = (size_t)(0.06 * 1.92e6);
+        int c, k, false_fcch = 0;
+
+        for (c = 0; c < 3; c++)
+            for (k = 0; k < 20; k++) {
+                make_ofdm(x, n, bins[c][0], bins[c][1], k % 2 ? 1.5 : 0.0, -3.0);
+                if (m2sdr_gsm_analyse(x, n, 1.92e6, NULL, res) != 0 || res->fcch)
+                    false_fcch++;
+            }
+        CHECK("OFDM carriers: no FCCH", false_fcch == 0);
+    }
     for (i = 0; i < max; i++)
         x[i] += (float complex)(0.3 * cexp(I * 2.0 * M_PI * (M2SDR_GSM_SYMBOL_RATE / 4.0 + 300.0) * (double)i / 2.166667e6));
     CHECK("steady tone at the FCCH", m2sdr_gsm_analyse(x, max, 2.166667e6, NULL, res) == 0 && !res->fcch);
@@ -868,6 +911,7 @@ static int check_file(const char *path, int which)
         printf("GSM report of m2sdr_analyzer:\n");
         CHECK("FCCH and SCH", strstr(json, "\"fcch\": true") && strstr(json, "\"found\": true"));
         CHECK_NEAR("ARFCN", json_number(json, "gsm", "arfcn"), 62, 0.0);
+        CHECK("band P-GSM 900", strstr(json, "\"band\": \"P-GSM 900\"") != NULL);
         CHECK_NEAR("BSIC", json_number(json, "gsm", "bsic"), file_gsm.bsic, 0.0);
         CHECK_NEAR("frame number", json_number(json, "gsm", "fn"), 1010, 0.0);
         CHECK_NEAR("carrier offset (Hz)", json_number(json, "gsm", "carrier_offset_hz"), file_gsm.freq_hz, 10.0);
