@@ -680,8 +680,285 @@ static void test_amam(void)
     free(res);
 }
 
-int main(void)
+/* Report tests: captures for m2sdr_analyzer --report */
+/*-----------------------------------------------------*/
+
+/* The stimulus written by m2sdr_analyzer --lab-stimulus-out (SC16 Q11, two channels): the
+ * first channel, full scale 1.0. */
+static float complex *read_stimulus(const char *path, size_t *period)
 {
+    FILE *f = fopen(path, "rb");
+    float complex *x = NULL;
+    long bytes;
+    size_t i;
+
+    if (!f)
+        return NULL;
+    fseek(f, 0, SEEK_END);
+    bytes = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    *period = (size_t)bytes / 8;
+    x = malloc(*period * sizeof(*x));
+    for (i = 0; x && i < *period; i++) {
+        short v[4];
+        if (fread(v, sizeof(v), 1, f) != 1) {
+            free(x);
+            x = NULL;
+            break;
+        }
+        x[i] = (v[0] + I * v[1]) / 2048.0f;
+    }
+    fclose(f);
+    return x;
+}
+
+static int write_capture_file(const char *path, const float complex *x, size_t count)
+{
+    FILE *f = fopen(path, "wb");
+    size_t i;
+
+    if (!f)
+        return 1;
+    for (i = 0; i < count; i++) {
+        const short re = (short)lrintf(fminf(fmaxf(crealf(x[i]), -1.0f), 1.0f) * 2047.0f);
+        const short im = (short)lrintf(fminf(fmaxf(cimagf(x[i]), -1.0f), 1.0f) * 2047.0f);
+        const short v[4] = { re, im, re, im };
+        if (fwrite(v, sizeof(v), 1, f) != 1)
+            return 1;
+    }
+    return fclose(f) == 0 ? 0 : 1;
+}
+
+static char *read_json(const char *path)
+{
+    static char json[1 << 20];
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f)
+        return NULL;
+    n = fread(json, 1, sizeof(json) - 1, f);
+    fclose(f);
+    json[n] = '\0';
+    return json;
+}
+
+static double json_number(const char *json, const char *section, const char *name)
+{
+    char key[64];
+    const char *p;
+
+    snprintf(key, sizeof(key), "\"%s\"", section);
+    p = strstr(json, key);
+    if (!p)
+        return NAN;
+    snprintf(key, sizeof(key), "\"%s\":", name);
+    p = strstr(p, key);
+    return p ? strtod(p + strlen(key), NULL) : NAN;
+}
+
+static int report_done(const char *what)
+{
+    if (failures) {
+        printf("test_m2sdr_analysis_lab: %s report, %d FAILED\n", what, failures);
+        return 1;
+    }
+    printf("test_m2sdr_analysis_lab: %s report checked\n", what);
+    return 0;
+}
+
+/* Sweep: a thru (the radio: -3 dB, 40 degrees, 23 samples) and the one-pole filter behind it,
+ * captured at other offsets of the stimulus. */
+static int write_sweep(const char *stim_path, const char *thru_path, const char *dut_path)
+{
+    const struct path thru = { -3.0, 40.0, 23, 0.0 };
+    const struct path dut  = { -3.0, 40.0, 23, 0.5 };
+    size_t period, count;
+    float complex *stim = read_stimulus(stim_path, &period), *x;
+    int rc;
+
+    if (!stim)
+        return 1;
+    count = 5 * period;
+    x = malloc(count * sizeof(*x));
+    run_path(stim, period, &thru, 4 * period + 1234, x, count, 1e-7);
+    rc = write_capture_file(thru_path, x, count);
+    run_path(stim, period, &dut, 4 * period + 777, x, count, 1e-7);
+    rc |= write_capture_file(dut_path, x, count);
+    free(x);
+    free(stim);
+    return rc;
+}
+
+static int check_sweep(const char *path)
+{
+    const char *json = read_json(path);
+    double gd_lo = 1e9, gd_hi = -1e9, f;
+
+    if (!json)
+        return 1;
+    printf("Sweep report:\n");
+    CHECK("found", strstr(json, "\"found\": true") != NULL);
+    CHECK("calibrated", strstr(json, "\"calibrated\": true") != NULL);
+    /* Default span: 0.8 of 1 MSPS, 201 points; the one-pole filter from 0 dB at the centre to
+     * |H(400 kHz)| at the edges. The 12-bit capture adds -70 dBFS of noise: 0.02 dB. */
+    CHECK_NEAR("|S21| centre (dB)", json_number(json, "sweep", "mag_centre_db"), 0.0, 0.02);
+    CHECK_NEAR("|S21| max (dB)", json_number(json, "sweep", "mag_max_db"), 0.0, 0.02);
+    CHECK_NEAR("|S21| min (dB)", json_number(json, "sweep", "mag_min_db"), 20.0 * log10(cabs(pole_h(0.5, 400e3))), 0.03);
+    /* The group delay without the timing is given from its mean: its peak to peak over the span
+     * inside the end points (one step in), samples of 1 us. */
+    for (f = -0.4e6 + 4e3; f <= 0.4e6 - 4e3 + 1.0; f += 4e3) {
+        gd_lo = fmin(gd_lo, pole_gd(0.5, f));
+        gd_hi = fmax(gd_hi, pole_gd(0.5, f));
+    }
+    CHECK_NEAR("group delay p-p (ns)", json_number(json, "sweep", "group_delay_pp_ns"), (gd_hi - gd_lo) * 1e3, 10.0);
+    return report_done("sweep");
+}
+
+/* Compression: the Rapp amplifier of the tests above on the staircase. */
+static int write_compression(const char *stim_path, const char *out_path)
+{
+    size_t period, count, i;
+    float complex *stim = read_stimulus(stim_path, &period), *x;
+    int rc;
+
+    if (!stim)
+        return 1;
+    count = 3 * period;
+    x = malloc(count * sizeof(*x));
+    for (i = 0; i < count; i++)
+        x[i] = rapp(stim[(i + 5000) % period], RAPP_G, RAPP_SAT, RAPP_P);
+    add_noise(x, count, 1e-8);
+    rc = write_capture_file(out_path, x, count);
+    free(x);
+    free(stim);
+    return rc;
+}
+
+static int check_compression(const char *path)
+{
+    const char *json = read_json(path);
+    const double g0 = 20.0 * log10(RAPP_G);
+    const double p1 = 20.0 * log10(RAPP_SAT / RAPP_G * pow(pow(10.0, RAPP_P / 10.0) - 1.0, 1.0 / (2.0 * RAPP_P)));
+
+    if (!json)
+        return 1;
+    printf("Compression report:\n");
+    CHECK("found", strstr(json, "\"found\": true") != NULL);
+    CHECK_NEAR("steps", json_number(json, "compression", "steps"), 31.0, 0.0);
+    /* 1 dB steps: the interpolation errs by 0.05 dB at most (see test_compression()), and the
+     * 12 bits of the file add 0.01 dB at the lowest steps. */
+    CHECK_NEAR("small-signal gain (dB)", json_number(json, "compression", "small_signal_gain_db"), g0, 0.03);
+    CHECK_NEAR("P1dB in (dBFS)", json_number(json, "compression", "p1db_in_db"), p1, 0.1);
+    CHECK_NEAR("P1dB out (dBFS)", json_number(json, "compression", "p1db_out_db"), p1 + g0 - 1.0, 0.1);
+    return report_done("compression");
+}
+
+/* IMD: y = a1 x + a3 x |x|^2 + a5 x |x|^4 on the two tones of -12 dBFS each. */
+#define FILE_A3 (-0.1)
+#define FILE_A5 (-0.5)
+
+static int write_imd(const char *stim_path, const char *out_path)
+{
+    size_t period, count, i;
+    float complex *stim = read_stimulus(stim_path, &period), *x;
+    int rc;
+
+    if (!stim)
+        return 1;
+    count = 5 * period;
+    x = malloc(count * sizeof(*x));
+    for (i = 0; i < count; i++) {
+        const double complex v = stim[(i + 999) % period];
+        const double r2 = creal(v * conj(v));
+        x[i] = (float complex)(v + FILE_A3 * v * r2 + FILE_A5 * v * r2 * r2);
+    }
+    add_noise(x, count, 1e-9);
+    rc = write_capture_file(out_path, x, count);
+    free(x);
+    free(stim);
+    return rc;
+}
+
+static int check_imd(const char *path)
+{
+    const char *json = read_json(path);
+    const double A = pow(10.0, -12.0 / 20.0);
+    const double tone = 20.0 * log10(fabs(A + 3.0 * FILE_A3 * pow(A, 3) + 10.0 * FILE_A5 * pow(A, 5)));
+    const double im3  = 20.0 * log10(fabs(FILE_A3 * pow(A, 3) + 5.0 * FILE_A5 * pow(A, 5)));
+    const double im5  = 20.0 * log10(fabs(FILE_A5 * pow(A, 5)));
+
+    if (!json)
+        return 1;
+    printf("IMD report:\n");
+    CHECK("found", strstr(json, "\"found\": true") != NULL);
+    /* Lines 30 dB and more over the noise of their band; the 12-bit stimulus and capture put a
+     * floor near -100 dBFS, and their rounding puts lines of their own on the products (periodic
+     * tones): IM5 (-66 dBFS) within 0.2 dB. */
+    CHECK_NEAR("tone 1 (dBFS)", json_number(json, "imd", "tone1_db"), tone, 0.05);
+    CHECK_NEAR("IM3 low (dBFS)", json_number(json, "imd", "im3_low_db"), im3, 0.05);
+    CHECK_NEAR("IM5 high (dBFS)", json_number(json, "imd", "im5_high_db"), im5, 0.2);
+    CHECK_NEAR("IIP3 (dBFS)", json_number(json, "imd", "iip3_db"), -12.0 + (tone - im3) / 2.0, 0.05);
+    return report_done("IMD");
+}
+
+/* AM/AM: the Saleh amplifier on the OFDM-like noise of -15 dBFS. */
+static int write_amam(const char *stim_path, const char *out_path)
+{
+    size_t period, count, i;
+    float complex *stim = read_stimulus(stim_path, &period), *x;
+    int rc;
+
+    if (!stim)
+        return 1;
+    count = 10 * period;          /* The capture of the spectrum is longer than four periods. */
+    x = malloc(count * sizeof(*x));
+    for (i = 0; i < count; i++)
+        x[i] = 0.4f * saleh(stim[(i + 3333) % period]);
+    add_noise(x, count, 1e-8);
+    rc = write_capture_file(out_path, x, count);
+    free(x);
+    free(stim);
+    return rc;
+}
+
+static int check_amam(const char *path)
+{
+    const char *json = read_json(path);
+    const double in = json_number(json ? json : "", "amam", "compression_in_db");
+
+    if (!json)
+        return 1;
+    printf("AM/AM report:\n");
+    CHECK("found", strstr(json, "\"found\": true") != NULL);
+    /* Gain: 0.4 aa; compression at the top bin: Saleh at the RMS amplitude of that bin. */
+    CHECK_NEAR("gain (dB)", json_number(json, "amam", "gain_db"), 20.0 * log10(0.4 * SALEH_AA), 0.03);
+    CHECK_NEAR("compression at the top (dB)", json_number(json, "amam", "compression_db"),
+               20.0 * log10(1.0 + SALEH_BA * pow(10.0, in / 10.0)), 0.05);
+    CHECK_NEAR("AM/PM at the top (deg)", json_number(json, "amam", "am_pm_deg"),
+               SALEH_AP * pow(10.0, in / 10.0) / (1.0 + SALEH_BP * pow(10.0, in / 10.0)) * 180.0 / M_PI, 0.4);
+    CHECK("ACLR", strstr(json, "\"aclr_lower_dbc\"") != NULL);
+    return report_done("AM/AM");
+}
+
+int main(int argc, char **argv)
+{
+    if (argc == 5 && strcmp(argv[1], "--write-sweep") == 0)
+        return write_sweep(argv[2], argv[3], argv[4]);
+    if (argc == 3 && strcmp(argv[1], "--check-sweep") == 0)
+        return check_sweep(argv[2]);
+    if (argc == 4 && strcmp(argv[1], "--write-compression") == 0)
+        return write_compression(argv[2], argv[3]);
+    if (argc == 3 && strcmp(argv[1], "--check-compression") == 0)
+        return check_compression(argv[2]);
+    if (argc == 4 && strcmp(argv[1], "--write-imd") == 0)
+        return write_imd(argv[2], argv[3]);
+    if (argc == 3 && strcmp(argv[1], "--check-imd") == 0)
+        return check_imd(argv[2]);
+    if (argc == 4 && strcmp(argv[1], "--write-amam") == 0)
+        return write_amam(argv[2], argv[3]);
+    if (argc == 3 && strcmp(argv[1], "--check-amam") == 0)
+        return check_amam(argv[2]);
     test_stimuli();
     test_sweep();
     test_compression();
