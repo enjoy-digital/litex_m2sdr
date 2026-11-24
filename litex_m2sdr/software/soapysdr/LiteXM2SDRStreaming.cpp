@@ -2312,6 +2312,9 @@ int SoapyLiteXM2SDR::writeStream(
                     } else if (estimate_ns < calib_early_ns) {
                         _tx_stream.hw_next_ns += samples_to_ns(_tx_stream.samplerate,
                             static_cast<long long>(returnedElems));
+                        /* The dropped samples belong to the burst: the next write still continues it (no new
+                         * stamp, no wait for a new burst to age before the next check). */
+                        _tx_stream.hw_burst_samples += static_cast<long long>(returnedElems);
                         _tx_stream.hw_check_count = 15; /* check again at the next write */
                         _tx_stream.time_error = true;
                         _tx_stream.status_time_ns = _tx_stream.hw_next_ns;
@@ -2336,6 +2339,10 @@ int SoapyLiteXM2SDR::writeStream(
                     _tx_stream.hw_catchup = true;
                     _tx_stream.hw_next_ns += samples_to_ns(_tx_stream.samplerate,
                         static_cast<long long>(returnedElems));
+                    /* The dropped samples belong to the burst: the next write still continues it, so the
+                     * catch-up goes on at every write (a new stamp would restart the 50 ms ageing of the
+                     * burst before each check, and a 15 ms catch-up would take about a second). */
+                    _tx_stream.hw_burst_samples += static_cast<long long>(returnedElems);
                     _tx_stream.hw_check_count = 15; /* check again at the next write */
                     _tx_stream.time_error = true;
                     _tx_stream.status_time_ns = _tx_stream.hw_next_ns;
