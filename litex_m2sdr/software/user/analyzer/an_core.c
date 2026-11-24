@@ -30,6 +30,103 @@
 
 const char *const window_names[] = { "Hann", "Flat-top", "Blackman-Harris", "Rectangular" };
 
+/* Results */
+/*---------*/
+
+static void *empty_result;         /* Zeroed, of the largest result_size: the result of a mode not measured. */
+
+int an_registry_init(void)
+{
+    size_t size = 1;
+    int m;
+
+    for (m = 0; an_modes[m]; m++) {
+        if (m >= AN_MODES_MAX) {
+            fprintf(stderr, "More than %d views and modes in analyzer/modes.h.\n", AN_MODES_MAX);
+            return -1;
+        }
+        if (an_modes[m]->result_size > size)
+            size = an_modes[m]->result_size;
+    }
+    empty_result = calloc(1, size);
+    if (!empty_result) {
+        fprintf(stderr, "Out of memory\n");
+        return -1;
+    }
+    return 0;
+}
+
+int an_mode_index(const struct an_mode *m)
+{
+    int i;
+
+    for (i = 0; an_modes[i]; i++) {
+        if (an_modes[i] == m)
+            return i;
+    }
+    return -1;
+}
+
+void *an_mode_result(const struct an_mode *m, const struct an_result *res)
+{
+    const int i = an_mode_index(m);
+
+    return i >= 0 && res->mode[i] ? res->mode[i] : empty_result;
+}
+
+bool an_mode_result_flag(const struct an_mode *m, const struct an_result *res, size_t off)
+{
+    if (!m->result_size)
+        return *(const bool *)((const char *)res + off);
+    return *(const bool *)((const char *)an_mode_result(m, res) + off);
+}
+
+int an_result_copy(struct an_result *dst, const struct an_result *src)
+{
+    float *power = dst->psd.power;
+    void *mode[AN_MODES_MAX];
+    int m;
+
+    /* The blocks of the modes of src, before anything of dst changes. */
+    for (m = 0; an_modes[m]; m++) {
+        if (src->mode[m] && !dst->mode[m] && !(dst->mode[m] = calloc(1, an_modes[m]->result_size)))
+            return -1;
+    }
+    if (dst->psd.bins != src->psd.bins) {
+        power = realloc(power, src->psd.bins * sizeof(*power));
+        if (!power)
+            return -1;
+    }
+    memcpy(mode, dst->mode, sizeof(mode));
+    *dst = *src;
+    dst->psd.power = power;
+    dst->psd.fft   = NULL;
+    dst->psd.win   = NULL;
+    dst->psd.work  = NULL;
+    memset(&dst->tone_psd, 0, sizeof(dst->tone_psd));
+    memcpy(power, src->psd.power, src->psd.bins * sizeof(*power));
+    for (m = 0; an_modes[m]; m++) {
+        dst->mode[m] = src->mode[m] ? mode[m] : NULL;
+        if (src->mode[m])
+            memcpy(mode[m], src->mode[m], an_modes[m]->result_size);
+        else
+            free(mode[m]);
+    }
+    return 0;
+}
+
+void an_result_free(struct an_result *res)
+{
+    int m;
+
+    m2sdr_psd_free(&res->psd);
+    m2sdr_psd_free(&res->tone_psd);
+    for (m = 0; m < AN_MODES_MAX; m++) {
+        free(res->mode[m]);
+        res->mode[m] = NULL;
+    }
+}
+
 /* Analysis */
 /*----------*/
 
@@ -142,9 +239,21 @@ int analyse_two(const float complex *x, const float complex *x2, size_t count, c
 
         if (!mode->analyse && !mode->analyse_two)
             continue;
-        *(bool *)((char *)res + mode->valid) = false;
-        if (!an_mode_on(mode, set))
-            continue;
+        if (mode->result_size) {
+            /* Its block while it is on, kept from a capture to the next; none while it is off. */
+            if (!an_mode_on(mode, set)) {
+                free(res->mode[m]);
+                res->mode[m] = NULL;
+                continue;
+            }
+            if (!res->mode[m] && !(res->mode[m] = calloc(1, mode->result_size)))
+                return -1;
+            *(bool *)((char *)res->mode[m] + mode->valid) = false;
+        } else {
+            *(bool *)((char *)res + mode->valid) = false;
+            if (!an_mode_on(mode, set))
+                continue;
+        }
         if (mode->analyse)
             mode->analyse(x, count, set, res);
         /* RX1 and RX2, whichever the spectrum shows. */
@@ -468,10 +577,8 @@ int run_report(struct an_source *src, const struct an_settings *set, bool json, 
     status = 0;
 
 out:
-    if (res) {
-        m2sdr_psd_free(&res->psd);
-        m2sdr_psd_free(&res->tone_psd);
-    }
+    if (res)
+        an_result_free(res);
     free(res);
     free(x);
     free(x2);
@@ -575,10 +682,8 @@ int run_watch(struct an_source *src, const struct an_settings *base, bool json)
     status = 0;
 
 out:
-    if (res) {
-        m2sdr_psd_free(&res->psd);
-        m2sdr_psd_free(&res->tone_psd);
-    }
+    if (res)
+        an_result_free(res);
     free(res);
     free(x);
     free(x2);

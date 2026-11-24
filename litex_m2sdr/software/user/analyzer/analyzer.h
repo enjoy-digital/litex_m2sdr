@@ -62,6 +62,7 @@
 #include "m2sdr_analysis_dual.h"
 #include "m2sdr_analysis_lab.h"
 
+#define AN_MODES_MAX           64            /* Views and modes. */
 #define AN_DEFAULT_FREQ_HZ     2400e6
 #define AN_DEFAULT_SAMPLE_RATE 7680000.0
 #define AN_DEFAULT_FFT_LEN     16384
@@ -388,7 +389,15 @@ struct an_result {
     bool   lost;                   /* Samples were lost in the capture. */
     struct m2sdr_dvbt2_result dvbt2;
     bool   dvbt2_valid;            /* Measured: the sample rate was one of DVB-T2; dvbt2.found says the rest. */
+    /* Result of each mode on, by its index in an_modes[], NULL for the others: a block of the
+     * result_size of the mode, of a type of its own, read with an_mode_result(). */
+    void  *mode[AN_MODES_MAX];
 };
+
+/* A copy of a result, with its own spectrum and the results of its modes (dst: zeroed, or an
+ * earlier copy). Returns 0, or -1 out of memory, dst left valid. Then what a result holds. */
+int    an_result_copy(struct an_result *dst, const struct an_result *src);
+void   an_result_free(struct an_result *res);
 
 size_t capture_samples(const struct an_settings *set);
 int    analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);
@@ -433,7 +442,6 @@ enum an_category {
 };
 
 #define AN_NONE      ((size_t)-1)  /* Offset of a flag a mode does not have. */
-#define AN_MODES_MAX 64            /* Views and modes. */
 
 /* What the reports of the modes get besides the result. */
 struct an_report {
@@ -464,8 +472,11 @@ struct an_mode {
     const char *title;             /* Its tab: "DVB-T". */
     enum an_category category;
     size_t on;                     /* offsetof(struct an_settings, <flag>); AN_NONE: always measured. */
-    size_t valid;                  /* offsetof(struct an_result, <flag>): cleared before each analysis. */
-    size_t found;                  /* offsetof(struct an_result, <flag>): something was found (a cell, a
+    /* Its result: result_size bytes of a type of its own, flat (copied with memcpy), allocated
+     * and zeroed while it is on, see an_mode_result(); 0: its fields are in struct an_result. */
+    size_t result_size;
+    size_t valid;                  /* offsetof(<its result>, <flag>): cleared before each analysis. */
+    size_t found;                  /* offsetof(<its result>, <flag>): something was found (a cell, a
                                     * carrier), see AN_PANEL_HOLD_S; 0: its results are shown as they come. */
     int    report_rank;            /* Place of its section in the reports: lower first. */
     double default_rate;           /* Sample rate when it is on and none is given; 0: none. */
@@ -549,6 +560,16 @@ static inline const char *lab_input_unit(const struct an_settings *set)
 
 /* JSON: "name": [v, ...] in a section. */
 void lab_json_array(const char *name, const double *v, int n, double add, bool last);
+
+/* The registry: what the core needs before the first capture. Returns 0, or -1 with a message. */
+int    an_registry_init(void);
+/* Index of a mode in an_modes[]. */
+int    an_mode_index(const struct an_mode *m);
+/* The result of a mode in res: its block, or a zeroed one (nothing valid, nothing found) when
+ * it was not measured. Written only by its analysis, where it is its own block. */
+void  *an_mode_result(const struct an_mode *m, const struct an_result *res);
+/* A flag of the result of a mode, at an offset of its result (valid, found). */
+bool   an_mode_result_flag(const struct an_mode *m, const struct an_result *res, size_t off);
 
 /* The flag of a mode in settings; NULL for a view of the spectrum. */
 static inline bool *an_mode_flag(const struct an_mode *m, struct an_settings *set)

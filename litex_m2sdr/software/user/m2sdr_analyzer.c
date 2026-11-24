@@ -281,6 +281,8 @@ int main(int argc, char **argv)
     int c, m, status;
 
     m2sdr_cli_handle_version(argc, argv);
+    if (an_registry_init() != 0)
+        return 1;
     m2sdr_cli_device_init(&cli_dev);
     memset(&set, 0, sizeof(set));
     memset(&src, 0, sizeof(src));
