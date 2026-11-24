@@ -793,11 +793,15 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | DVB-T2 | Pilot and data MER and their trace, P1, mode and pilot pattern, constellation (rotated or not), channel and echoes of a DVB-T2 multiplex |
 | DAB | MER and its trace, SNR, constellation, channel, MER per carrier and echoes of a DAB/DAB+ ensemble |
 | FM | Multiplex spectrum, deviation histogram, MPX power and its 60 s mean, pilot, RDS (PS, RadioText, bits) of an FM station |
+| Wi-Fi | Networks, packets, airtime, channel, EVM per carrier and constellation of a Wi-Fi channel |
+| ADS-B | Aircraft (callsign, altitude, speed, track, position), message rate, level and SNR at 1090 MHz |
+| LoRa | LoRa packets (SF, bandwidth, offset, RSSI, SNR, sync word, symbols), channel busy time |
 
 The tabs of the window group the views by category: Spectrum (Spectrum, Time, Statistics),
 Signal (Phase noise, Modulation), Cellular (LTE) and Broadcast (DVB-T, DVB-T2, DAB). `--view`
 selects one of them by its name: `spectrum`, `time`, `statistics`, `phase-noise`, `modulation`,
 `lte`, `dvbt`, `dvbt2` or `dab`.
+Wi-Fi is in the Wireless category (`wifi`), ADS-B and LoRa in Monitoring (`adsb`, `lora`).
 
 The figures are next to the views, and `--report` prints the same ones for one capture:
 
@@ -1241,6 +1245,62 @@ two points at one frequency make a step:
 For a live speed, the default span is 100 RBW around the centre (201 channels, 12 MHz in band
 C/D, about 0.12 s per capture at 20 MSPS); `--emc-span` widens it, `-1` takes the whole capture:
 328 channels at 20 MSPS in band C/D, about 0.2 s per capture (0.4 s with 2^20 samples).
+#### Wi-Fi {#sw-analyzer-wifi}
+The Wi-Fi view, and `--wifi` with `--report` (and `--watch`), look at a 20 MHz Wi-Fi channel:
+the packets of 802.11a/g OFDM, and the legacy preamble of 802.11n/ac/ax.
+m2sdr_analyzer --freq 2437e6 --view wifi            # Channel 6
+m2sdr_analyzer --freq 5180e6 --report --wifi        # Channel 36
+m2sdr_analyzer --report --wifi --watch              # Channel 1, one line per capture
+The sample rate is 20 MSPS (the default with `--wifi`, at 2412 MHz, channel 1) and a capture is
+105 ms, a beacon interval: each network sends a beacon in it. The view selects the channel
+(2.4 GHz 1 to 13, 5 GHz 36 to 165), lists the networks seen since the tuning (BSSID, SSID,
+beacons, level, SNR) and the packets of the last capture, and draws the airtime over the
+captures, the channel and the EVM per carrier and the constellation of the strongest packet.
+|-----------------------|-------------------------------------------------------------------------------|
+| Packet | L-STF: autocorrelation at its 16-sample period, then the L-LTF correlation for the timing |
+| Carrier offset | L-STF (coarse), then the two L-LTF symbols (fine) |
+| SNR per carrier | Channel power against the difference of the two L-LTF symbols |
+| Channel | L-LTF, projected on a short impulse response (12 taps, 22 for a long channel) |
+| EVM | L-SIG and data symbols, equalised, turned by the pilots (common phase, sampling drift) |
+| Rate, length | L-SIG, decoded (BPSK 1/2, deinterleaver, Viterbi); HT-SIG with its CRC for 802.11n |
+| MAC header | Legacy data: demapping to 64QAM, depuncturing, Viterbi, descrambler; FCS checked |
+| Airtime | The durations of the L-SIGs; and the 4 us slots 6 dB over the noise floor |
+The data of 802.11n and later (MIMO, LDPC) is not decoded, their packets are counted with their
+L-SIG duration. When the decoding of a capture takes longer than the capture, the next ones are
+read without the data (the L-SIG and HT-SIG only, the view says so), one in eleven in full.
+#### ADS-B {#sw-analyzer-adsb}
+The ADS-B view, and `--adsb` with `--report` (and `--watch`), receive the Mode S extended
+squitters (DF17, DF18) of the aircraft around, at 1090 MHz (the default with `--adsb`).
+m2sdr_analyzer --view adsb --adsb-ref 48.85,2.35
+m2sdr_analyzer --report --adsb
+m2sdr_analyzer --report --adsb --watch              # One line per message
+The sample rate is 2.4 MSPS (the default): a pulse lasts 0.5 us, one sample at 2 MSPS, and
+half a sample off it shares its power with the next one, so that it needs about 10 dB more
+SNR; at 2.4 MSPS the timings spread over the samples. A capture is 0.5 s. The bits are the half
+of more magnitude, or, when the CRC fails, the sequence most likely given how the pulses of
+the preamble spread over the samples; a wrong bit is corrected by the CRC-24.
+The aircraft are kept from capture to capture: identification (TC 1 to 4), barometric altitude
+(TC 9 to 18, 25 ft steps), velocity (TC 19) and position. A position needs an even and an odd
+frame less than 10 s apart, or one frame near a known position: the last one of the aircraft,
+or the receiver given by `--adsb-ref LAT,LON` (or in the view), within 180 NM. Each message has
+its level and its SNR (the pulses against the noise between them). Surface positions, GNSS
+altitudes and the short Mode S replies are not decoded.
+#### LoRa {#sw-analyzer-lora}
+The LoRa view, and `--lora` with `--report` (and `--watch`), find the LoRa packets of a channel
+(868.1 MHz by default, 868.1, 868.3 and 868.5 MHz in the view) at every spreading factor (7 to
+12) and bandwidth (125, 250, 500 kHz) at once.
+m2sdr_analyzer --view lora
+m2sdr_analyzer --freq 868.3e6 --report --lora
+m2sdr_analyzer --report --lora --watch              # One line per packet
+The sample rate is 1 MSPS (the default): each bandwidth must divide it by a power of two. A
+capture is 1 s. Each bandwidth is cut out of the capture; windows of 2^SF samples are dechirped,
+and up-chirps in a row with the same peak are a preamble. Its down-chirps give, with its
+up-chirps, the carrier offset and the timing, to a hundredth of a sample once the band is cut
+again around the packet. The SNR is the one LoRa radios give (signal over the noise in the
+bandwidth, below 0 dB down to the limit of the SF), from the peaks of the preamble. The symbols
+are the FFT peaks: the header and the payload (Gray mapping, interleaving, Hamming code,
+whitening) are not decoded. The view lists the packets over the captures, draws the time the
+channel is busy and the symbols of the last packet.
 #### Phase noise {#sw-analyzer-pn}
 
 The Phase noise view, and `--phase-noise` with `--report`, measure the strongest carrier of the
