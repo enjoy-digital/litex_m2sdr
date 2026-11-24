@@ -32,8 +32,18 @@
 #define ADEV_SEARCH_PPM     20.0     /* ... or this much of it, if more. */
 #define ADEV_GAP            3.0      /* A spacing this many times the last one: a pause, the series restarts. */
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_adev;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct adev_set {
+    bool   adev_on;
+    double adev_carrier_hz;        /* Nominal RF frequency of the carrier; 0: the first one found. */
+};
+
+#define SET(set) ((struct adev_set *)an_mode_settings(&an_mode_adev, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). This capture, and the
  * series of the captures of one tuning. */
@@ -48,7 +58,6 @@ struct adev_res {
     float  adev_t_s[AN_ADEV_HISTORY], adev_ppb[AN_ADEV_HISTORY];
 };
 
-extern const struct an_mode an_mode_adev;
 #define RES(res) ((struct adev_res *)an_mode_result(&an_mode_adev, (res)))
 
 /* Series */
@@ -77,7 +86,7 @@ static void adev_series_restart(const struct an_settings *set, enum an_clock clo
     adev_state.freq_hz    = set->freq_hz;
     adev_state.rate       = set->sample_rate;
     adev_state.channel    = set->channel;
-    adev_state.carrier_hz = set->adev_carrier_hz;
+    adev_state.carrier_hz = SET(set)->adev_carrier_hz;
     adev_state.nominal_hz = nominal_hz;
     adev_state.clock      = clock;
     adev_state.last_dt    = 0.0;
@@ -103,10 +112,10 @@ static void adev_analyse(const float complex *x, size_t count, const struct an_s
     size_t k;
 
     memset(&cfg, 0, sizeof(cfg));
-    if (set->adev_carrier_hz > 0.0) {
-        cfg.carrier_hz = set->adev_carrier_hz;
-        cfg.offset_hz  = set->adev_carrier_hz - set->freq_hz;
-        cfg.search_hz  = fmax(ADEV_MIN_SEARCH_HZ, ADEV_SEARCH_PPM * 1e-6 * set->adev_carrier_hz);
+    if (SET(set)->adev_carrier_hz > 0.0) {
+        cfg.carrier_hz = SET(set)->adev_carrier_hz;
+        cfg.offset_hz  = SET(set)->adev_carrier_hz - set->freq_hz;
+        cfg.search_hz  = fmax(ADEV_MIN_SEARCH_HZ, ADEV_SEARCH_PPM * 1e-6 * SET(set)->adev_carrier_hz);
     }
     RES(res)->adev_series_ok = false;
     RES(res)->adev_npoints   = 0;
@@ -117,12 +126,12 @@ static void adev_analyse(const float complex *x, size_t count, const struct an_s
     /* A new series on a new tuning, a pause (or a file read again from its start), or when asked. */
     restart = !adev_state.init || adev_reset_wanted || adev_state.freq_hz != set->freq_hz ||
               adev_state.rate != set->sample_rate || adev_state.channel != set->channel ||
-              adev_state.carrier_hz != set->adev_carrier_hz || adev_state.clock != res->capture.clock ||
+              adev_state.carrier_hz != SET(set)->adev_carrier_hz || adev_state.clock != res->capture.clock ||
               t_s <= adev_state.last_t ||
               (adev_state.last_dt > 0.0 && t_s - adev_state.last_t > ADEV_GAP * adev_state.last_dt);
     if (restart) {
         /* Without a nominal frequency, the first carrier found is the reference of the offsets. */
-        const double nominal = set->adev_carrier_hz > 0.0 ? set->adev_carrier_hz : set->freq_hz + c->freq_mean_hz;
+        const double nominal = SET(set)->adev_carrier_hz > 0.0 ? SET(set)->adev_carrier_hz : set->freq_hz + c->freq_mean_hz;
 
         adev_reset_wanted = 0;
         adev_series_restart(set, res->capture.clock, nominal);
@@ -132,7 +141,7 @@ static void adev_analyse(const float complex *x, size_t count, const struct an_s
     }
     adev_state.last_t = t_s;
     RES(res)->adev_nominal_hz    = adev_state.nominal_hz;
-    RES(res)->adev_nominal_given = set->adev_carrier_hz > 0.0;
+    RES(res)->adev_nominal_given = SET(set)->adev_carrier_hz > 0.0;
     if (!adev_state.init)
         return;
     m2sdr_adev_series_add(&adev_state.s, c->timestamp, c->freq_mean_hz);
@@ -197,7 +206,7 @@ static void adev_report_text(const struct an_result *res, const struct an_report
         return;
     }
     if (!c->found) {
-        printf("  No carrier found%s.\n", set->adev_carrier_hz > 0.0 ? " near the nominal frequency" : "");
+        printf("  No carrier found%s.\n", SET(set)->adev_carrier_hz > 0.0 ? " near the nominal frequency" : "");
         return;
     }
     printf("  Carrier    : %.6f MHz (%+.4f Hz from the centre), %.1f %s, SNR %.1f dB, C/N0 %.1f dB-Hz\n",
@@ -205,9 +214,9 @@ static void adev_report_text(const struct an_result *res, const struct an_report
            c->cn0_dbhz);
     printf("  Frequency  : fitted %+.6f Hz (+-%.2g Hz), mean over the capture %+.6f Hz, phase %+.4f rad\n", c->freq_hz, c->freq_std_hz,
            c->freq_mean_hz, c->phase_rad);
-    if (set->adev_carrier_hz > 0.0)
+    if (SET(set)->adev_carrier_hz > 0.0)
         printf("  Offset     : %+.3f ppb from %.6f MHz, against the reference of the board\n", c->offset_ppb,
-               set->adev_carrier_hz / 1e6);
+               SET(set)->adev_carrier_hz / 1e6);
     printf("  Short tau  : %d sub-blocks of %zu samples (phase error %.2g rad RMS)\n", c->blocks, c->block_len,
            c->phase_rms_rad);
     printf("  %12s %12s %12s\n", "tau (s)", "ADEV", "MDEV");
@@ -252,8 +261,8 @@ static void adev_report_json(const struct an_result *res, const struct an_report
         print_json_number("level_db", c->level_dbfs + rep->off, false);
         print_json_number("snr_db", c->snr_db, false);
         print_json_number("cn0_dbhz", c->cn0_dbhz, false);
-        if (set->adev_carrier_hz > 0.0) {
-            print_json_number("nominal_hz", set->adev_carrier_hz, false);
+        if (SET(set)->adev_carrier_hz > 0.0) {
+            print_json_number("nominal_hz", SET(set)->adev_carrier_hz, false);
             print_json_number("offset_ppb", c->offset_ppb, false);
         }
         printf("    \"block_len\": %zu,\n", c->block_len);
@@ -338,10 +347,10 @@ static int adev_option(int id, const char *arg, struct an_cli *cli)
 {
     switch (id) {
     case 0:
-        cli->set->adev_on = true;
+        SET(cli->set)->adev_on = true;
         return 0;
     case 1:
-        if (m2sdr_cli_parse_double(arg, &cli->set->adev_carrier_hz) != 0 || cli->set->adev_carrier_hz < 0) {
+        if (m2sdr_cli_parse_double(arg, &SET(cli->set)->adev_carrier_hz) != 0 || SET(cli->set)->adev_carrier_hz < 0) {
             m2sdr_cli_error("invalid carrier frequency '%s'", arg);
             return -1;
         }
@@ -398,26 +407,26 @@ static void draw_adev(struct an_ui *ui, bool live, bool *changed)
     int ns = 0, na = 0, nm = 0, i;
 
     (void)live;
-    if (input_scaled("Nominal carrier (MHz)", &ui->set.adev_carrier_hz, 1e6, "%.6f"))
+    if (input_scaled("Nominal carrier (MHz)", &SET(&ui->set)->adev_carrier_hz, 1e6, "%.6f"))
         *changed = true;
     same_line_or_wrap(16.0f, 140.0f);
     if (igButton("Restart series", (ImVec2){ 0.0f, 0.0f }))
         adev_reset_wanted = 1;
-    if (ok && ui->set.adev_carrier_hz <= 0.0) {
+    if (ok && SET(&ui->set)->adev_carrier_hz <= 0.0) {
         same_line_or_wrap(16.0f, 200.0f);
         snprintf(text, sizeof(text), "Nominal: %.3f MHz", 1e-6 * round(res->set.freq_hz + c->freq_mean_hz));
         if (igSmallButton(text)) {
-            ui->set.adev_carrier_hz = round(res->set.freq_hz + c->freq_mean_hz);
+            SET(&ui->set)->adev_carrier_hz = round(res->set.freq_hz + c->freq_mean_hz);
             *changed = true;
         }
     }
-    if (!res->set.adev_on) {
+    if (!SET(&res->set)->adev_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
     if (!ok) {
         igPushTextWrapPos(0.0f);
-        igTextUnformatted(res->set.adev_carrier_hz > 0.0
+        igTextUnformatted(SET(&res->set)->adev_carrier_hz > 0.0
                           ? "No carrier near the nominal frequency: check the tuning, or clear the nominal to search the capture."
                           : "No carrier stands out of the capture (the centre is left out): tune a little off the carrier.",
                           NULL);
@@ -558,24 +567,25 @@ static void draw_adev_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_adev = {
-    .key          = "adev",
-    .title        = "Allan deviation",
-    .category     = AN_CAT_TIMING,
-    .on           = offsetof(struct an_settings, adev_on),
-    .result_size  = sizeof(struct adev_res),
-    .valid        = offsetof(struct adev_res, adev_valid),
-    .found        = offsetof(struct adev_res, adev.found),
-    .report_rank  = 70,
-    .options      = adev_options,
-    .option       = adev_option,
-    .help         = adev_help,
-    .samples      = adev_samples,
-    .analyse      = adev_analyse,
-    .report_text  = adev_report_text,
-    .report_json  = adev_report_json,
-    .watch_line   = adev_watch_line,
+    .key           = "adev",
+    .title         = "Allan deviation",
+    .category      = AN_CAT_TIMING,
+    .settings_size = sizeof(struct adev_set),
+    .on            = offsetof(struct adev_set, adev_on),
+    .result_size   = sizeof(struct adev_res),
+    .valid         = offsetof(struct adev_res, adev_valid),
+    .found         = offsetof(struct adev_res, adev.found),
+    .report_rank   = 70,
+    .options       = adev_options,
+    .option        = adev_option,
+    .help          = adev_help,
+    .samples       = adev_samples,
+    .analyse       = adev_analyse,
+    .report_text   = adev_report_text,
+    .report_json   = adev_report_json,
+    .watch_line    = adev_watch_line,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_adev,
-    .results      = draw_adev_results,
+    .draw          = draw_adev,
+    .results       = draw_adev_results,
 #endif
 };

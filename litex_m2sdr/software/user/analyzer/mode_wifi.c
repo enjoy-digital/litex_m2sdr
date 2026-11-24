@@ -23,8 +23,17 @@
 #define WIFI_SKIP_FULL     10        /* Captures without the data after one too slow to decode. */
 #define WIFI_REPORT_PACKETS 32       /* Packets listed in the reports. */
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_wifi;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct wifi_set {
+    bool   wifi_on;                /* Wi-Fi channel. */
+};
+
+#define SET(set) ((struct wifi_set *)an_mode_settings(&an_mode_wifi, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct wifi_res {
@@ -33,7 +42,6 @@ struct wifi_res {
     bool   wifi_no_psdu;           /* The data was not decoded: it took longer than the capture. */
 };
 
-extern const struct an_mode an_mode_wifi;
 #define RES(res) ((struct wifi_res *)an_mode_result(&an_mode_wifi, (res)))
 
 /* Analysis */
@@ -237,7 +245,7 @@ static int wifi_option(int id, const char *arg, struct an_cli *cli)
 {
     (void)id;
     (void)arg;
-    cli->set->wifi_on = true;
+    SET(cli->set)->wifi_on = true;
     return 0;
 }
 
@@ -286,7 +294,7 @@ static void wifi_keep(struct an_ui *ui)
     const struct m2sdr_wifi_result *w = &RES(res)->wifi;
     int i, b;
 
-    if (!res->set.wifi_on || !RES(res)->wifi_valid)
+    if (!SET(&res->set)->wifi_on || !RES(res)->wifi_valid)
         return;
     if (res->set.freq_hz != wifi_nets_freq) {
         wifi_nets_freq = res->set.freq_hz;
@@ -436,7 +444,7 @@ static void draw_wifi(struct an_ui *ui, bool live, bool *changed)
 
     if (live)
         draw_wifi_channel(ui, changed);
-    if (!res->set.wifi_on) {
+    if (!SET(&res->set)->wifi_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -521,27 +529,28 @@ static void draw_wifi_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_wifi = {
-    .key          = "wifi",
-    .title        = "Wi-Fi",
-    .category     = AN_CAT_WIRELESS,
-    .on           = offsetof(struct an_settings, wifi_on),
-    .result_size  = sizeof(struct wifi_res),
-    .valid        = offsetof(struct wifi_res, wifi_valid),
-    .report_rank  = 40,
-    .default_rate = M2SDR_WIFI_SAMPLE_RATE,
-    .default_freq = 2412e6,
-    .psd_short    = true,
-    .samples      = wifi_samples,
-    .analyse      = wifi_analyse,
-    .report_text  = wifi_report_text,
-    .report_json  = wifi_report_json,
-    .watch_line   = wifi_watch_line,
-    .options      = wifi_options,
-    .option       = wifi_option,
-    .help         = wifi_help,
+    .key           = "wifi",
+    .title         = "Wi-Fi",
+    .category      = AN_CAT_WIRELESS,
+    .settings_size = sizeof(struct wifi_set),
+    .on            = offsetof(struct wifi_set, wifi_on),
+    .result_size   = sizeof(struct wifi_res),
+    .valid         = offsetof(struct wifi_res, wifi_valid),
+    .report_rank   = 40,
+    .default_rate  = M2SDR_WIFI_SAMPLE_RATE,
+    .default_freq  = 2412e6,
+    .psd_short     = true,
+    .samples       = wifi_samples,
+    .analyse       = wifi_analyse,
+    .report_text   = wifi_report_text,
+    .report_json   = wifi_report_json,
+    .watch_line    = wifi_watch_line,
+    .options       = wifi_options,
+    .option        = wifi_option,
+    .help          = wifi_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_wifi,
-    .results      = draw_wifi_results,
-    .keep         = wifi_keep,
+    .draw          = draw_wifi,
+    .results       = draw_wifi_results,
+    .keep          = wifi_keep,
 #endif
 };

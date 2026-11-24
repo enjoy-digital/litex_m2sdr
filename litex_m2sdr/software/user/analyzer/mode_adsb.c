@@ -24,8 +24,18 @@
 #define ADSB_FREQ_HZ       1090e6
 #define ADSB_HISTORY       300       /* Results of the message rate trace. */
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_adsb;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct adsb_set {
+    bool   adsb_on;                /* ADS-B at 1090 MHz. */
+    struct m2sdr_adsb_config adsb; /* Its receiver position. */
+};
+
+#define SET(set) ((struct adsb_set *)an_mode_settings(&an_mode_adsb, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct adsb_res {
@@ -34,7 +44,6 @@ struct adsb_res {
     struct m2sdr_adsb_state adsb_state;   /* Aircraft of the captures so far. */
 };
 
-extern const struct an_mode an_mode_adsb;
 #define RES(res) ((struct adsb_res *)an_mode_result(&an_mode_adsb, (res)))
 
 /* Analysis */
@@ -55,7 +64,7 @@ static void adsb_analyse(const float complex *x, size_t count, const struct an_s
 
     /* Dated by the clock: the captures of a board follow each other, the pairs of CPR frames are
      * taken within 10 s. */
-    RES(res)->adsb_valid = m2sdr_adsb_analyse(x, count < n ? count : n, set->sample_rate, now_ms() / 1e3, &set->adsb,
+    RES(res)->adsb_valid = m2sdr_adsb_analyse(x, count < n ? count : n, set->sample_rate, now_ms() / 1e3, &SET(set)->adsb,
                                               &adsb_state, &RES(res)->adsb) == 0;
     RES(res)->adsb_state = adsb_state;
 }
@@ -224,15 +233,15 @@ static int adsb_option(int id, const char *arg, struct an_cli *cli)
     struct an_settings *set = cli->set;
 
     if (id == 0) {
-        set->adsb_on = true;
+        SET(set)->adsb_on = true;
         return 0;
     }
-    if (sscanf(arg, "%lf,%lf", &set->adsb.ref_lat_deg, &set->adsb.ref_lon_deg) != 2 ||
-        fabs(set->adsb.ref_lat_deg) > 90.0 || fabs(set->adsb.ref_lon_deg) > 180.0) {
+    if (sscanf(arg, "%lf,%lf", &SET(set)->adsb.ref_lat_deg, &SET(set)->adsb.ref_lon_deg) != 2 ||
+        fabs(SET(set)->adsb.ref_lat_deg) > 90.0 || fabs(SET(set)->adsb.ref_lon_deg) > 180.0) {
         m2sdr_cli_error("invalid position '%s' (expected LAT,LON in degrees)", arg);
         return -1;
     }
-    set->adsb.has_reference = true;
+    SET(set)->adsb.has_reference = true;
     return 0;
 }
 
@@ -258,7 +267,7 @@ static void adsb_keep(struct an_ui *ui)
 {
     const struct an_result *res = &ui->res;
 
-    if (!res->set.adsb_on || !RES(res)->adsb_valid)
+    if (!SET(&res->set)->adsb_on || !RES(res)->adsb_valid)
         return;
     if (adsb_nrate == ADSB_HISTORY) {
         memmove(adsb_rate_hist, adsb_rate_hist + 1, (ADSB_HISTORY - 1) * sizeof(adsb_rate_hist[0]));
@@ -299,19 +308,19 @@ static void draw_adsb(struct an_ui *ui, bool live, bool *changed)
         }
     }
     /* Receiver position: single CPR frames are then placed near it. */
-    if (igCheckbox("Receiver position", &ui->set.adsb.has_reference))
+    if (igCheckbox("Receiver position", &SET(&ui->set)->adsb.has_reference))
         *changed = true;
-    if (ui->set.adsb.has_reference) {
+    if (SET(&ui->set)->adsb.has_reference) {
         igSameLine(0.0f, 8.0f);
         igSetNextItemWidth(110.0f);
-        if (igInputDouble("lat##adsbref", &ui->set.adsb.ref_lat_deg, 0.0, 0.0, "%.4f", 0))
+        if (igInputDouble("lat##adsbref", &SET(&ui->set)->adsb.ref_lat_deg, 0.0, 0.0, "%.4f", 0))
             *changed = true;
         igSameLine(0.0f, 8.0f);
         igSetNextItemWidth(110.0f);
-        if (igInputDouble("lon##adsbref", &ui->set.adsb.ref_lon_deg, 0.0, 0.0, "%.4f", 0))
+        if (igInputDouble("lon##adsbref", &SET(&ui->set)->adsb.ref_lon_deg, 0.0, 0.0, "%.4f", 0))
             *changed = true;
     }
-    if (!res->set.adsb_on) {
+    if (!SET(&res->set)->adsb_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -409,27 +418,28 @@ static void draw_adsb_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_adsb = {
-    .key          = "adsb",
-    .title        = "ADS-B",
-    .category     = AN_CAT_MONITORING,
-    .on           = offsetof(struct an_settings, adsb_on),
-    .result_size  = sizeof(struct adsb_res),
-    .valid        = offsetof(struct adsb_res, adsb_valid),
-    .report_rank  = 41,
-    .default_rate = AN_ADSB_SAMPLE_RATE,
-    .default_freq = 1090e6,
-    .psd_short    = true,
-    .samples      = adsb_samples,
-    .analyse      = adsb_analyse,
-    .report_text  = adsb_report_text,
-    .report_json  = adsb_report_json,
-    .watch_line   = adsb_watch_line,
-    .options      = adsb_options,
-    .option       = adsb_option,
-    .help         = adsb_help,
+    .key           = "adsb",
+    .title         = "ADS-B",
+    .category      = AN_CAT_MONITORING,
+    .settings_size = sizeof(struct adsb_set),
+    .on            = offsetof(struct adsb_set, adsb_on),
+    .result_size   = sizeof(struct adsb_res),
+    .valid         = offsetof(struct adsb_res, adsb_valid),
+    .report_rank   = 41,
+    .default_rate  = AN_ADSB_SAMPLE_RATE,
+    .default_freq  = 1090e6,
+    .psd_short     = true,
+    .samples       = adsb_samples,
+    .analyse       = adsb_analyse,
+    .report_text   = adsb_report_text,
+    .report_json   = adsb_report_json,
+    .watch_line    = adsb_watch_line,
+    .options       = adsb_options,
+    .option        = adsb_option,
+    .help          = adsb_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_adsb,
-    .results      = draw_adsb_results,
-    .keep         = adsb_keep,
+    .draw          = draw_adsb,
+    .results       = draw_adsb_results,
+    .keep          = adsb_keep,
 #endif
 };

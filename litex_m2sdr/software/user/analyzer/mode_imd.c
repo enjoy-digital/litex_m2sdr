@@ -25,8 +25,17 @@
 #define IMD_PERIODS    4
 #define IMD_LEVEL_DBFS -12.0
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_imd;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct imd_set {
+    bool   imd_on;                 /* Lab: two-tone intermodulation. */
+};
+
+#define SET(set) ((struct imd_set *)an_mode_settings(&an_mode_imd, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct imd_res {
@@ -34,7 +43,6 @@ struct imd_res {
     struct m2sdr_imd_result imd;
 };
 
-extern const struct an_mode an_mode_imd;
 #define RES(res) ((struct imd_res *)an_mode_result(&an_mode_imd, (res)))
 
 /* Stimulus */
@@ -216,7 +224,7 @@ static int imd_option(int id, const char *arg, struct an_cli *cli)
     struct an_lab_settings *lab = &cli->set->lab;
 
     switch (id) {
-    case IM_OPT_ON:      cli->set->imd_on = true; return 0;
+    case IM_OPT_ON:      SET(cli->set)->imd_on = true; return 0;
     case IM_OPT_SPACING: return lab_value(arg, &lab->imd_spacing_hz, true);
     case IM_OPT_LEVEL:   return lab_level(arg, &lab->imd_level_dbfs);
     }
@@ -270,7 +278,7 @@ static void draw_imd(struct an_ui *ui, bool live, bool *changed)
         *changed = true;
     }
 
-    if (!res->set.imd_on) {
+    if (!SET(&res->set)->imd_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -355,23 +363,24 @@ static void draw_imd_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_imd = {
-    .key          = "imd",
-    .title        = "IMD",
-    .category     = AN_CAT_LAB,
-    .on           = offsetof(struct an_settings, imd_on),
-    .result_size  = sizeof(struct imd_res),
-    .valid        = offsetof(struct imd_res, imd_valid),
-    .report_rank  = 42,
-    .options      = imd_options,
-    .option       = imd_option,
-    .help         = imd_help,
-    .samples      = imd_samples,
-    .analyse      = imd_analyse,
-    .stimulus     = imd_stimulus,
-    .report_text  = imd_report_text,
-    .report_json  = imd_report_json,
+    .key           = "imd",
+    .title         = "IMD",
+    .category      = AN_CAT_LAB,
+    .settings_size = sizeof(struct imd_set),
+    .on            = offsetof(struct imd_set, imd_on),
+    .result_size   = sizeof(struct imd_res),
+    .valid         = offsetof(struct imd_res, imd_valid),
+    .report_rank   = 42,
+    .options       = imd_options,
+    .option        = imd_option,
+    .help          = imd_help,
+    .samples       = imd_samples,
+    .analyse       = imd_analyse,
+    .stimulus      = imd_stimulus,
+    .report_text   = imd_report_text,
+    .report_json   = imd_report_json,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_imd,
-    .results      = draw_imd_results,
+    .draw          = draw_imd,
+    .results       = draw_imd_results,
 #endif
 };

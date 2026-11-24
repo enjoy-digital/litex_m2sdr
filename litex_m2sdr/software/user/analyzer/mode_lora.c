@@ -23,8 +23,17 @@
 #define LORA_HISTORY       300       /* Results of the busy trace. */
 #define LORA_LIST          100       /* Packets of the list of the view. */
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_lora;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct lora_set {
+    bool   lora_on;                /* LoRa channel. */
+};
+
+#define SET(set) ((struct lora_set *)an_mode_settings(&an_mode_lora, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct lora_res {
@@ -32,7 +41,6 @@ struct lora_res {
     struct m2sdr_lora_result lora;
 };
 
-extern const struct an_mode an_mode_lora;
 #define RES(res) ((struct lora_res *)an_mode_result(&an_mode_lora, (res)))
 
 /* Analysis */
@@ -165,7 +173,7 @@ static int lora_option(int id, const char *arg, struct an_cli *cli)
 {
     (void)id;
     (void)arg;
-    cli->set->lora_on = true;
+    SET(cli->set)->lora_on = true;
     return 0;
 }
 
@@ -203,7 +211,7 @@ static void lora_keep(struct an_ui *ui)
     const double now = now_ms() / 1e3, span = AN_LORA_SECONDS;
     int i;
 
-    if (!res->set.lora_on || !RES(res)->lora_valid)
+    if (!SET(&res->set)->lora_on || !RES(res)->lora_valid)
         return;
     for (i = 0; i < l->npackets; i++) {
         if (lora_nlist == LORA_LIST) {
@@ -251,7 +259,7 @@ static void draw_lora(struct an_ui *ui, bool live, bool *changed)
                 view_rate(ui, AN_LORA_SAMPLE_RATE, changed);
         }
     }
-    if (!res->set.lora_on) {
+    if (!SET(&res->set)->lora_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -360,27 +368,28 @@ static void draw_lora_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_lora = {
-    .key          = "lora",
-    .title        = "LoRa",
-    .category     = AN_CAT_MONITORING,
-    .on           = offsetof(struct an_settings, lora_on),
-    .result_size  = sizeof(struct lora_res),
-    .valid        = offsetof(struct lora_res, lora_valid),
-    .report_rank  = 42,
-    .default_rate = AN_LORA_SAMPLE_RATE,
-    .default_freq = 868.1e6,
-    .psd_short    = true,
-    .samples      = lora_samples,
-    .analyse      = lora_analyse,
-    .report_text  = lora_report_text,
-    .report_json  = lora_report_json,
-    .watch_line   = lora_watch_line,
-    .options      = lora_options,
-    .option       = lora_option,
-    .help         = lora_help,
+    .key           = "lora",
+    .title         = "LoRa",
+    .category      = AN_CAT_MONITORING,
+    .settings_size = sizeof(struct lora_set),
+    .on            = offsetof(struct lora_set, lora_on),
+    .result_size   = sizeof(struct lora_res),
+    .valid         = offsetof(struct lora_res, lora_valid),
+    .report_rank   = 42,
+    .default_rate  = AN_LORA_SAMPLE_RATE,
+    .default_freq  = 868.1e6,
+    .psd_short     = true,
+    .samples       = lora_samples,
+    .analyse       = lora_analyse,
+    .report_text   = lora_report_text,
+    .report_json   = lora_report_json,
+    .watch_line    = lora_watch_line,
+    .options       = lora_options,
+    .option        = lora_option,
+    .help          = lora_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_lora,
-    .results      = draw_lora_results,
-    .keep         = lora_keep,
+    .draw          = draw_lora,
+    .results       = draw_lora_results,
+    .keep          = lora_keep,
 #endif
 };

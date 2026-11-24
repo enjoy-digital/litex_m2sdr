@@ -27,8 +27,17 @@
 #define AMAM_LEVEL_DBFS -15.0
 #define AMAM_SEED       1           /* The stimulus is the same from capture to capture. */
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_amam;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct amam_set {
+    bool   amam_on;                /* Lab: AM/AM, AM/PM of a wideband signal. */
+};
+
+#define SET(set) ((struct amam_set *)an_mode_settings(&an_mode_amam, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct amam_res {
@@ -36,7 +45,6 @@ struct amam_res {
     struct m2sdr_amam_result amam;
 };
 
-extern const struct an_mode an_mode_amam;
 #define RES(res) ((struct amam_res *)an_mode_result(&an_mode_amam, (res)))
 
 /* Stimulus */
@@ -204,7 +212,7 @@ static int amam_option(int id, const char *arg, struct an_cli *cli)
     int n;
 
     switch (id) {
-    case AM_OPT_ON: cli->set->amam_on = true; break;
+    case AM_OPT_ON: SET(cli->set)->amam_on = true; break;
     case AM_OPT_STIMULUS:
         if (strcmp(arg, "noise") == 0) {
             lab->amam_stimulus = 0;
@@ -310,7 +318,7 @@ static void draw_amam(struct an_ui *ui, bool live, bool *changed)
         }
     }
 
-    if (!res->set.amam_on) {
+    if (!SET(&res->set)->amam_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -390,23 +398,24 @@ static void draw_amam_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_amam = {
-    .key          = "amam",
-    .title        = "AM/AM",
-    .category     = AN_CAT_LAB,
-    .on           = offsetof(struct an_settings, amam_on),
-    .result_size  = sizeof(struct amam_res),
-    .valid        = offsetof(struct amam_res, amam_valid),
-    .report_rank  = 43,
-    .options      = amam_options,
-    .option       = amam_option,
-    .help         = amam_help,
-    .samples      = amam_samples,
-    .analyse      = amam_analyse,
-    .stimulus     = amam_stimulus,
-    .report_text  = amam_report_text,
-    .report_json  = amam_report_json,
+    .key           = "amam",
+    .title         = "AM/AM",
+    .category      = AN_CAT_LAB,
+    .settings_size = sizeof(struct amam_set),
+    .on            = offsetof(struct amam_set, amam_on),
+    .result_size   = sizeof(struct amam_res),
+    .valid         = offsetof(struct amam_res, amam_valid),
+    .report_rank   = 43,
+    .options       = amam_options,
+    .option        = amam_option,
+    .help          = amam_help,
+    .samples       = amam_samples,
+    .analyse       = amam_analyse,
+    .stimulus      = amam_stimulus,
+    .report_text   = amam_report_text,
+    .report_json   = amam_report_json,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_amam,
-    .results      = draw_amam_results,
+    .draw          = draw_amam,
+    .results       = draw_amam_results,
 #endif
 };

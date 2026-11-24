@@ -29,8 +29,23 @@
 
 #define DF_C 299792458.0
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_df;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct df_set {
+    bool   df_on;                  /* Direction finding with two antennas. */
+    double df_spacing_m;           /* 0: half the wavelength. */
+    double df_freq_hz;             /* Signal, from the centre; 0: the strongest. */
+    double df_bw_hz;               /* 0: the main lobe of its peak. */
+    bool   df_cal_given;           /* df_cal_deg given: the stored calibration is not used. */
+    double df_cal_deg;
+    bool   df_cal_store;           /* --report: store the phase read as the calibration (source at broadside). */
+};
+
+#define SET(set) ((struct df_set *)an_mode_settings(&an_mode_df, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct df_res {
@@ -42,7 +57,6 @@ struct df_res {
     double df_cal_freq_hz;         /* The frequency of the stored one. */
 };
 
-extern const struct an_mode an_mode_df;
 #define RES(res) ((struct df_res *)an_mode_result(&an_mode_df, (res)))
 
 /* Calibration */
@@ -98,7 +112,7 @@ static int df_opened(struct an_cli *cli)
 
     if (src->live && !src->dna)
         (void)m2sdr_get_fpga_dna(src->dev, &src->dna);
-    if (df_cal_init(src->live ? src->dna : 0) != 0 && cli->set->df_cal_store) {
+    if (df_cal_init(src->live ? src->dna : 0) != 0 && SET(cli->set)->df_cal_store) {
         m2sdr_cli_error("Could not store the calibration (no board, no --df-cal-file)");
         return -1;
     }
@@ -189,35 +203,35 @@ static int df_option(int id, const char *arg, struct an_cli *cli)
 
     switch (id) {
     case 0:
-        set->df_on = true;
+        SET(set)->df_on = true;
         break;
     case 1:
-        if (m2sdr_cli_parse_double(arg, &set->df_spacing_m) != 0 || !(set->df_spacing_m > 0)) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->df_spacing_m) != 0 || !(SET(set)->df_spacing_m > 0)) {
             m2sdr_cli_error("invalid antenna spacing '%s'", arg);
             return -1;
         }
         break;
     case 2:
-        if (m2sdr_cli_parse_double(arg, &set->df_freq_hz) != 0) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->df_freq_hz) != 0) {
             m2sdr_cli_error("invalid signal offset '%s'", arg);
             return -1;
         }
         break;
     case 3:
-        if (m2sdr_cli_parse_double(arg, &set->df_bw_hz) != 0 || set->df_bw_hz < 0) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->df_bw_hz) != 0 || SET(set)->df_bw_hz < 0) {
             m2sdr_cli_error("invalid signal bandwidth '%s'", arg);
             return -1;
         }
         break;
     case 4:
-        if (m2sdr_cli_parse_double(arg, &set->df_cal_deg) != 0) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->df_cal_deg) != 0) {
             m2sdr_cli_error("invalid calibration '%s'", arg);
             return -1;
         }
-        set->df_cal_given = true;
+        SET(set)->df_cal_given = true;
         break;
     case 5:
-        set->df_cal_store = set->df_on = true;
+        SET(set)->df_cal_store = SET(set)->df_on = true;
         break;
     case 6:
         snprintf(df_cal.path, sizeof(df_cal.path), "%.1023s", arg);
@@ -259,18 +273,18 @@ static void df_analyse(const float complex *x1, const float complex *x2, size_t 
     memset(&cfg, 0, sizeof(cfg));
     RES(res)->df_cal_source = 0;
     RES(res)->df_cal_deg    = 0.0;
-    if (set->df_cal_given) {
-        RES(res)->df_cal_deg    = set->df_cal_deg;
+    if (SET(set)->df_cal_given) {
+        RES(res)->df_cal_deg    = SET(set)->df_cal_deg;
         RES(res)->df_cal_source = 1;
     } else if (df_cal_lookup(set->freq_hz, &RES(res)->df_cal_deg, &RES(res)->df_cal_freq_hz)) {
         RES(res)->df_cal_source = 2;
     }
     /* Without a spacing, half the wavelength of the centre: no ambiguity. */
-    RES(res)->df_spacing_m = set->df_spacing_m > 0 ? set->df_spacing_m : set->freq_hz > 0 ? 0.5 * DF_C / set->freq_hz : 0.0;
+    RES(res)->df_spacing_m = SET(set)->df_spacing_m > 0 ? SET(set)->df_spacing_m : set->freq_hz > 0 ? 0.5 * DF_C / set->freq_hz : 0.0;
     cfg.spacing_m     = RES(res)->df_spacing_m;
     cfg.rf_freq_hz    = set->freq_hz;
-    cfg.freq_hz       = set->df_freq_hz;
-    cfg.bandwidth_hz  = set->df_bw_hz;
+    cfg.freq_hz       = SET(set)->df_freq_hz;
+    cfg.bandwidth_hz  = SET(set)->df_bw_hz;
     cfg.cal_phase_deg = RES(res)->df_cal_deg;
     RES(res)->df_valid = m2sdr_df_analyse(x1, x2, count, set->sample_rate, &cfg, &RES(res)->df) == 0;
 }
@@ -295,7 +309,7 @@ static int df_report_done(const struct an_result *res)
 {
     double cal;
 
-    if (!res->set.df_cal_store)
+    if (!SET(&res->set)->df_cal_store)
         return 0;
     if (!RES(res)->df_valid || !RES(res)->df.found) {
         fprintf(stderr, "No signal: no direction finding calibration stored.\n");
@@ -516,19 +530,19 @@ static void draw_df(struct an_ui *ui, bool live, bool *changed)
     const struct an_result *res = &ui->res;
     const struct m2sdr_df_result *d = &RES(res)->df;
     const bool ok = res->two_channels && RES(res)->df_valid && d->found;
-    double cm = ui->set.df_spacing_m, khz = ui->set.df_freq_hz;
+    double cm = SET(&ui->set)->df_spacing_m, khz = SET(&ui->set)->df_freq_hz;
     ImVec2 avail;
     char text[128];
     float side;
 
     (void)live;
     if (input_scaled("Spacing (cm, 0: lambda/2)##dfsp", &cm, 0.01, "%.2f")) {
-        ui->set.df_spacing_m = cm > 0 ? cm : 0.0;
+        SET(&ui->set)->df_spacing_m = cm > 0 ? cm : 0.0;
         *changed = true;
     }
     same_line_or_wrap(16.0f, 300.0f);
     if (input_scaled("Signal (kHz, 0: strongest)##dff", &khz, 1e3, "%.3f")) {
-        ui->set.df_freq_hz = khz;
+        SET(&ui->set)->df_freq_hz = khz;
         *changed = true;
     }
     same_line_or_wrap(16.0f, 400.0f);
@@ -540,21 +554,21 @@ static void draw_df(struct an_ui *ui, bool live, bool *changed)
                      res->set.freq_hz / 1e6, df_cal_file());
         else
             snprintf(ui->message, sizeof(ui->message), "Calibration %+.2f deg used, not stored (no board file)", cal);
-        ui->set.df_cal_given = df_cal_file() == NULL;
-        ui->set.df_cal_deg   = cal;
+        SET(&ui->set)->df_cal_given = df_cal_file() == NULL;
+        SET(&ui->set)->df_cal_deg   = cal;
         *changed = true;
     }
-    if (ui->set.df_cal_given) {
+    if (SET(&ui->set)->df_cal_given) {
         igSameLine(0.0f, 8.0f);
         if (igSmallButton("Use the stored one")) {
-            ui->set.df_cal_given = false;
+            SET(&ui->set)->df_cal_given = false;
             *changed = true;
         }
     }
     if (ui->set.agc) {
         igTextColored((ImVec4){ 1.0f, 0.75f, 0.3f, 1.0f }, "AGC on: a gain change of one RX can move its phase; a manual gain keeps the calibration.");
     }
-    if (!res->set.df_on) {
+    if (!SET(&res->set)->df_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -625,27 +639,28 @@ static void draw_df_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_df = {
-    .key          = "df",
-    .title        = "Direction",
-    .category     = AN_CAT_TWO_CHANNEL,
-    .on           = offsetof(struct an_settings, df_on),
-    .result_size  = sizeof(struct df_res),
-    .valid        = offsetof(struct df_res, df_valid),
-    .found        = offsetof(struct df_res, df.found),
-    .report_rank  = 71,
-    .samples      = df_samples,
-    .two_channels = true,
-    .analyse_two  = df_analyse,
-    .report_text  = df_report_text,
-    .report_json  = df_report_json,
-    .report_done  = df_report_done,
-    .watch_line   = df_watch_line,
-    .options      = df_options,
-    .option       = df_option,
-    .help         = df_help,
-    .opened       = df_opened,
+    .key           = "df",
+    .title         = "Direction",
+    .category      = AN_CAT_TWO_CHANNEL,
+    .settings_size = sizeof(struct df_set),
+    .on            = offsetof(struct df_set, df_on),
+    .result_size   = sizeof(struct df_res),
+    .valid         = offsetof(struct df_res, df_valid),
+    .found         = offsetof(struct df_res, df.found),
+    .report_rank   = 71,
+    .samples       = df_samples,
+    .two_channels  = true,
+    .analyse_two   = df_analyse,
+    .report_text   = df_report_text,
+    .report_json   = df_report_json,
+    .report_done   = df_report_done,
+    .watch_line    = df_watch_line,
+    .options       = df_options,
+    .option        = df_option,
+    .help          = df_help,
+    .opened        = df_opened,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_df,
-    .results      = draw_df_results,
+    .draw          = draw_df,
+    .results       = draw_df_results,
 #endif
 };

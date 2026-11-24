@@ -28,8 +28,19 @@ static const char *const pulse_mod_names[] = { "CW", "LFM", "other" };
 static const char *const pulse_mod_keys[]  = { "cw", "lfm", "other" };
 static const char *const pri_keys[]        = { "none", "constant", "stagger", "jitter" };
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_pulse;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct pulse_set {
+    bool   pulse_on;               /* Pulsed signals. */
+    double pulse_threshold_db;     /* Over the noise floor; 0: the default of libm2sdr. */
+    double pulse_seconds;          /* Capture; 0: AN_PULSE_SECONDS. */
+};
+
+#define SET(set) ((struct pulse_set *)an_mode_settings(&an_mode_pulse, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct pulse_res {
@@ -39,7 +50,6 @@ struct pulse_res {
     double pulse_env_s;            /* Time of the capture over them. */
 };
 
-extern const struct an_mode an_mode_pulse;
 #define RES(res) ((struct pulse_res *)an_mode_result(&an_mode_pulse, (res)))
 
 /* Analysis */
@@ -47,7 +57,7 @@ extern const struct an_mode an_mode_pulse;
 
 static double pulse_seconds(const struct an_settings *set)
 {
-    return set->pulse_seconds > 0 ? set->pulse_seconds : AN_PULSE_SECONDS;
+    return SET(set)->pulse_seconds > 0 ? SET(set)->pulse_seconds : AN_PULSE_SECONDS;
 }
 
 static size_t pulse_samples(const struct an_settings *set)
@@ -63,7 +73,7 @@ static void pulse_analyse(const float complex *x, size_t count, const struct an_
     size_t i, p;
 
     memset(&cfg, 0, sizeof(cfg));
-    cfg.threshold_db = set->pulse_threshold_db;
+    cfg.threshold_db = SET(set)->pulse_threshold_db;
     RES(res)->pulse_valid = m2sdr_pulse_analyse(x, n, set->sample_rate, &cfg, &RES(res)->pulse) == 0;
     /* Envelope for the view: the highest power of each point, so that no pulse is lost. */
     RES(res)->pulse_env_s = (double)n / set->sample_rate;
@@ -207,15 +217,15 @@ static int pulse_option(int id, const char *arg, struct an_cli *cli)
     struct an_settings *set = cli->set;
 
     switch (id) {
-    case PULSE_OPT_ON: set->pulse_on = true; break;
+    case PULSE_OPT_ON: SET(set)->pulse_on = true; break;
     case PULSE_OPT_THRESHOLD:
-        if (m2sdr_cli_parse_double(arg, &set->pulse_threshold_db) != 0 || set->pulse_threshold_db <= 0) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->pulse_threshold_db) != 0 || SET(set)->pulse_threshold_db <= 0) {
             m2sdr_cli_error("invalid pulse threshold '%s' (dB, over 0)", arg);
             return -1;
         }
         break;
     case PULSE_OPT_SECONDS:
-        if (m2sdr_cli_parse_double(arg, &set->pulse_seconds) != 0 || set->pulse_seconds <= 0 || set->pulse_seconds > 2.0) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->pulse_seconds) != 0 || SET(set)->pulse_seconds <= 0 || SET(set)->pulse_seconds > 2.0) {
             m2sdr_cli_error("invalid pulse capture '%s' (seconds, up to 2)", arg);
             return -1;
         }
@@ -440,17 +450,17 @@ static void draw_pulse(struct an_ui *ui, bool live, bool *changed)
     ImVec2 avail;
 
     (void)live;
-    if (input_scaled("Threshold (dB)", &ui->set.pulse_threshold_db, 1.0, "%.1f"))
+    if (input_scaled("Threshold (dB)", &SET(&ui->set)->pulse_threshold_db, 1.0, "%.1f"))
         *changed = true;
     same_line_or_wrap(16.0f, 230.0f);
     if (input_scaled("Capture (ms)", &ms, 1.0, "%.1f") && ms > 0) {
-        ui->set.pulse_seconds = ms / 1e3;
+        SET(&ui->set)->pulse_seconds = ms / 1e3;
         *changed = true;
     }
     same_line_or_wrap(16.0f, 300.0f);
     igTextDisabled("threshold 0: 10 dB over the floor");
 
-    if (!res->set.pulse_on) {
+    if (!SET(&res->set)->pulse_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -525,25 +535,26 @@ static void draw_pulse_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_pulse = {
-    .key          = "pulses",
-    .title        = "Pulses",
-    .category     = AN_CAT_MONITORING,
-    .on           = offsetof(struct an_settings, pulse_on),
-    .result_size  = sizeof(struct pulse_res),
-    .valid        = offsetof(struct pulse_res, pulse_valid),
-    .found        = offsetof(struct pulse_res, pulse.found),
-    .report_rank  = 80,
-    .psd_short    = true,
-    .samples      = pulse_samples,
-    .analyse      = pulse_analyse,
-    .report_text  = pulse_report_text,
-    .report_json  = pulse_report_json,
-    .watch_line   = pulse_watch_line,
-    .options      = pulse_options,
-    .option       = pulse_option,
-    .help         = pulse_help,
+    .key           = "pulses",
+    .title         = "Pulses",
+    .category      = AN_CAT_MONITORING,
+    .settings_size = sizeof(struct pulse_set),
+    .on            = offsetof(struct pulse_set, pulse_on),
+    .result_size   = sizeof(struct pulse_res),
+    .valid         = offsetof(struct pulse_res, pulse_valid),
+    .found         = offsetof(struct pulse_res, pulse.found),
+    .report_rank   = 80,
+    .psd_short     = true,
+    .samples       = pulse_samples,
+    .analyse       = pulse_analyse,
+    .report_text   = pulse_report_text,
+    .report_json   = pulse_report_json,
+    .watch_line    = pulse_watch_line,
+    .options       = pulse_options,
+    .option        = pulse_option,
+    .help          = pulse_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_pulse,
-    .results      = draw_pulse_results,
+    .draw          = draw_pulse,
+    .results       = draw_pulse_results,
 #endif
 };

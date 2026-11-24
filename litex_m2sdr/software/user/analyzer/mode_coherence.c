@@ -20,8 +20,18 @@
 
 #include "analyzer.h"
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_coherence;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct coherence_set {
+    bool   coherence_on;           /* Coherence, gain, phase and delay between RX1 and RX2. */
+    int    coherence_fft_len;
+};
+
+#define SET(set) ((struct coherence_set *)an_mode_settings(&an_mode_coherence, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct coherence_res {
@@ -29,7 +39,6 @@ struct coherence_res {
     struct m2sdr_coherence_result coherence;
 };
 
-extern const struct an_mode an_mode_coherence;
 #define RES(res) ((struct coherence_res *)an_mode_result(&an_mode_coherence, (res)))
 
 /* Command line */
@@ -47,11 +56,11 @@ static int coherence_option(int id, const char *arg, struct an_cli *cli)
 
     switch (id) {
     case 0:
-        set->coherence_on = true;
+        SET(set)->coherence_on = true;
         break;
     case 1:
-        if (m2sdr_cli_parse_int_range(arg, 256, M2SDR_COHERENCE_MAX_BINS, &set->coherence_fft_len) != 0 ||
-            (set->coherence_fft_len & (set->coherence_fft_len - 1))) {
+        if (m2sdr_cli_parse_int_range(arg, 256, M2SDR_COHERENCE_MAX_BINS, &SET(set)->coherence_fft_len) != 0 ||
+            (SET(set)->coherence_fft_len & (SET(set)->coherence_fft_len - 1))) {
             m2sdr_cli_error("invalid coherence FFT length '%s' (expected a power of two from 256 to %d)", arg,
                             M2SDR_COHERENCE_MAX_BINS);
             return -1;
@@ -85,7 +94,7 @@ static void coherence_analyse(const float complex *x1, const float complex *x2, 
 {
     struct m2sdr_coherence_config cfg = { 0 };
 
-    cfg.fft_len = set->coherence_fft_len > 0 ? (size_t)set->coherence_fft_len : AN_COHERENCE_FFT_LEN;
+    cfg.fft_len = SET(set)->coherence_fft_len > 0 ? (size_t)SET(set)->coherence_fft_len : AN_COHERENCE_FFT_LEN;
     /* The channel of the spectrum, when one is set, is the band of the figures. */
     if (set->chan_bw_hz > 0) {
         cfg.lo_hz = set->chan_offset_hz - 0.5 * set->chan_bw_hz;
@@ -229,7 +238,7 @@ static void draw_coherence(struct an_ui *ui, bool live, bool *changed)
     static const int lens[] = { 256, 512, 1024, 2048, 4096, 8192 };
     const struct an_result *res = &ui->res;
     const struct m2sdr_coherence_result *c = &RES(res)->coherence;
-    const int len = ui->set.coherence_fft_len > 0 ? ui->set.coherence_fft_len : AN_COHERENCE_FFT_LEN;
+    const int len = SET(&ui->set)->coherence_fft_len > 0 ? SET(&ui->set)->coherence_fft_len : AN_COHERENCE_FFT_LEN;
     ImVec2 avail, half;
     char text[64];
     double top = -200.0;
@@ -244,7 +253,7 @@ static void draw_coherence(struct an_ui *ui, bool live, bool *changed)
         for (i = 0; i < (int)(sizeof(lens) / sizeof(lens[0])); i++) {
             snprintf(text, sizeof(text), "%d", lens[i]);
             if (igSelectable_Bool(text, lens[i] == len, 0, (ImVec2){ 0.0f, 0.0f })) {
-                ui->set.coherence_fft_len = lens[i];
+                SET(&ui->set)->coherence_fft_len = lens[i];
                 *changed = true;
             }
         }
@@ -256,7 +265,7 @@ static void draw_coherence(struct an_ui *ui, bool live, bool *changed)
         igSameLine(0.0f, 16.0f);
         igTextColored((ImVec4){ 1.0f, 0.75f, 0.3f, 1.0f }, "AGC on: each RX sets its own gain; a manual gain compares them.");
     }
-    if (!res->set.coherence_on) {
+    if (!SET(&res->set)->coherence_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -333,25 +342,26 @@ static void draw_coherence_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_coherence = {
-    .key          = "coherence",
-    .title        = "Coherence",
-    .category     = AN_CAT_TWO_CHANNEL,
-    .on           = offsetof(struct an_settings, coherence_on),
-    .result_size  = sizeof(struct coherence_res),
-    .valid        = offsetof(struct coherence_res, coherence_valid),
-    .found        = offsetof(struct coherence_res, coherence.found),
-    .report_rank  = 70,
-    .samples      = coherence_samples,
-    .two_channels = true,
-    .analyse_two  = coherence_analyse,
-    .report_text  = coherence_report_text,
-    .report_json  = coherence_report_json,
-    .watch_line   = coherence_watch_line,
-    .options      = coherence_options,
-    .option       = coherence_option,
-    .help         = coherence_help,
+    .key           = "coherence",
+    .title         = "Coherence",
+    .category      = AN_CAT_TWO_CHANNEL,
+    .settings_size = sizeof(struct coherence_set),
+    .on            = offsetof(struct coherence_set, coherence_on),
+    .result_size   = sizeof(struct coherence_res),
+    .valid         = offsetof(struct coherence_res, coherence_valid),
+    .found         = offsetof(struct coherence_res, coherence.found),
+    .report_rank   = 70,
+    .samples       = coherence_samples,
+    .two_channels  = true,
+    .analyse_two   = coherence_analyse,
+    .report_text   = coherence_report_text,
+    .report_json   = coherence_report_json,
+    .watch_line    = coherence_watch_line,
+    .options       = coherence_options,
+    .option        = coherence_option,
+    .help          = coherence_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_coherence,
-    .results      = draw_coherence_results,
+    .draw          = draw_coherence,
+    .results       = draw_coherence_results,
 #endif
 };

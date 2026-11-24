@@ -31,8 +31,17 @@
 #define SWEEP_POINTS       201
 #define SWEEP_LEVEL_DBFS   -10.0
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_sweep;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct sweep_set {
+    bool   sweep_on;               /* Lab: scalar network analysis, TX to RX. */
+};
+
+#define SET(set) ((struct sweep_set *)an_mode_settings(&an_mode_sweep, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct sweep_res {
@@ -40,7 +49,6 @@ struct sweep_res {
     struct m2sdr_sweep_result sweep;
 };
 
-extern const struct an_mode an_mode_sweep;
 #define RES(res) ((struct sweep_res *)an_mode_result(&an_mode_sweep, (res)))
 
 /* Lab, shared */
@@ -303,7 +311,7 @@ static int sweep_option(int id, const char *arg, struct an_cli *cli)
     double v;
 
     switch (id) {
-    case SW_OPT_ON: set->sweep_on = true; break;
+    case SW_OPT_ON: SET(set)->sweep_on = true; break;
     case SW_OPT_TX_ATT:
         if (m2sdr_cli_parse_int_range(arg, 0, 89, &set->lab.tx_att) != 0) {
             m2sdr_cli_error("invalid TX attenuation '%s' (expected 0 to 89)", arg);
@@ -357,7 +365,7 @@ static int sweep_option(int id, const char *arg, struct an_cli *cli)
 /* --lab-stimulus-out: the stimulus only depends on the settings, written before any source. */
 static int sweep_start(struct an_cli *cli)
 {
-    if (cli->set->lab.sweep_store && !cli->set->sweep_on) {
+    if (cli->set->lab.sweep_store && !SET(cli->set)->sweep_on) {
         m2sdr_cli_error("--sweep-thru-save goes with --sweep");
         return -1;
     }
@@ -378,7 +386,7 @@ static int sweep_opened(struct an_cli *cli)
     const bool store = cli->set->lab.sweep_store;
 
     if (thru_arg) {
-        if (sweep_cal_load(thru_arg) != 0 && !store && cli->set->sweep_on)
+        if (sweep_cal_load(thru_arg) != 0 && !store && SET(cli->set)->sweep_on)
             fprintf(stderr, "No thru calibration in %s: raw S21.\n", thru_arg);
     } else if (src->live && (src->dna || m2sdr_get_fpga_dna(src->dev, &src->dna) == M2SDR_ERR_OK) &&
                sweep_cal_default_path(src->dna, thru_default, sizeof(thru_default)) == 0) {
@@ -585,7 +593,7 @@ static void draw_sweep(struct an_ui *ui, bool live, bool *changed)
     igSameLine(0.0f, 16.0f);
     igTextUnformatted(sweep_cal_valid() ? "thru stored" : "no thru stored: S21 holds the radio", NULL);
 
-    if (!res->set.sweep_on) {
+    if (!SET(&res->set)->sweep_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -663,28 +671,29 @@ static void draw_sweep_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_sweep = {
-    .key          = "sweep",
-    .title        = "Sweep",
-    .category     = AN_CAT_LAB,
-    .on           = offsetof(struct an_settings, sweep_on),
-    .result_size  = sizeof(struct sweep_res),
-    .valid        = offsetof(struct sweep_res, sweep_valid),
-    .report_rank  = 40,
-    .psd_short    = true,
-    .defaults     = sweep_defaults,
-    .options      = sweep_options,
-    .option       = sweep_option,
-    .help         = sweep_help,
-    .start        = sweep_start,
-    .opened       = sweep_opened,
-    .samples      = sweep_samples,
-    .analyse      = sweep_analyse,
-    .stimulus     = sweep_stimulus,
-    .report_text  = sweep_report_text,
-    .report_json  = sweep_report_json,
-    .report_done  = sweep_report_done,
+    .key           = "sweep",
+    .title         = "Sweep",
+    .category      = AN_CAT_LAB,
+    .settings_size = sizeof(struct sweep_set),
+    .on            = offsetof(struct sweep_set, sweep_on),
+    .result_size   = sizeof(struct sweep_res),
+    .valid         = offsetof(struct sweep_res, sweep_valid),
+    .report_rank   = 40,
+    .psd_short     = true,
+    .defaults      = sweep_defaults,
+    .options       = sweep_options,
+    .option        = sweep_option,
+    .help          = sweep_help,
+    .start         = sweep_start,
+    .opened        = sweep_opened,
+    .samples       = sweep_samples,
+    .analyse       = sweep_analyse,
+    .stimulus      = sweep_stimulus,
+    .report_text   = sweep_report_text,
+    .report_json   = sweep_report_json,
+    .report_done   = sweep_report_done,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_sweep,
-    .results      = draw_sweep_results,
+    .draw          = draw_sweep,
+    .results       = draw_sweep_results,
 #endif
 };

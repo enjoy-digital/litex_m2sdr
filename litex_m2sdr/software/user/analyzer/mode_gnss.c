@@ -23,8 +23,18 @@
 
 #define GNSS_RATE 2048000.0
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_gnss;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct gnss_set {
+    bool   gnss_on;
+    int    gnss_ms;                /* Milliseconds integrated; 0: AN_GNSS_DEFAULT_MS. */
+};
+
+#define SET(set) ((struct gnss_set *)an_mode_settings(&an_mode_gnss, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct gnss_res {
@@ -32,7 +42,6 @@ struct gnss_res {
     struct m2sdr_gnss_result gnss;
 };
 
-extern const struct an_mode an_mode_gnss;
 #define RES(res) ((struct gnss_res *)an_mode_result(&an_mode_gnss, (res)))
 
 /* Analysis */
@@ -40,7 +49,7 @@ extern const struct an_mode an_mode_gnss;
 
 static int gnss_ms(const struct an_settings *set)
 {
-    return set->gnss_ms > 0 ? set->gnss_ms : AN_GNSS_DEFAULT_MS;
+    return SET(set)->gnss_ms > 0 ? SET(set)->gnss_ms : AN_GNSS_DEFAULT_MS;
 }
 
 static size_t gnss_samples(const struct an_settings *set)
@@ -185,10 +194,10 @@ static int gnss_option(int id, const char *arg, struct an_cli *cli)
 {
     switch (id) {
     case 0:
-        cli->set->gnss_on = true;
+        SET(cli->set)->gnss_on = true;
         return 0;
     case 1:
-        if (m2sdr_cli_parse_int_range(arg, 1, 100, &cli->set->gnss_ms) != 0) {
+        if (m2sdr_cli_parse_int_range(arg, 1, 100, &SET(cli->set)->gnss_ms) != 0) {
             m2sdr_cli_error("invalid GNSS integration '%s' (expected 1 to 100 ms)", arg);
             return -1;
         }
@@ -241,13 +250,13 @@ static void draw_gnss(struct an_ui *ui, bool live, bool *changed)
 
         igSetNextItemWidth(100.0f);
         if (igInputInt("ms integrated", &ms, 5, 10, 0)) {
-            ui->set.gnss_ms = ms < 1 ? 1 : ms > 100 ? 100 : ms;
+            SET(&ui->set)->gnss_ms = ms < 1 ? 1 : ms > 100 ? 100 : ms;
             *changed = true;
         }
     }
     igSameLine(0.0f, 16.0f);
     igTextDisabled("An active antenna needs a bias-T: the M2SDR has none.");
-    if (!res->set.gnss_on) {
+    if (!SET(&res->set)->gnss_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -379,26 +388,27 @@ static void draw_gnss_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_gnss = {
-    .key          = "gnss",
-    .title        = "GPS L1",
-    .category     = AN_CAT_TIMING,
-    .on           = offsetof(struct an_settings, gnss_on),
-    .result_size  = sizeof(struct gnss_res),
-    .valid        = offsetof(struct gnss_res, gnss_valid),
-    .found        = offsetof(struct gnss_res, gnss.found),
-    .report_rank  = 71,
-    .default_rate = GNSS_RATE,
-    .default_freq = 1575.42e6,
-    .options      = gnss_options,
-    .option       = gnss_option,
-    .help         = gnss_help,
-    .samples      = gnss_samples,
-    .analyse      = gnss_analyse,
-    .report_text  = gnss_report_text,
-    .report_json  = gnss_report_json,
-    .watch_line   = gnss_watch_line,
+    .key           = "gnss",
+    .title         = "GPS L1",
+    .category      = AN_CAT_TIMING,
+    .settings_size = sizeof(struct gnss_set),
+    .on            = offsetof(struct gnss_set, gnss_on),
+    .result_size   = sizeof(struct gnss_res),
+    .valid         = offsetof(struct gnss_res, gnss_valid),
+    .found         = offsetof(struct gnss_res, gnss.found),
+    .report_rank   = 71,
+    .default_rate  = GNSS_RATE,
+    .default_freq  = 1575.42e6,
+    .options       = gnss_options,
+    .option        = gnss_option,
+    .help          = gnss_help,
+    .samples       = gnss_samples,
+    .analyse       = gnss_analyse,
+    .report_text   = gnss_report_text,
+    .report_json   = gnss_report_json,
+    .watch_line    = gnss_watch_line,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_gnss,
-    .results      = draw_gnss_results,
+    .draw          = draw_gnss,
+    .results       = draw_gnss_results,
 #endif
 };

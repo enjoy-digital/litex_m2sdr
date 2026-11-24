@@ -172,38 +172,7 @@ struct an_settings {
     double chan_bw_hz;             /* 0: no channel measurement. */
     double chan_spacing_hz;        /* 0: the bandwidth. */
     double ref_offset_db;          /* Added to the levels: dBFS to dBm at the connector. */
-    /* Monitoring: pulses and EMC pre-compliance. */
-    bool   pulse_on;               /* Pulsed signals. */
-    double pulse_threshold_db;     /* Over the noise floor; 0: the default of libm2sdr. */
-    double pulse_seconds;          /* Capture; 0: AN_PULSE_SECONDS. */
-    bool   emc_on;                 /* EMC pre-compliance. */
-    int    emc_log2;               /* Its capture: 2^emc_log2 samples; 0: the default. */
-    double emc_span_hz;            /* Channels over this span around the centre; 0: the default, < 0: all. */
-    struct m2sdr_emc_config emc;   /* Band, unit offset, factors and limit lines (centre and channels set per capture). */
-    bool   wifi_on;                /* Wi-Fi channel. */
-    bool   adsb_on;                /* ADS-B at 1090 MHz. */
-    struct m2sdr_adsb_config adsb; /* Its receiver position. */
-    bool   lora_on;                /* LoRa channel. */
-    /* Timing: stability of a carrier, GPS L1 C/A. */
-    bool   adev_on;
-    double adev_carrier_hz;        /* Nominal RF frequency of the carrier; 0: the first one found. */
-    bool   gnss_on;
-    int    gnss_ms;                /* Milliseconds integrated; 0: AN_GNSS_DEFAULT_MS. */
-    /* Two channels: RX1 and RX2 captured together. */
-    bool   coherence_on;           /* Coherence, gain, phase and delay between RX1 and RX2. */
-    int    coherence_fft_len;
-    bool   df_on;                  /* Direction finding with two antennas. */
-    double df_spacing_m;           /* 0: half the wavelength. */
-    double df_freq_hz;             /* Signal, from the centre; 0: the strongest. */
-    double df_bw_hz;               /* 0: the main lobe of its peak. */
-    bool   df_cal_given;           /* df_cal_deg given: the stored calibration is not used. */
-    double df_cal_deg;
-    bool   df_cal_store;           /* --report: store the phase read as the calibration (source at broadside). */
-    bool   sweep_on;               /* Lab: scalar network analysis, TX to RX. */
-    bool   compression_on;         /* Lab: gain against the input level. */
-    bool   imd_on;                 /* Lab: two-tone intermodulation. */
-    bool   amam_on;                /* Lab: AM/AM, AM/PM of a wideband signal. */
-    struct an_lab_settings lab;
+    struct an_lab_settings lab;    /* Shared by the lab modes, the TX of the source and the window. */
     /* Settings of each mode that has some, a block of its settings_size at the place
      * an_registry_init() gives it, read with an_mode_settings(): copied with the rest. */
     _Alignas(16) unsigned char modes[AN_SETTINGS_MODES];
