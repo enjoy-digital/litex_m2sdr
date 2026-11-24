@@ -274,23 +274,25 @@ static const char *df_cal_name(const struct an_result *res, char *text, size_t l
 }
 
 /* --report --df-cal-store: the phase read, a source at broadside, as the calibration of the
- * frequency. */
-static void df_report_store(const struct an_result *res)
+ * frequency. The command fails when nothing is stored. */
+static int df_report_done(const struct an_result *res)
 {
     double cal;
 
     if (!res->set.df_cal_store)
-        return;
+        return 0;
     if (!res->df_valid || !res->df.found) {
         fprintf(stderr, "No signal: no direction finding calibration stored.\n");
-        return;
+        return -1;
     }
     cal = m2sdr_df_calibration(&res->df, 0.0);
-    if (df_cal_store(res->set.freq_hz, cal) == 0)
-        fprintf(stderr, "Calibration %+.3f degrees at %.6f MHz stored in %s.\n", cal, res->set.freq_hz / 1e6, df_cal_file());
-    else
+    if (df_cal_store(res->set.freq_hz, cal) != 0) {
         fprintf(stderr, "Could not store the calibration%s%s.\n", df_cal_file() ? " in " : " (no board, no --df-cal-file)",
                 df_cal_file() ? df_cal_file() : "");
+        return -1;
+    }
+    fprintf(stderr, "Calibration %+.3f degrees at %.6f MHz stored in %s.\n", cal, res->set.freq_hz / 1e6, df_cal_file());
+    return 0;
 }
 
 static void df_report_text(const struct an_result *res, const struct an_report *rep)
@@ -322,7 +324,6 @@ static void df_report_text(const struct an_result *res, const struct an_report *
             printf(" deg\n");
         }
     }
-    df_report_store(res);
 }
 
 static void df_report_json(const struct an_result *res, const struct an_report *rep)
@@ -358,7 +359,6 @@ static void df_report_json(const struct an_result *res, const struct an_report *
         printf("]\n");
     }
     printf("  }");
-    df_report_store(res);
 }
 
 /* Watch */
@@ -621,6 +621,7 @@ const struct an_mode an_mode_df = {
     .analyse_two  = df_analyse,
     .report_text  = df_report_text,
     .report_json  = df_report_json,
+    .report_done  = df_report_done,
     .watch_line   = df_watch_line,
     .options      = df_options,
     .option       = df_option,

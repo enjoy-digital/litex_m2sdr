@@ -425,7 +425,7 @@ int run_report(struct an_source *src, const struct an_settings *set, bool json, 
     float complex *x = malloc(count * sizeof(*x)), *x2 = two ? malloc(count * sizeof(*x2)) : NULL;
     struct an_result *res = calloc(1, sizeof(*res));
     char err[256];
-    int rc, status = 1;
+    int rc, m, status = 1;
 
     if (!x || !res || (two && !x2)) {
         fprintf(stderr, "Out of memory\n");
@@ -446,6 +446,10 @@ int run_report(struct an_source *src, const struct an_settings *set, bool json, 
         report_json(src, res, fl);
     else
         report_text(src, res, fl);
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->report_done && an_modes[m]->report_done(res) < 0)
+            goto out;
+    }
     if (floor_save_path) {
         if (!res->pn_valid) {
             fprintf(stderr, "No carrier: no floor stored.\n");

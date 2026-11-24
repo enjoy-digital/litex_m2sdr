@@ -497,6 +497,9 @@ struct an_mode {
      * from its first line to its closing brace, with no comma nor newline after it. */
     void   (*report_text)(const struct an_result *res, const struct an_report *rep);
     void   (*report_json)(const struct an_result *res, const struct an_report *rep);
+    /* After the report of the capture: what it was asked to store (a calibration). < 0 when it
+     * could not, after its message: the command then fails. */
+    int    (*report_done)(const struct an_result *res);
     /* --watch on a board: before each capture, then one line per result (now: seconds since the
      * start); < 0: stop on an error. */
     void   (*watch_prepare)(struct an_settings *set);
