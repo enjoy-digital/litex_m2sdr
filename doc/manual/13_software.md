@@ -799,7 +799,7 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | Coherence | Levels, coherence, gain and phase of RX2 against RX1 over frequency |
 | Direction | Angle of arrival on two antennas, beamscan and MUSIC on a half circle and against the angle |
 | LTE 2x2 | Paths, condition number and singular values per resource block of a 2-port LTE cell |
-| Sweep, Compression, IMD, AM/AM | Lab: the board sends a stimulus on TX and measures a device between TX and RX ([Lab modes](#sw-analyzer-lab)) |
+| Lab | Sweep, Compression, IMD and AM/AM tabs: the board sends a stimulus on TX and measures a device between TX and RX ([Lab modes](#sw-analyzer-lab)) |
 
 The tabs of the window group the views by category: Spectrum (Spectrum, Time, Statistics),
 Signal (Phase noise, Modulation), Cellular (LTE) and Broadcast (DVB-T, DVB-T2, DAB). `--view`
@@ -1132,6 +1132,11 @@ not known. The MER needed is not given: it depends on the code rate, which is in
 and the frame length need a P1 in the capture: they are held from the last capture that had
 one. MISO, FEF parts and several PLPs are not told apart.
 
+A DVB-T multiplex has the scattered pilots of PP1 and the same PRBS: it is told from DVB-T2 by
+its own continual pilots (EN 300 744). The report, `--watch` and the view then say "Not DVB-T2:
+a DVB-T multiplex" and point to `--dvbt`, with no T2 figure; the JSON has `"dvbt": true` and
+`"found": false`.
+
 #### DAB reception {#sw-analyzer-dab}
 
 The DAB view, and `--dab` with `--report` (and `--watch`), check the reception of a DAB/DAB+
@@ -1394,10 +1399,12 @@ The GPS L1 view (Timing), and `--gnss` with `--report` (and `--watch`), search t
 satellites at 1575.42 MHz and look at the interference in the band.
 
 ```sh
-m2sdr_analyzer --freq 1575.42e6 --view gnss
-m2sdr_analyzer --freq 1575.42e6 --report --gnss
-m2sdr_analyzer --freq 1575.42e6 --report --gnss --gnss-ms 20 --watch
+m2sdr_analyzer --view gnss
+m2sdr_analyzer --report --gnss
+m2sdr_analyzer --report --gnss --gnss-ms 20 --watch
 ```
+
+With `--gnss` and no `--freq`, the board tunes to 1575.42 MHz.
 
 The sample rate is 2.048 MSPS (the default with `--gnss`) or 4.096 MSPS. An active antenna needs
 a bias-T: the M2SDR has none.
