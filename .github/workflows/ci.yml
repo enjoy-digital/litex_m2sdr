@@ -75,6 +75,7 @@ jobs:
           cmake -S . -B build
           cmake --build build -j"$(nproc)"
           test -f build/libSoapyLiteXM2SDR.so
+          (cd build && ctest --output-on-failure)
           ldd build/libSoapyLiteXM2SDR.so | tee /tmp/ldd_soapylitexm2sdr.txt
           ! grep -q "not found" /tmp/ldd_soapylitexm2sdr.txt
 
