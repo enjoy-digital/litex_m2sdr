@@ -483,7 +483,7 @@ commands, by group:
 - PTP: `ptp-status`, `ptp-smoke`, `ptp-config`, `ptp-clock10-status`, `ptp-clock10-config`.
 - LEDs: `led-status`, `led-control`, `led-pulse`, `led-release`.
 - Clock generator: `si5351-init`, `si5351-dump`, `si5351-read`, `si5351-write`.
-- RFIC: `ad9361-dump`, `ad9361-read`, `ad9361-write`, `ad9361-port-dump`, `ad9361-ensm-dump`.
+- RFIC: `ad9361-dump`, `ad9361-read`, `ad9361-write`, `ad9361-port-dump`, `ad9361-ensm-dump`, and `ad9361-tx-att`/`ad9361-rx-gain` to change the TX attenuation or the manual RX gain at runtime (while streaming).
 - Flash: `flash-write`, `flash-read`, `flash-reload`.
 
 ```sh

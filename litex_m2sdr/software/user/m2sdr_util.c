@@ -962,6 +962,123 @@ static void test_ad9361_read(uint16_t reg)
     m2sdr_close_dev(conn);
 }
 
+/* AD9361 Runtime Gain Utilities */
+/*--------------------------------*/
+
+/* These only touch the AD9361 gain registers over SPI, without re-initializing the RFIC, so they can be used while
+ * another application (eg the SoapySDR driver) is streaming. That application keeps its own cached gain values. */
+
+static bool parse_channel_mask(const char *text, unsigned *mask)
+{
+    if (!text) {
+        *mask = 0x3;
+        return true;
+    }
+    if (strcmp(text, "1") == 0) {
+        *mask = 0x1;
+        return true;
+    }
+    if (strcmp(text, "2") == 0) {
+        *mask = 0x2;
+        return true;
+    }
+    fprintf(stderr, "Invalid channel '%s' (expected 1 or 2)\n", text);
+    return false;
+}
+
+static void ad9361_tx_att(bool set, double att_db, unsigned mask)
+{
+    static const uint16_t att_reg[2] = { REG_TX1_ATTEN_0, REG_TX2_ATTEN_0 };
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
+
+    m2sdr_ad9361_spi_init(handle, 0);
+
+    if (set) {
+        /* 0.25 dB per LSB, 9 bits (TS AD9361 UG-570). */
+        unsigned code = (unsigned)(att_db * 4.0 + 0.5);
+        uint8_t  dig  = m2sdr_ad9361_spi_read(handle, REG_TX2_DIG_ATTEN);
+
+        m2sdr_ad9361_spi_write(handle, REG_TX2_DIG_ATTEN, dig & ~IMMEDIATELY_UPDATE_TPC_ATTEN);
+        for (unsigned ch = 0; ch < 2; ch++) {
+            if (!(mask & (1u << ch)))
+                continue;
+            m2sdr_ad9361_spi_write(handle, att_reg[ch] + 1, (code >> 8) & 0x1);
+            m2sdr_ad9361_spi_write(handle, att_reg[ch], code & 0xff);
+        }
+        m2sdr_ad9361_spi_write(handle, REG_TX2_DIG_ATTEN, dig | IMMEDIATELY_UPDATE_TPC_ATTEN);
+    }
+
+    for (unsigned ch = 0; ch < 2; ch++) {
+        if (!(mask & (1u << ch)))
+            continue;
+        unsigned code = ((m2sdr_ad9361_spi_read(handle, att_reg[ch] + 1) & 0x1) << 8) |
+                        m2sdr_ad9361_spi_read(handle, att_reg[ch]);
+        printf("TX%u attenuation: %.2f dB\n", ch + 1, code / 4.0);
+    }
+
+    m2sdr_close_dev(conn);
+}
+
+/* Full gain table (the default), linear 1 dB per index above the first entries: gain_dB = index + offset. The offset
+ * depends on the band the table was loaded for, see full_gain_table_abs_gain[] in ad9361.c. */
+static int ad9361_rx_gain_offset(double lo_mhz)
+{
+    if (lo_mhz < 1300.0)
+        return -3;
+    if (lo_mhz < 4000.0)
+        return -5;
+    return -14;
+}
+
+/* First index of the linear part of the table (the entries below it repeat the minimum gain). */
+static int ad9361_rx_gain_min_index(double lo_mhz)
+{
+    return lo_mhz < 4000.0 ? 2 : 4;
+}
+
+static void ad9361_rx_gain(bool set, double gain_db, unsigned mask, double lo_mhz)
+{
+    static const uint16_t idx_reg[2] = { REG_RX1_MANUAL_LMT_FULL_GAIN, REG_RX2_MANUAL_LMT_FULL_GAIN };
+    static const uint8_t  ctl_shift[2] = { RX1_GAIN_CTRL_SHIFT, RX2_GAIN_CTRL_SHIFT };
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
+    int offset = ad9361_rx_gain_offset(lo_mhz);
+
+    m2sdr_ad9361_spi_init(handle, 0);
+
+    uint8_t agc = m2sdr_ad9361_spi_read(handle, REG_AGC_CONFIG_1);
+    for (unsigned ch = 0; ch < 2; ch++) {
+        if (!(mask & (1u << ch)))
+            continue;
+        bool mgc = ((agc >> ctl_shift[ch]) & RX_GAIN_CTL_MASK) == RX_GAIN_CTL_MGC;
+        if (set && !mgc) {
+            printf("RX%u: not in manual gain mode, gain left unchanged\n", ch + 1);
+            continue;
+        }
+        uint8_t reg = m2sdr_ad9361_spi_read(handle, idx_reg[ch]);
+        if (set) {
+            int index = (int)(gain_db + (gain_db < 0 ? -0.5 : 0.5)) - offset;
+            int min_index = ad9361_rx_gain_min_index(lo_mhz);
+            if (index < min_index || index > 76) {
+                fprintf(stderr, "RX gain %.1f dB out of range [%d..%d] dB\n", gain_db, min_index + offset, 76 + offset);
+                m2sdr_close_dev(conn);
+                exit(1);
+            }
+            reg = (reg & ~RX_FULL_TBL_IDX_MASK) | (index & RX_FULL_TBL_IDX_MASK);
+            m2sdr_ad9361_spi_write(handle, idx_reg[ch], reg);
+            reg = m2sdr_ad9361_spi_read(handle, idx_reg[ch]);
+        }
+        unsigned index = reg & RX_FULL_TBL_IDX_MASK;
+        int min_index = ad9361_rx_gain_min_index(lo_mhz);
+        printf("RX%u gain: %d dB (%s, full table index %u, %s band)\n", ch + 1,
+               (int)(index < (unsigned)min_index ? min_index : index) + offset, mgc ? "manual" : "AGC", index,
+               lo_mhz < 1300.0 ? "< 1300 MHz" : (lo_mhz < 4000.0 ? "1300-4000 MHz" : "> 4000 MHz"));
+    }
+
+    m2sdr_close_dev(conn);
+}
+
 /* AD9361 Dump Utilities */
 /*-----------------------*/
 
@@ -4400,6 +4517,10 @@ static void help(void)
            "      Write an AD9361 register.\n"
            "  ad9361-read REG\n"
            "      Read an AD9361 register.\n"
+           "  ad9361-tx-att [DB [CH]]\n"
+           "      Show or set the TX attenuation (0..89.75 dB, CH 1 or 2, default both) at runtime.\n"
+           "  ad9361-rx-gain [DB [CH [LO_MHZ]]]\n"
+           "      Show or set the manual RX gain (full gain table, LO_MHZ selects the band, default 2400) at runtime.\n"
            "  ad9361-port-dump\n"
            "      Dump AD9361 port configuration.\n"
            "  ad9361-ensm-dump\n"
@@ -4828,6 +4949,29 @@ int main(int argc, char **argv)
         if (!parse_next_u16_arg("AD9361 register", argv, &optind, &reg))
             exit(1);
         test_ad9361_read(reg);
+    }
+    else if (cmd_is(cmd, "ad9361_tx_att", "ad9361-tx-att")) {
+        bool     set  = optind < argc;
+        double   db   = set ? strtod(argv[optind], NULL) : 0.0;
+        unsigned mask = 0x3;
+
+        if (set && (db < 0.0 || db > 89.75)) {
+            fprintf(stderr, "TX attenuation %.2f dB out of range [0..89.75] dB\n", db);
+            exit(1);
+        }
+        if (!parse_channel_mask(optind + 1 < argc ? argv[optind + 1] : NULL, &mask))
+            exit(1);
+        ad9361_tx_att(set, db, mask);
+    }
+    else if (cmd_is(cmd, "ad9361_rx_gain", "ad9361-rx-gain")) {
+        bool     set  = optind < argc;
+        double   db   = set ? strtod(argv[optind], NULL) : 0.0;
+        double   lo   = optind + 2 < argc ? strtod(argv[optind + 2], NULL) : 2400.0;
+        unsigned mask = 0x3;
+
+        if (!parse_channel_mask(optind + 1 < argc ? argv[optind + 1] : NULL, &mask))
+            exit(1);
+        ad9361_rx_gain(set, db, mask, lo);
     }
     else if (cmd_is(cmd, "ad9361_port_dump", "ad9361-port-dump"))
         test_ad9361_port_dump();
