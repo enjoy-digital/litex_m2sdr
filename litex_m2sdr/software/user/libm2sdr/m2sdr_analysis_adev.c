@@ -16,12 +16,6 @@
 #include "m2sdr_analysis_timing.h"
 #include "m2sdr_fft.h"
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3). */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
-
 #define MIN_COUNT       1024
 #define MAX_FFT         65536   /* Coarse search: within a tenth of a bin of this, fine enough. */
 #define MIN_BLOCKS      8

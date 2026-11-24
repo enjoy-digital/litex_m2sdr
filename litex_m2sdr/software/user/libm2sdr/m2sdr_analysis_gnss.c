@@ -15,12 +15,6 @@
 #include "m2sdr_analysis_timing.h"
 #include "m2sdr_fft.h"
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3). */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
-
 #define MAX_MS            200
 #define SEARCH_RATE       2.048e6 /* Of the code phase search. */
 #define SEARCH_N          2048    /* Its millisecond. */

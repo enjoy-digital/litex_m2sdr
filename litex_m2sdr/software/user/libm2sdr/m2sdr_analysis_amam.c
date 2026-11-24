@@ -15,12 +15,6 @@
 #include "m2sdr_analysis_lab.h"
 #include "m2sdr_analysis_lab_internal.h"
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3). */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
-
 #define DEFAULT_LINEAR_RMS 0.5
 #define MIN_BIN_SAMPLES    100      /* Of the bin of the compression figures. */
 #define BAND_DB            60.0     /* Bins of the reference within this of its strongest: its band. */

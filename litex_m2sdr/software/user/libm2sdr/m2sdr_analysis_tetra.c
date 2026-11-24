@@ -15,12 +15,6 @@
 #include "m2sdr_analysis_cellular.h"
 #include "m2sdr_resample.h"
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3). */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
-
 #define TETRA_R          M2SDR_TETRA_SYMBOL_RATE
 #define TETRA_SPS        8                  /* Samples a symbol of the analysis. */
 #define TETRA_FS8        (TETRA_SPS * TETRA_R)

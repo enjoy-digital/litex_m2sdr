@@ -536,6 +536,13 @@ libliteusb/%.o: libliteusb/%.c $(BUILD_FLAGS_FILE)
 libm2sdr/%.o: libm2sdr/%.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<
 
+# The signal processing of libm2sdr works on finite samples: complex products and divisions without
+# the NaN and infinity handling of C99 Annex G (__mulsc3, __divsc3), which costs more than the
+# products themselves. On the command line: GCC ignores it as a pragma of the file. Only with a
+# compiler that has the flag (clang 14 has not).
+CX_LIMITED_RANGE := $(shell $(CC) -fcx-limited-range -x c -c /dev/null -o /dev/null 2>/dev/null && echo -fcx-limited-range)
+libm2sdr/m2sdr_analysis_%.o libm2sdr/m2sdr_fm.o libm2sdr/m2sdr_resample.o: CFLAGS += $(CX_LIMITED_RANGE)
+
 ad9361/%.o: ad9361/%.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<
 

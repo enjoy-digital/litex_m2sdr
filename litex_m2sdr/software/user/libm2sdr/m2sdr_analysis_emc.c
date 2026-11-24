@@ -15,12 +15,6 @@
 #include "m2sdr_analysis_monitoring.h"
 #include "m2sdr_fft.h"
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3). */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
-
 #define MIN_COUNT          4096
 #define FILTER_SPAN        3.0     /* Envelope rate over the RBW: the Gaussian is 54 dB down at
                                     * 1.5 RBW from its centre, where the rate folds it. */

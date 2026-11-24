@@ -14,12 +14,6 @@
 
 #include "m2sdr_analysis_monitoring.h"
 
-/* The samples and the products here are finite: complex products without the NaN and infinity
- * handling of C99 (__mulsc3). */
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC optimize("cx-limited-range")
-#endif
-
 #define FLOOR_BLOCK        64      /* Samples of the blocks of the noise floor. */
 #define FLOOR_QUANTILE     0.25    /* Their quantile taken: room for pulses in 3/4 of the blocks. */
 #define DEFAULT_THRESHOLD  10.0    /* dB over the floor. With 4 samples averaged, noise exceeds it
