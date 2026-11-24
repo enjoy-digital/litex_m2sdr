@@ -52,6 +52,7 @@
 
 #include "m2sdr.h"
 #include "m2sdr_analysis.h"
+#include "m2sdr_analysis_dvbt2.h"
 
 #define AN_DEFAULT_FREQ_HZ     2400e6
 #define AN_DEFAULT_SAMPLE_RATE 7680000.0
@@ -115,6 +116,10 @@ struct an_settings {
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
     struct m2sdr_dvbt_config dvbt_hint;
+    /* DVB-T2 multiplex; set by the worker once its mode and pattern are known: short captures. */
+    bool   dvbt2_on;
+    bool   dvbt2_fast;
+    struct m2sdr_dvbt2_config dvbt2_hint;
 };
 
 extern const char *const window_names[];  /* enum m2sdr_window. */
@@ -192,6 +197,8 @@ struct an_result {
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
+    struct m2sdr_dvbt2_result dvbt2;
+    bool   dvbt2_valid;            /* Measured: the sample rate was one of DVB-T2; dvbt2.found says the rest. */
 };
 
 size_t capture_samples(const struct an_settings *set);
@@ -415,6 +422,9 @@ struct an_ui {
     struct m2sdr_dvbt_result *dvbt_tps;
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
+    /* DVB-T2: MER over the results of one tuning, and the last capture with a P1. */
+    struct an_trend dvbt2;
+    struct m2sdr_dvbt2_result *dvbt2_p1;
 };
 
 int  run_gui(struct an_source *src, const struct an_settings *set, int first_view, struct an_floor *fl,
