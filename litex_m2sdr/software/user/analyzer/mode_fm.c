@@ -91,6 +91,7 @@ static double fm_bs412_add(struct fm_bs412 *b, double t, double ms)
     return b->mean_dbr[b->n - 1];
 }
 
+#ifdef M2SDR_ANALYZER_GUI
 /* Seconds covered by the 60 s mean, from the first result in it to the last. */
 static double fm_bs412_span(const struct fm_bs412 *b)
 {
@@ -102,6 +103,7 @@ static double fm_bs412_span(const struct fm_bs412 *b)
         ;
     return b->t[b->n - 1] - b->t[i];
 }
+#endif
 
 /* Reports */
 /*---------*/

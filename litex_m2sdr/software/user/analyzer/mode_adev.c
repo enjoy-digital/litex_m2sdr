@@ -150,6 +150,7 @@ static double adev_at(const struct m2sdr_adev *d, double tau_s, double *tau_foun
     return NAN;
 }
 
+#ifdef M2SDR_ANALYZER_GUI
 static const char *adev_clock_name(enum an_clock clock)
 {
     switch (clock) {
@@ -159,6 +160,7 @@ static const char *adev_clock_name(enum an_clock clock)
     default:               return "none";
     }
 }
+#endif
 
 /* Reports */
 /*---------*/

@@ -45,7 +45,7 @@ static struct {
 } df_cal = { PTHREAD_MUTEX_INITIALIZER, "", false, 0, { 0 }, { 0 } };
 
 /* The file of --df-cal-file, or the one of the board. Returns -1 when there is neither. */
-int df_cal_init(uint64_t dna)
+static int df_cal_init(uint64_t dna)
 {
     char cal[1024], line[256], *slash;
     FILE *f;
@@ -72,6 +72,20 @@ int df_cal_init(uint64_t dna)
         }
     }
     fclose(f);
+    return 0;
+}
+
+/* The calibrations of the board, once the source is open: --df-cal-store needs a file. */
+static int df_opened(struct an_cli *cli)
+{
+    struct an_source *src = cli->src;
+
+    if (src->live && !src->dna)
+        (void)m2sdr_get_fpga_dna(src->dev, &src->dna);
+    if (df_cal_init(src->live ? src->dna : 0) != 0 && cli->set->df_cal_store) {
+        m2sdr_cli_error("Could not store the calibration (no board, no --df-cal-file)");
+        return -1;
+    }
     return 0;
 }
 
@@ -610,6 +624,7 @@ const struct an_mode an_mode_df = {
     .options      = df_options,
     .option       = df_option,
     .help         = df_help,
+    .opened       = df_opened,
 #ifdef M2SDR_ANALYZER_GUI
     .draw         = draw_df,
     .results      = draw_df_results,

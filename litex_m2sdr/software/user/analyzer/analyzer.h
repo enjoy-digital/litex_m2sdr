@@ -512,7 +512,6 @@ extern const struct an_mode *const an_modes[];
 
 /* Direction finding: phase of RX2 against RX1 of the board, per frequency, from a source at
  * broadside; kept per board (or in the file of --df-cal-file) in a text file (mode_df.c). */
-int    df_cal_init(uint64_t dna);
 const char *df_cal_file(void);
 bool   df_cal_lookup(double freq_hz, double *phase_deg, double *at_hz);
 int    df_cal_store(double freq_hz, double phase_deg);
