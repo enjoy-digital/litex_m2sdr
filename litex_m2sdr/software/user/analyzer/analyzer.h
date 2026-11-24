@@ -57,6 +57,7 @@
 #include "m2sdr_analysis_monitoring.h"
 #include "m2sdr_analysis_cellular.h"
 #include "m2sdr_analysis_wireless.h"
+#include "m2sdr_analysis_timing.h"
 
 #define AN_DEFAULT_FREQ_HZ     2400e6
 #define AN_DEFAULT_SAMPLE_RATE 7680000.0
@@ -99,6 +100,9 @@
 #define AN_ADSB_SAMPLE_RATE     2.4e6         /* Pulses across two samples decode with less SNR than at 2 MSPS. */
 #define AN_LORA_SECONDS         1.0           /* Capture of a LoRa analysis: an SF12 preamble and more. */
 #define AN_LORA_SAMPLE_RATE     1e6           /* The three bandwidths divide it by a power of two. */
+#define AN_ADEV_SAMPLES         (1 << 17)     /* Capture of a carrier estimate. */
+#define AN_ADEV_HISTORY         1024          /* Captures kept in the series of the Allan deviation. */
+#define AN_GNSS_DEFAULT_MS      10            /* Milliseconds of a GPS acquisition. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 /* Monitoring. */
@@ -155,6 +159,11 @@ struct an_settings {
     bool   adsb_on;                /* ADS-B at 1090 MHz. */
     struct m2sdr_adsb_config adsb; /* Its receiver position. */
     bool   lora_on;                /* LoRa channel. */
+    /* Timing: stability of a carrier, GPS L1 C/A. */
+    bool   adev_on;
+    double adev_carrier_hz;        /* Nominal RF frequency of the carrier; 0: the first one found. */
+    bool   gnss_on;
+    int    gnss_ms;                /* Milliseconds integrated; 0: AN_GNSS_DEFAULT_MS. */
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -169,6 +178,19 @@ extern const char *const window_names[];  /* enum m2sdr_window. */
 
 /* Source */
 /*--------*/
+
+/* Time of the first sample of a capture, and what it is read from. */
+enum an_clock {
+    AN_CLOCK_NONE    = 0,
+    AN_CLOCK_SAMPLES = 1,          /* File: its sample count, exact; consecutive captures are contiguous. */
+    AN_CLOCK_BOARD   = 2,          /* Board: the timestamp of its DMA header. */
+    AN_CLOCK_HOST    = 3,          /* Board without timestamps: the host clock, within a millisecond or so. */
+};
+
+struct an_capture_time {
+    double t_s;
+    enum an_clock clock;
+};
 
 struct an_source {
     bool   live;
@@ -201,6 +223,7 @@ struct an_source {
     void  *raw;
     size_t raw_bytes;
     unsigned lost;                 /* Captures with samples lost, since the start. */
+    struct an_capture_time capture;  /* Of the last capture. */
 };
 
 int  file_open(struct an_source *src, const char *path, int capture_index, char *err, size_t err_len);
@@ -260,6 +283,18 @@ struct an_result {
     bool   adsb_valid;             /* Measured: the sample rate was 2 MSPS or more. */
     struct m2sdr_lora_result lora;
     bool   lora_valid;             /* Measured: a LoRa bandwidth divides the sample rate by a power of two. */
+    struct an_capture_time capture;  /* Set from the source before the analysis. */
+    /* Stability of a carrier: this capture, and the series of the captures of one tuning. */
+    struct m2sdr_carrier_result adev;
+    bool   adev_valid;             /* Measured; adev.found says whether a carrier was. */
+    bool   adev_series_ok;         /* 3 captures or more: adev_series holds their figures. */
+    struct m2sdr_adev_result adev_series;
+    double adev_nominal_hz;        /* Nominal frequency the offsets are taken from. */
+    bool   adev_nominal_given;     /* From the settings; else the first carrier found. */
+    int    adev_npoints;           /* History, oldest first: time from the first point, offset. */
+    float  adev_t_s[AN_ADEV_HISTORY], adev_ppb[AN_ADEV_HISTORY];
+    struct m2sdr_gnss_result gnss;
+    bool   gnss_valid;             /* Measured: the sample rate was 2.048 or 4.096 MSPS. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */

@@ -1301,6 +1301,52 @@ bandwidth, below 0 dB down to the limit of the SF), from the peaks of the preamb
 are the FFT peaks: the header and the payload (Gray mapping, interleaving, Hamming code,
 whitening) are not decoded. The view lists the packets over the captures, draws the time the
 channel is busy and the symbols of the last packet.
+#### Carrier stability, Allan deviation {#sw-analyzer-adev}
+The Allan deviation view (Timing), and `--adev` with `--report` (and `--watch`), follow the
+frequency of a carrier: a GPSDO tone, a broadcast carrier, or the reference of the board against
+an external one.
+m2sdr_analyzer --freq 10.01e6 --sample-rate 1e6 --view adev --adev-carrier 10e6
+m2sdr_analyzer --freq 10.01e6 --sample-rate 1e6 --report --adev --adev-carrier 10e6
+m2sdr_analyzer --freq 10.01e6 --sample-rate 1e6 --report --adev --adev-carrier 10e6 --watch
+Each capture (131072 samples) gives the carrier, the strongest line of the capture (the centre,
+with the DC offset of the receiver, is left out) or of the span around `--adev-carrier`:
+| Frequency, phase | A line fitted to the unwrapped phases of up to 1024 sub-blocks, the coarse frequency of an FFT removed: the Cramer-Rao bound for a tone in noise, given as the resolution |
+| Offset (ppb) | From the nominal frequency of `--adev-carrier`; without one, from the first capture of the series |
+| Level, SNR, C/N0 | The coherent amplitude of the carrier against the rest of the capture |
+| ADEV inside the capture | The sub-block phases: tau from a sub-block to a third of the capture. Its short taus show the white phase of the additive noise, sqrt(3) sigma_x / tau |
+| ADEV, MDEV over captures | Overlapping Allan and modified Allan deviations of the mean frequency of each capture, at octaves of tau0, the spacing of the captures |
+| Drift (ppb/s) | Straight line fitted to the offsets of the series |
+The series holds the last 1024 captures of a tuning, and restarts on a retune, a pause or the
+"Restart series" button. Its time comes from the sample count of a file (contiguous captures),
+from the timestamps of the board when its DMA header carries them, or else from the host clock.
+From a board the captures have dead time between them: the deviation of white FM then reads
+sqrt(tau0 / capture time) high, that of random walk FM about right; captures not evenly spaced
+are flagged. The view plots the offset against time and the deviations log-log, with the
+slopes of white PM (-1), white FM (-1/2), flicker FM (0) and random walk FM (+1/2). What is
+measured is the carrier against the board: the LO and the sample clock come from its reference,
+so the offset and the deviation hold both; lock the board to a better reference (`--sync
+external`) to see the carrier alone. `--watch` prints the offset, the drift and the ADEV at 1,
+10 and 100 s, one line per capture.
+#### GPS L1 C/A acquisition and jamming {#sw-analyzer-gnss}
+The GPS L1 view (Timing), and `--gnss` with `--report` (and `--watch`), search the GPS
+satellites at 1575.42 MHz and look at the interference in the band.
+m2sdr_analyzer --freq 1575.42e6 --view gnss
+m2sdr_analyzer --freq 1575.42e6 --report --gnss
+m2sdr_analyzer --freq 1575.42e6 --report --gnss --gnss-ms 20 --watch
+The sample rate is 2.048 MSPS (the default with `--gnss`) or 4.096 MSPS. An active antenna needs
+a bias-T: the M2SDR has none.
+| PRN detected | C/A codes of PRN 1 to 32 (IS-GPS-200), code phase searched by FFT over Doppler +-5 kHz in 500 Hz bins, `--gnss-ms` milliseconds (10) summed; threshold for a false alarm probability of 1e-3 over the whole search |
+| C/N0 | Prompt correlation power over the noise of the search |
+| Doppler | The bin, then the turn of the prompt from one millisecond to the next |
+| Code phase | Early, prompt and late correlations half a chip apart |
+| Level, noise density | The capture, the median of its spectrum (the AGC level to watch at a fixed gain: a wideband jammer raises the whole floor) |
+| Flatness, J/N | The spectrum of 80 % of the band: geometric over arithmetic mean, power above the noise floor |
+| Lines | Narrowband lines 10 dB over the floor; they are fitted and notched out before the acquisition, as a CW correlates with the lines of the C/A spectrum |
+With 10 ms, a satellite is found from about 40 dB-Hz at the worst place of the search (between
+two Doppler bins, half a sample off the code phase), 35 dB-Hz with 20 ms; open sky gives 40 to
+50 dB-Hz. The Doppler holds the frequency error of the board: 1 ppm of its reference is 1575 Hz,
+common to all the satellites. A search takes about 0.25 s. Tracking, the navigation message and
+a position are not done.
 #### Phase noise {#sw-analyzer-pn}
 
 The Phase noise view, and `--phase-noise` with `--report`, measure the strongest carrier of the
