@@ -533,7 +533,7 @@ static void evm_add(struct packet_ctx *pc, const float complex d[DATA_CARRIERS],
  * QBPSK. Returns 0, or -1 past the capture. */
 static int decode_bpsk(struct packet_ctx *pc, int i, int nsym, bool qbpsk, uint8_t *bits)
 {
-    float soft[2 * 48], coded[48];
+    float soft[2 * 48] = { 0 }, coded[48];
     uint64_t dec[48];
     float complex z[M2SDR_WIFI_CARRIERS], d[DATA_CARRIERS];
     float wd[DATA_CARRIERS];

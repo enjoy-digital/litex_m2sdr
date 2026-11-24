@@ -534,7 +534,7 @@ int m2sdr_gsm_analyse(const float complex *x, size_t count, double sample_rate, 
     ca[0] = 0;
     for (i = 0; i < ny; i++) {
         const float complex z = i >= GSM_SPS ? y[i] * conjf(y[i - GSM_SPS]) : 0;
-        const double complex v = z * z;
+        const double complex v = (double complex)z * z;
 
         cs[i + 1] = cs[i] + v;
         ca[i + 1] = ca[i] + cabs(v);

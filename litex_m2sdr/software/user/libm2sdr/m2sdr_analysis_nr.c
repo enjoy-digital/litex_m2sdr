@@ -544,7 +544,7 @@ static int ssb_analyse(const float complex *x, size_t count, const struct nr_dim
                 const int m0 = l == 1 ? 0 : l == 3 ? 84 : 60 + 12 * run;
                 const int k_lo = (l == 2 && run) ? 192 : 0, k_hi = (l == 2 && !run) ? 48 : 240;
                 const int k0 = ssb->pci % 4 + k_lo;
-                float complex lsd[60], smd[60];
+                float complex lsd[60] = { 0 }, smd[60];
                 int got;
 
                 for (j = 0; j < np; j++)
