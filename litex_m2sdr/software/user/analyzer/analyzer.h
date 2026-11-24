@@ -531,12 +531,15 @@ static inline double lab_input_offset(const struct an_settings *set)
 {
     return set->lab.tx_ref_db - (double)set->lab.tx_att;
 }
+
 static inline const char *lab_input_unit(const struct an_settings *set)
 {
     return set->lab.tx_ref_db != 0.0 ? "dBm" : "dBFS";
 }
+
 /* JSON: "name": [v, ...] in a section. */
 void lab_json_array(const char *name, const double *v, int n, double add, bool last);
+
 /* The flag of a mode in settings; NULL for a view of the spectrum. */
 static inline bool *an_mode_flag(const struct an_mode *m, struct an_settings *set)
 {

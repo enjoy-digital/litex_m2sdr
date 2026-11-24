@@ -1194,16 +1194,24 @@ RadioText build up live; the report has the one second of its capture. RDS needs
 CNR for no block errors, and the audio SNR means nothing below the FM threshold (about 12 dB).
 
 #### Pulsed signals {#sw-analyzer-pulse}
+
 The Pulses view (Monitoring), and `--pulses` with `--report` (and `--watch`), find the pulses
 of a capture (radar, DFS test patterns, pulsed interferers) and measure each one and their
 train. The option and the view are `pulses`: `--pulse` is the transmit pulse of the demodulation.
+
+```sh
 m2sdr_analyzer --freq 5.6e9 --sample-rate 20e6 --view pulses
 m2sdr_analyzer --freq 5.6e9 --sample-rate 20e6 --report --pulses
 m2sdr_analyzer --freq 5.6e9 --sample-rate 20e6 --report --pulses --watch
+```
+
 A capture is 50 ms (`--pulse-seconds`): three pulses of PRIs up to 16 ms. The view shows the
 peak power of the capture with the pulses found, the threshold and the noise floor, a
 histogram of the intervals between pulses with the PRIs of the pattern, and the table of the
 pulses.
+
+| Figure | From |
+|---------------------------|---------------------------------------------------------------------|
 | Noise floor, threshold | A low quantile of the power of blocks of the capture, the threshold 10 dB over it (`--pulse-threshold`), with 3 dB of hysteresis |
 | Start, width | 50 % points of the amplitude, its top the median amplitude of the pulse |
 | Rise, fall | 10 % to 90 % of the amplitude: meaningful above about 25 dB of SNR |
@@ -1212,25 +1220,34 @@ pulses.
 | Modulation | CW or LFM when the pulse fits that model (coherence over 0.5), other otherwise (phase codes, nonlinear FM) |
 | PRI, stagger | Shortest pattern of intervals between leading edges that repeats (up to 8), within 0.5 % |
 | PRF, duty cycle | 1 / mean PRI of the pattern; mean width over mean PRI |
+
 One emitter at a time is assumed: interleaved trains, or a missed pulse, read as a PRI with no
 pattern (jitter), with its mean and spread.
+
 #### EMC pre-compliance {#sw-analyzer-emc}
+
 The EMC view (Monitoring), and `--emc` with `--report` (and `--watch`), are the measuring
 receiver of CISPR 16-1-1 over a span: per channel, the peak, quasi-peak and average (CISPR-AV)
 levels, against limit lines.
+
 This is pre-compliance. The levels are dBFS unless `--emc-offset` (dBFS to dBuV at the input)
 and `--emc-factors` (antenna factor and cable loss) are given, and the board has no absolute
 calibration. The CISPR 16-1-1 constants below come from memory, not from the text of the
 standard: check them against CISPR 16-1-1 and a calibrated generator (a CW, then an impulse
 generator at the reference repetition rate) before relying on the readings.
+
+```sh
 m2sdr_analyzer --freq 100e6 --sample-rate 20e6 --view emc --emc-limit-qp qp.txt --emc-limit-av av.txt
 m2sdr_analyzer --freq 100e6 --sample-rate 20e6 --report --emc --emc-band cd --emc-offset 107 \
     --emc-factors antenna.txt --emc-limit-qp qp.txt
+```
+
 | Band | Range | RBW (6 dB) | Quasi-peak: charge / discharge / meter | Average meter |
 |------|----------------|------------|-------------------|--------|
 | A | 9 to 150 kHz | 200 Hz | 45 ms / 500 ms / 160 ms | 160 ms |
 | B | 0.15 to 30 MHz | 9 kHz | 1 ms / 160 ms / 160 ms | 160 ms |
 | C/D | 30 to 1000 MHz | 120 kHz | 1 ms / 550 ms / 100 ms | 100 ms |
+
 The band is the one of `--freq` unless `--emc-band` gives it. The RFIC tunes from 70 MHz: bands A
 and B are for captures from another receiver, or behind an up-converter. Each channel is the
 capture through a Gaussian filter of the RBW, from one FFT of the capture, and its envelope
@@ -1240,28 +1257,41 @@ synthetic impulses. The capture (2^18 samples, `--emc-samples`) is taken as one 
 steady emission: the detectors are in their steady state, as after a long measurement. An
 emission that changes slower than the capture, or an isolated event, is not read as a receiver
 would over seconds.
+
 Limit lines and factors are text files, a frequency in Hz and a level in dB per line, `#` for
 comments, in ascending frequency; the line is linear in log frequency between its points, and
 two points at one frequency make a step:
+
+```
 # CISPR 32 class B, 10 m, quasi-peak, dBuV/m
 30e6   30
 230e6  30
 230e6  37
 1e9    37
+```
+
 For a live speed, the default span is 100 RBW around the centre (201 channels, 12 MHz in band
 C/D, about 0.12 s per capture at 20 MSPS); `--emc-span` widens it, `-1` takes the whole capture:
 328 channels at 20 MSPS in band C/D, about 0.2 s per capture (0.4 s with 2^20 samples).
+
 #### Wi-Fi {#sw-analyzer-wifi}
+
 The Wi-Fi view, and `--wifi` with `--report` (and `--watch`), look at a 20 MHz Wi-Fi channel:
 the packets of 802.11a/g OFDM, and the legacy preamble of 802.11n/ac/ax.
+
+```sh
 m2sdr_analyzer --freq 2437e6 --view wifi            # Channel 6
 m2sdr_analyzer --freq 5180e6 --report --wifi        # Channel 36
 m2sdr_analyzer --report --wifi --watch              # Channel 1, one line per capture
+```
+
 The sample rate is 20 MSPS (the default with `--wifi`, at 2412 MHz, channel 1) and a capture is
 105 ms, a beacon interval: each network sends a beacon in it. The view selects the channel
 (2.4 GHz 1 to 13, 5 GHz 36 to 165), lists the networks seen since the tuning (BSSID, SSID,
 beacons, level, SNR) and the packets of the last capture, and draws the airtime over the
 captures, the channel and the EVM per carrier and the constellation of the strongest packet.
+
+| Figure | From |
 |-----------------------|-------------------------------------------------------------------------------|
 | Packet | L-STF: autocorrelation at its 16-sample period, then the L-LTF correlation for the timing |
 | Carrier offset | L-STF (coarse), then the two L-LTF symbols (fine) |
@@ -1271,33 +1301,47 @@ captures, the channel and the EVM per carrier and the constellation of the stron
 | Rate, length | L-SIG, decoded (BPSK 1/2, deinterleaver, Viterbi); HT-SIG with its CRC for 802.11n |
 | MAC header | Legacy data: demapping to 64QAM, depuncturing, Viterbi, descrambler; FCS checked |
 | Airtime | The durations of the L-SIGs; and the 4 us slots 6 dB over the noise floor |
+
 The data of 802.11n and later (MIMO, LDPC) is not decoded, their packets are counted with their
 L-SIG duration. When the decoding of a capture takes longer than the capture, the next ones are
 read without the data (the L-SIG and HT-SIG only, the view says so), one in eleven in full.
+
 #### ADS-B {#sw-analyzer-adsb}
+
 The ADS-B view, and `--adsb` with `--report` (and `--watch`), receive the Mode S extended
 squitters (DF17, DF18) of the aircraft around, at 1090 MHz (the default with `--adsb`).
+
+```sh
 m2sdr_analyzer --view adsb --adsb-ref 48.85,2.35
 m2sdr_analyzer --report --adsb
 m2sdr_analyzer --report --adsb --watch              # One line per message
+```
+
 The sample rate is 2.4 MSPS (the default): a pulse lasts 0.5 us, one sample at 2 MSPS, and
 half a sample off it shares its power with the next one, so that it needs about 10 dB more
 SNR; at 2.4 MSPS the timings spread over the samples. A capture is 0.5 s. The bits are the half
 of more magnitude, or, when the CRC fails, the sequence most likely given how the pulses of
 the preamble spread over the samples; a wrong bit is corrected by the CRC-24.
+
 The aircraft are kept from capture to capture: identification (TC 1 to 4), barometric altitude
 (TC 9 to 18, 25 ft steps), velocity (TC 19) and position. A position needs an even and an odd
 frame less than 10 s apart, or one frame near a known position: the last one of the aircraft,
 or the receiver given by `--adsb-ref LAT,LON` (or in the view), within 180 NM. Each message has
 its level and its SNR (the pulses against the noise between them). Surface positions, GNSS
 altitudes and the short Mode S replies are not decoded.
+
 #### LoRa {#sw-analyzer-lora}
+
 The LoRa view, and `--lora` with `--report` (and `--watch`), find the LoRa packets of a channel
 (868.1 MHz by default, 868.1, 868.3 and 868.5 MHz in the view) at every spreading factor (7 to
 12) and bandwidth (125, 250, 500 kHz) at once.
+
+```sh
 m2sdr_analyzer --view lora
 m2sdr_analyzer --freq 868.3e6 --report --lora
 m2sdr_analyzer --report --lora --watch              # One line per packet
+```
+
 The sample rate is 1 MSPS (the default): each bandwidth must divide it by a power of two. A
 capture is 1 s. Each bandwidth is cut out of the capture; windows of 2^SF samples are dechirped,
 and up-chirps in a row with the same peak are a preamble. Its down-chirps give, with its
@@ -1307,21 +1351,31 @@ bandwidth, below 0 dB down to the limit of the SF), from the peaks of the preamb
 are the FFT peaks: the header and the payload (Gray mapping, interleaving, Hamming code,
 whitening) are not decoded. The view lists the packets over the captures, draws the time the
 channel is busy and the symbols of the last packet.
+
 #### Carrier stability, Allan deviation {#sw-analyzer-adev}
+
 The Allan deviation view (Timing), and `--adev` with `--report` (and `--watch`), follow the
 frequency of a carrier: a GPSDO tone, a broadcast carrier, or the reference of the board against
 an external one.
+
+```sh
 m2sdr_analyzer --freq 10.01e6 --sample-rate 1e6 --view adev --adev-carrier 10e6
 m2sdr_analyzer --freq 10.01e6 --sample-rate 1e6 --report --adev --adev-carrier 10e6
 m2sdr_analyzer --freq 10.01e6 --sample-rate 1e6 --report --adev --adev-carrier 10e6 --watch
+```
+
 Each capture (131072 samples) gives the carrier, the strongest line of the capture (the centre,
 with the DC offset of the receiver, is left out) or of the span around `--adev-carrier`:
+
+| Figure | From |
+|---------------------------|---------------------------------------------------------------------|
 | Frequency, phase | A line fitted to the unwrapped phases of up to 1024 sub-blocks, the coarse frequency of an FFT removed: the Cramer-Rao bound for a tone in noise, given as the resolution |
 | Offset (ppb) | From the nominal frequency of `--adev-carrier`; without one, from the first capture of the series |
 | Level, SNR, C/N0 | The coherent amplitude of the carrier against the rest of the capture |
 | ADEV inside the capture | The sub-block phases: tau from a sub-block to a third of the capture. Its short taus show the white phase of the additive noise, sqrt(3) sigma_x / tau |
 | ADEV, MDEV over captures | Overlapping Allan and modified Allan deviations of the mean frequency of each capture, at octaves of tau0, the spacing of the captures |
 | Drift (ppb/s) | Straight line fitted to the offsets of the series |
+
 The series holds the last 1024 captures of a tuning, and restarts on a retune, a pause or the
 "Restart series" button. Its time comes from the sample count of a file (contiguous captures),
 from the timestamps of the board when its DMA header carries them, or else from the host clock.
@@ -1333,14 +1387,23 @@ measured is the carrier against the board: the LO and the sample clock come from
 so the offset and the deviation hold both; lock the board to a better reference (`--sync
 external`) to see the carrier alone. `--watch` prints the offset, the drift and the ADEV at 1,
 10 and 100 s, one line per capture.
+
 #### GPS L1 C/A acquisition and jamming {#sw-analyzer-gnss}
+
 The GPS L1 view (Timing), and `--gnss` with `--report` (and `--watch`), search the GPS
 satellites at 1575.42 MHz and look at the interference in the band.
+
+```sh
 m2sdr_analyzer --freq 1575.42e6 --view gnss
 m2sdr_analyzer --freq 1575.42e6 --report --gnss
 m2sdr_analyzer --freq 1575.42e6 --report --gnss --gnss-ms 20 --watch
+```
+
 The sample rate is 2.048 MSPS (the default with `--gnss`) or 4.096 MSPS. An active antenna needs
 a bias-T: the M2SDR has none.
+
+| Figure | From |
+|---------------------------|---------------------------------------------------------------------|
 | PRN detected | C/A codes of PRN 1 to 32 (IS-GPS-200), code phase searched by FFT over Doppler +-5 kHz in 500 Hz bins, `--gnss-ms` milliseconds (10) summed; threshold for a false alarm probability of 1e-3 over the whole search |
 | C/N0 | Prompt correlation power over the noise of the search |
 | Doppler | The bin, then the turn of the prompt from one millisecond to the next |
@@ -1348,37 +1411,52 @@ a bias-T: the M2SDR has none.
 | Level, noise density | The capture, the median of its spectrum (the AGC level to watch at a fixed gain: a wideband jammer raises the whole floor) |
 | Flatness, J/N | The spectrum of 80 % of the band: geometric over arithmetic mean, power above the noise floor |
 | Lines | Narrowband lines 10 dB over the floor; they are fitted and notched out before the acquisition, as a CW correlates with the lines of the C/A spectrum |
+
 With 10 ms, a satellite is found from about 40 dB-Hz at the worst place of the search (between
 two Doppler bins, half a sample off the code phase), 35 dB-Hz with 20 ms; open sky gives 40 to
 50 dB-Hz. The Doppler holds the frequency error of the board: 1 ppm of its reference is 1575 Hz,
 common to all the satellites. A search takes about 0.25 s. Tracking, the navigation message and
 a position are not done.
+
 #### Two channels {#sw-analyzer-two}
+
 RX1 and RX2 of the AD9361 share their local oscillator and their sample clock. The board
 always streams both (2T2R): while a mode of two channels is on, `m2sdr_analyzer` keeps both,
 from the same sample periods, and the spectrum still shows the channel selected. A file must
 hold two channels (`--nchannels 2`, RX1 first). Use a manual gain (`--rx-gain`): with the AGC
 each receiver sets its own gain, and a change of gain can move its phase.
+
 **Coherence** (`--coherence`): one source on both receivers, through a splitter or on two
 antennas side by side, checks the board, the cables and the antennas.
+
+```sh
 m2sdr_analyzer --freq 2.45e9 --rx-gain 30 --view coherence
 m2sdr_analyzer --freq 2.45e9 --rx-gain 30 --report --coherence --channel-bw 5e6
+```
+
+| Figure | From |
 |-------------|---------------------------------------------------------------------------------------|
 | Coherence | Per bin, the magnitude-squared coherence of the averaged cross spectrum; noise alone reads about 1/K for K segments |
 | Gain | RX2 over RX1, from the power of the coherent bins |
 | Delay | RX2 behind RX1: the peak of the phase transform, then a line fitted to the phase over frequency, each bin weighted by its coherence |
 | Phase | At the centre of the capture, the delay taken off |
 | Ripple | What is left of the gain and the phase over frequency: filters, cables, reflections |
+
 The band is the one of `--channel-bw` and `--channel-offset` when given, the whole capture
 otherwise; the DC bin and its neighbours, where the LO leaks, are left out. A tone gives the
 gain and the phase, not the delay. The FFT is `--coherence-fft` points (1024 by default),
 over 2^18 samples.
+
 **Direction finding** (`--df`): two antennas on RX1 and RX2, `--df-spacing` apart, make a phase
 interferometer. The angle is from broadside, positive towards the RX2 antenna: a wave from there
 reaches RX2 first, which leads RX1 by 2 pi d sin(angle) / lambda.
+
+```sh
 # Source at broadside first: store the phase of the board and cables for this frequency.
 m2sdr_analyzer --freq 2.45e9 --rx-gain 30 --report --df --df-spacing 0.06 --df-cal-store
 m2sdr_analyzer --freq 2.45e9 --rx-gain 30 --report --df --df-spacing 0.06 --watch
+```
+
 The signal is the strongest one off the centre, or the one at `--df-freq` (from the centre),
 over its main lobe or `--df-bw`. The phase of the receivers and their cables is taken off: the
 one stored for the frequency (within 5 MHz, in `~/.config/litex_m2sdr/df_cal_<dna>.csv`, or
@@ -1388,13 +1466,19 @@ listed, and the angle is the one nearest broadside. Two antennas on a line do no
 front from the back. The beamscan and MUSIC pseudo-spectra are those of the 2x2 covariance:
 with two antennas MUSIC finds one source, drawn more sharply. Re-tuning the LO may change the
 phase between the receivers: calibrate again after a change of frequency.
+
 **LTE 2x2** (`--mimo`): the 2x2 channel of an LTE downlink cell of two antenna ports, from its
 cell reference signals of ports 0 and 1 received on RX1 and RX2.
+
+```sh
 m2sdr_analyzer --freq 1842.5e6 --sample-rate 7.68e6 --rx-gain 40 --view mimo
 m2sdr_analyzer --freq 1842.5e6 --sample-rate 7.68e6 --rx-gain 40 --report --mimo
+```
+
 The cell, its frame and its carrier offset come from the LTE analysis on RX1 (RX2 when RX1 has
 no cell), the sample rates as for [LTE](#sw-analyzer-lte). Per resource block, H is the mean of
 the estimates at its pilots over the frame:
+
 | Figure | Content |
 |------------------|-------------------------------------------------------------------------------|
 | Paths | Power of each of the four paths, RX1 and RX2 from port 0 and port 1 |
@@ -1402,16 +1486,20 @@ the estimates at its pilots over the frame:
 | Condition number | s1 / s2 in dB, per block, mean and worst: high when the paths are alike |
 | Rank | Two layers when their Shannon capacity beats one layer's at the SNR of the pilots |
 | Correlation | Of the rows (receivers) and of the columns (ports) of H |
+
 The rank is an estimate with ideal precoding, not the rank indicator a UE reports from the
 tables of TS 36.213. The noise comes from how the estimate of a block changes over the frame:
 a channel that moves reads as noise. The cell search takes about 0.2 s a capture, a few results a
 second.
+
 #### Lab modes: a device between TX and RX {#sw-analyzer-lab}
+
 The Lab tabs (Sweep, Compression, IMD, AM/AM), and `--sweep`, `--compression`, `--imd` and
 `--amam` with `--report`, make the board a small lab instrument: TX sends a known stimulus, the
 device under test (an amplifier, a filter, a mixer at a fixed LO, or a cable) sits between a TX
 port and an RX port, and the capture is compared with the stimulus. The TX LO is set on the RX
 frequency and the stimulus is sent on both TX channels.
+
 > [!CAUTION]
 > These modes transmit. Connect TX to the device and the device to RX with cables and
 > attenuators, never an antenna: the stimulus is not a licensed emission. The TX attenuation
@@ -1419,16 +1507,21 @@ frequency and the stimulus is sent on both TX channels.
 > and the RX input can take the level before lowering it. TX is stopped, its attenuation set
 > to 89 dB, at the first capture without a lab mode (another view), when the acquisition is
 > stopped and when the tool ends.
+
+```sh
 m2sdr_analyzer --freq 915e6 --sample-rate 7.68e6 --view sweep --lab-tx-att 40
 m2sdr_analyzer --freq 915e6 --sample-rate 7.68e6 --report --sweep --sweep-thru-save    # Thru
 m2sdr_analyzer --freq 915e6 --sample-rate 7.68e6 --report --sweep --json               # Device
 m2sdr_analyzer --freq 915e6 --sample-rate 7.68e6 --report --compression --lab-tx-att 20
 m2sdr_analyzer --freq 915e6 --sample-rate 7.68e6 --report --imd --imd-spacing 100e3
 m2sdr_analyzer --freq 915e6 --sample-rate 7.68e6 --report --amam --amam-stimulus qam
+```
+
 The stimuli are periodic: one period, looped on TX by a thread of the tool while the captures
 go on. TX and RX share the clock of the board, so the capture is periodic too and the analyses
 work on whole periods, without windows. The measurements are in libm2sdr
 (`m2sdr_analysis_lab.h`), stateless and tested on synthetic devices of known response.
+
 - **Levels:** the input of the device is the level of the stimulus in dBFS of TX, less the TX
   attenuation; `--lab-tx-ref` adds the power a 0 dBFS tone gives at 0 dB of attenuation,
   measured once with a power meter, to read the input in dBm. The output is in dBFS of RX,
@@ -1439,7 +1532,9 @@ work on whole periods, without windows. The measurements are in libm2sdr
   give the absolute delay, and is not done yet.
 - **Without a board:** `--lab-stimulus-out PATH` writes the stimulus of the mode given (one
   period, SC16, two channels) and exits; the analyses run on recordings (`--file`) of it.
+
 ##### Sweep {#sw-analyzer-sweep}
+
 |S21|, phase and group delay of the device at `--sweep-points` points (201) over a span
 (`--sweep-span`, 0.8 of the sample rate) centred on the frequency. Wider spans are measured in
 steps by retuning. The stimulus is a tone per point (`--sweep-stimulus stepped`, 65536 samples
@@ -1447,12 +1542,15 @@ a period: the most dynamic range) or a chirp over the period (`chirp`: the same 
 range against spurs). The capture is aligned on the stimulus by correlation, each point is the
 ratio of the capture to the stimulus averaged over three periods, and its SNR is given from
 their spread.
+
 The response of the radio itself is removed by a thru: a sweep with a cable (and the
 attenuators) in place of the device, stored with `--sweep-thru-save` or the button of the view
 in `~/.config/litex_m2sdr/sweep_thru_<FPGA DNA>.csv` (`--sweep-thru PATH` for another file).
 It holds for the frequency, the sample rate, the span, the points, the gains and the
 attenuation it was taken with; `--sweep-raw` or the box of the view leaves it out.
+
 ##### Compression {#sw-analyzer-compression}
+
 Gain of the device against the level of a tone (`--tone-offset`, a tenth of the sample rate
 from the centre), the small-signal gain, and the 1 dB and 3 dB compression points interpolated
 between the steps. The steps are in the stimulus: one period holds the tone at `--comp-range`
@@ -1461,7 +1559,9 @@ each, so one capture holds them all and the view follows the device live. The TX
 moves all the steps together; the TX chain of the board is taken as linear over the
 staircase, which holds while its output stays well below its own compression (a high TX
 attenuation and an external driver amplifier for a power device).
+
 ##### IMD {#sw-analyzer-imd}
+
 Two tones of `--imd-level` (-12 dBFS) each, `--imd-spacing` apart (a hundredth of the sample
 rate), centred at `--tone-offset`. The figures are the levels of the tones and of the IM3 and
 IM5 products, their level in dBc from the mean tone level, the output and input intercepts
@@ -1469,10 +1569,13 @@ IM5 products, their level in dBc from the mean tone level, the output and input 
 the other lines as spurs. A product under the noise gives the noise: the intercept is then a
 bound (">="). The intercepts are those of a small-signal device: taken with the tones well
 below compression, they hold at other levels.
+
 > [!NOTE]
 > The board makes intermodulation of its own: measure the thru first, and keep its products
 > 10 dB under the ones of the device (more TX attenuation, a lower RX gain).
+
 ##### AM/AM {#sw-analyzer-amam}
+
 AM/AM and AM/PM of the device, its EVM and the ACLR of its output, from a wideband stimulus:
 OFDM-like noise (`--amam-stimulus noise`, a flat band of `--amam-bw`, a fifth of the sample
 rate, with a PAPR of 10 to 12 dB) or PSK/QAM under a root raised cosine (`qam`,
@@ -1482,6 +1585,7 @@ complex gain of each bin gives the AM/AM (compression) and the AM/PM from the sm
 gain. The EVM is that of the waveform after its gain, not of demodulated symbols; the ACLR is
 that of the channel of the stimulus and of the adjacent channels that fit in the span. The
 model is memoryless: the filters of the radio and the memory of the device spread the points.
+
 #### Phase noise {#sw-analyzer-pn}
 
 The Phase noise view, and `--phase-noise` with `--report`, measure the strongest carrier of the

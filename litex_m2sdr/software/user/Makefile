@@ -406,18 +406,25 @@ tests/test_m2sdr_analysis_dvbt2: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_dv
 
 tests/test_m2sdr_analysis_fm: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_fm.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_fm.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+
 tests/test_m2sdr_analysis_monitoring: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_monitoring.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_monitoring.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+
 tests/test_m2sdr_analysis_cellular: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_cellular.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_cellular.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+
 tests/test_m2sdr_analysis_wireless: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_wireless.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_wireless.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+
 tests/test_m2sdr_analysis_timing: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_timing.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_timing.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+
 tests/test_m2sdr_analysis_dual: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_dual.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_dual.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+
 tests/test_m2sdr_analysis_lab: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_lab.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_lab.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+
 tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_cal.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
