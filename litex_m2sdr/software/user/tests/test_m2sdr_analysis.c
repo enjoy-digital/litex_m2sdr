@@ -8,11 +8,8 @@
  *
  */
 
-#include <complex.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#define TEST_NAME "test_m2sdr_analysis"
+#include "test_analysis_helpers.h"
 
 #include "../libm2sdr/m2sdr_analysis.h"
 #include "../libm2sdr/m2sdr_fft.h"
@@ -21,53 +18,13 @@
 #define FS    1.0e6
 #define COUNT (1u << 18)
 
-static int failures;
-
-#define CHECK_NEAR(name, value, expected, tol) do { \
-    const double v_ = (value), e_ = (expected); \
-    const int ok_ = fabs(v_ - e_) <= (tol); \
-    printf("  %-34s %12.4f (expected %10.4f +-%g) %s\n", name, v_, e_, (double)(tol), ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
-#define CHECK(name, cond) do { \
-    const int ok_ = (cond); \
-    printf("  %-34s %s\n", name, ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
 /* Signals */
 /*---------*/
 
-static unsigned long long rng_state = 0x2545f4914f6cdd1dull;
-
-static double rng_uniform(void)
+/* Tone of level_db, at the sample rate of these tests. */
+static void add_tone_db(float complex *x, size_t count, double freq_hz, double level_db, double phase)
 {
-    rng_state ^= rng_state << 13;
-    rng_state ^= rng_state >> 7;
-    rng_state ^= rng_state << 17;
-    return ((double)(rng_state >> 11) + 0.5) / 9007199254740992.0;
-}
-
-/* Complex Gaussian noise of power `power`. */
-static void add_noise(float complex *x, size_t count, double power)
-{
-    size_t i;
-
-    for (i = 0; i < count; i++) {
-        const double r = sqrt(-power * log(rng_uniform()));
-        const double a = 2.0 * M_PI * rng_uniform();
-        x[i] += (float)(r * cos(a)) + I * (float)(r * sin(a));
-    }
-}
-
-static void add_tone(float complex *x, size_t count, double freq_hz, double level_db, double phase)
-{
-    const double amp = pow(10.0, level_db / 20.0);
-    size_t i;
-
-    for (i = 0; i < count; i++)
-        x[i] += (float complex)(amp * cexp(I * (2.0 * M_PI * freq_hz * (double)i / FS + phase)));
+    add_tone(x, count, freq_hz, FS, pow(10.0, level_db / 20.0), phase);
 }
 
 /* Band of flat spectrum: tones every `step_hz` with random phases, total power level_db. */
@@ -77,7 +34,7 @@ static void add_band(float complex *x, size_t count, double lo_hz, double hi_hz,
     int k;
 
     for (k = 0; k < n; k++)
-        add_tone(x, count, lo_hz + (k + 0.5) * step_hz, level_db - 10.0 * log10(n), 2.0 * M_PI * rng_uniform());
+        add_tone_db(x, count, lo_hz + (k + 0.5) * step_hz, level_db - 10.0 * log10(n), 2.0 * M_PI * rng_uniform());
 }
 
 /* Tests */
@@ -97,8 +54,8 @@ static void test_tone(float complex *x)
 
     /* Tone between two bins, the worst case for its level; noise of -100 dBFS/Hz. */
     memset(x, 0, COUNT * sizeof(*x));
-    add_tone(x, COUNT, 123456.7, -10.0, 0.3);
-    add_tone(x, COUNT, -200000.0, -50.0, 1.0);
+    add_tone_db(x, COUNT, 123456.7, -10.0, 0.3);
+    add_tone_db(x, COUNT, -200000.0, -50.0, 1.0);
     add_noise(x, COUNT, pow(10.0, -100.0 / 10.0) * FS);
 
     memset(&psd, 0, sizeof(psd));
@@ -121,12 +78,12 @@ static void test_tone(float complex *x)
 
     printf("Tone figures:\n");
     memset(x, 0, COUNT * sizeof(*x));
-    add_tone(x, COUNT, 100000.0, -6.0, 0.0);
-    add_tone(x, COUNT, 200000.0, -46.0, 0.5);        /* Second harmonic, -40 dBc. */
-    add_tone(x, COUNT, 300000.0, -66.0, 0.7);        /* Third, -60 dBc. */
-    add_tone(x, COUNT, -400000.0, -76.0, 0.2);       /* Sixth, folded: 600 kHz - 1 MHz. */
-    add_tone(x, COUNT, -310000.0, -56.0, 0.9);       /* A spur, -50 dBc. */
-    add_tone(x, COUNT, 0.0, -30.0, 0.0);             /* DC. */
+    add_tone_db(x, COUNT, 100000.0, -6.0, 0.0);
+    add_tone_db(x, COUNT, 200000.0, -46.0, 0.5);        /* Second harmonic, -40 dBc. */
+    add_tone_db(x, COUNT, 300000.0, -66.0, 0.7);        /* Third, -60 dBc. */
+    add_tone_db(x, COUNT, -400000.0, -76.0, 0.2);       /* Sixth, folded: 600 kHz - 1 MHz. */
+    add_tone_db(x, COUNT, -310000.0, -56.0, 0.9);       /* A spur, -50 dBc. */
+    add_tone_db(x, COUNT, 0.0, -30.0, 0.0);             /* DC. */
     add_noise(x, COUNT, pow(10.0, -66.0 / 10.0));    /* SNR 60 dB. */
     CHECK("psd", m2sdr_psd_compute(x, COUNT, FS, 16384, M2SDR_WINDOW_BLACKMAN_HARRIS, &psd) == 0);
     CHECK("tone", m2sdr_psd_tone(&psd, &tone) == 0);
@@ -182,7 +139,7 @@ static void test_stats(float complex *x)
 
     printf("Time domain, tone:\n");
     memset(x, 0, COUNT * sizeof(*x));
-    add_tone(x, COUNT, 12345.0, -12.0, 0.0);
+    add_tone_db(x, COUNT, 12345.0, -12.0, 0.0);
     CHECK("stats", m2sdr_iq_stats(x, COUNT, 0.999, &st) == 0);
     CHECK_NEAR("mean power (dBFS)", st.mean_db, -12.0, 0.01);
     CHECK_NEAR("PAPR (dB)", st.papr_db, 0.0, 0.01);
@@ -249,11 +206,6 @@ static void test_arguments(float complex *x)
 /* Phase noise */
 
 #define PN_COUNT (1u << 20)
-
-static double rng_gauss(void)
-{
-    return sqrt(-2.0 * log(rng_uniform())) * cos(2.0 * M_PI * rng_uniform());
-}
 
 /* Value of a trace at an offset, between its points. */
 static double pn_at(const struct m2sdr_phase_noise *pn, const double *trace, double offset_hz)
@@ -328,7 +280,7 @@ static void test_phase_noise(void)
      * other, N / (2 fs A^2) each. */
     printf("Phase noise, additive noise:\n");
     memset(x, 0, PN_COUNT * sizeof(*x));
-    add_tone(x, PN_COUNT, 200000.0, -6.0206, 0.0);
+    add_tone_db(x, PN_COUNT, 200000.0, -6.0206, 0.0);
     add_noise(x, PN_COUNT, 1e-4);
     CHECK("phase noise", m2sdr_phase_noise(x, PN_COUNT, FS, 0.0, 0.0, 0.0, pn) == 0 && pn->found);
     CHECK_NEAR("L at 10 kHz (dBc/Hz)", pn_at(pn, pn->l_dbc_hz, 10000.0), 10.0 * log10(1e-4 / (2.0 * FS * 0.25)), 0.4);
@@ -338,7 +290,7 @@ static void test_phase_noise(void)
     memset(x, 0, PN_COUNT * sizeof(*x));
     add_noise(x, PN_COUNT, 0.01);
     CHECK("noise", m2sdr_phase_noise(x, PN_COUNT, FS, 0.0, 0.0, 0.0, pn) == 0 && !pn->found);
-    add_tone(x, PN_COUNT, 10000.0, -20.0, 0.0);     /* As strong as the noise: not enough. */
+    add_tone_db(x, PN_COUNT, 10000.0, -20.0, 0.0);     /* As strong as the noise: not enough. */
     CHECK("carrier in as much noise", m2sdr_phase_noise(x, PN_COUNT, FS, 0.0, 0.0, 0.0, pn) == 0 && !pn->found);
     CHECK("too short", m2sdr_phase_noise(x, 1000, FS, 0.0, 0.0, 0.0, pn) != 0);
     free(pn);
@@ -348,17 +300,6 @@ static void test_phase_noise(void)
 /* Demodulation */
 
 #define DEMOD_COUNT (1u << 19)
-
-static double test_rrc(double t, double alpha)
-{
-    if (fabs(t) < 1e-9)
-        return 1.0 - alpha + 4.0 * alpha / M_PI;
-    if (fabs(fabs(t) - 1.0 / (4.0 * alpha)) < 1e-9)
-        return alpha / sqrt(2.0) * ((1.0 + 2.0 / M_PI) * sin(M_PI / (4.0 * alpha)) +
-                                    (1.0 - 2.0 / M_PI) * cos(M_PI / (4.0 * alpha)));
-    return (sin(M_PI * t * (1.0 - alpha)) + 4.0 * alpha * t * cos(M_PI * t * (1.0 + alpha))) /
-           (M_PI * t * (1.0 - 16.0 * alpha * alpha * t * t));
-}
 
 struct mod_signal {
     enum m2sdr_modulation modulation;
@@ -493,7 +434,7 @@ static void test_demod(void)
     memset(x, 0, DEMOD_COUNT * sizeof(*x));
     add_noise(x, DEMOD_COUNT, 0.01);
     CHECK("noise", m2sdr_demod(x, DEMOD_COUNT, FS, &cfg, res) == 0 && !res->signal);
-    add_tone(x, DEMOD_COUNT, 100000.0, -6.0, 0.0);
+    add_tone_db(x, DEMOD_COUNT, 100000.0, -6.0, 0.0);
     CHECK("tone", m2sdr_demod(x, DEMOD_COUNT, FS, &cfg, res) == 0 && !res->locked);
     cfg.rolloff = 3.0;
     CHECK("bad roll-off", m2sdr_demod(x, DEMOD_COUNT, FS, &cfg, res) != 0);
@@ -854,20 +795,15 @@ static int write_lte(const char *path)
     static const struct lte_signal sig = { 301, 25, 400, 2, 0.0, 0.0, 0, 0.012 };
     const size_t max = 5 * 76800;
     float complex *x = malloc(max * sizeof(*x));
-    FILE *f = fopen(path, "wb");
-    size_t count, i;
+    size_t count;
+    int rc;
 
-    if (!x || !f)
+    if (!x)
         return 1;
     count = make_lte(x, max, &sig);
-    for (i = 0; i < count; i++) {
-        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
-                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
-        if (fwrite(v, sizeof(v), 1, f) != 1)
-            return 1;
-    }
+    rc    = write_sc16(path, x, x, count);
     free(x);
-    return fclose(f) == 0 && count == max ? 0 : 1;
+    return rc == 0 && count == max ? 0 : 1;
 }
 
 /* Report mode of m2sdr_analyzer */
@@ -889,7 +825,7 @@ static int write_capture(const char *path)
     if (!x || !f)
         return 1;
     /* One channel, SC16 with 12 significant bits. */
-    add_tone(x, FILE_COUNT, FILE_FREQ, FILE_LEVEL, 0.0);
+    add_tone_db(x, FILE_COUNT, FILE_FREQ, FILE_LEVEL, 0.0);
     add_band(x, FILE_COUNT, -250000.0, -150000.0, 500.0, -30.0);
     add_noise(x, FILE_COUNT, pow(10.0, -60.0 / 10.0));
     for (i = 0; i < FILE_COUNT; i++) {
@@ -901,35 +837,12 @@ static int write_capture(const char *path)
     return fclose(f) == 0 ? 0 : 1;
 }
 
-/* Number after "name": in the object `section` of a JSON text. */
-static double json_number(const char *json, const char *section, const char *name)
-{
-    char key[64];
-    const char *p;
-
-    snprintf(key, sizeof(key), "\"%s\"", section);
-    p = strstr(json, key);
-    if (!p)
-        return NAN;
-    snprintf(key, sizeof(key), "\"%s\":", name);
-    p = strstr(p, key);
-    return p ? strtod(p + strlen(key), NULL) : NAN;
-}
-
 static int check_report(const char *path)
 {
-    static char json[16384];
-    FILE *f = fopen(path, "rb");
-    size_t n;
+    const char *json = read_report(path);
 
-    if (!f) {
-        printf("test_m2sdr_analysis: cannot open %s\n", path);
+    if (!json)
         return 1;
-    }
-    n = fread(json, 1, sizeof(json) - 1, f);
-    fclose(f);
-    json[n] = '\0';
-
     printf("Report of m2sdr_analyzer:\n");
     CHECK_NEAR("centre (Hz)", json_number(json, "source", "center_hz"), 100e6, 0.5);
     CHECK_NEAR("tone frequency (Hz)", json_number(json, "tone", "freq_hz"), 100e6 + FILE_FREQ, 2.0);
@@ -940,27 +853,15 @@ static int check_report(const char *path)
     CHECK_NEAR("mean power (dBFS)", json_number(json, "time", "mean_db"),
                10.0 * log10(pow(10.0, FILE_LEVEL / 10.0) + 1e-3 + 1e-6), 0.1);
     CHECK_NEAR("clipped", json_number(json, "time", "clipped"), 0.0, 0.0);
-    if (failures) {
-        printf("test_m2sdr_analysis: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis: report checked\n");
-    return 0;
+    return report_done(NULL);
 }
 
 static int check_lte_report(const char *path)
 {
-    static char json[32768];
-    FILE *f = fopen(path, "rb");
-    size_t n;
+    const char *json = read_report(path);
 
-    if (!f) {
-        printf("test_m2sdr_analysis: cannot open %s\n", path);
+    if (!json)
         return 1;
-    }
-    n = fread(json, 1, sizeof(json) - 1, f);
-    fclose(f);
-    json[n] = '\0';
     printf("LTE report of m2sdr_analyzer:\n");
     CHECK_NEAR("cell identity", json_number(json, "lte", "cell_id"), 301, 0);
     CHECK_NEAR("resource blocks", json_number(json, "lte", "n_rb"), 25, 0);
@@ -969,127 +870,11 @@ static int check_lte_report(const char *path)
     CHECK("reference signal EVM under 1 %", json_number(json, "lte", "rs_evm_percent") < 1.0);
     CHECK("data EVM under 1 %", json_number(json, "lte", "data_evm_percent") < 1.0);
     CHECK("data blocks", json_number(json, "lte", "data_blocks") >= 20 * 12 - 12);
-    if (failures) {
-        printf("test_m2sdr_analysis: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis: LTE report checked\n");
-    return 0;
+    return report_done("LTE");
 }
 
 /* DVB-T */
 /*-------*/
-
-/* A DVB-T multiplex built as EN 300 744 sets its pilots and TPS, with random data in place of
- * the coded stream: what the analysis reads. */
-struct dvbt_signal {
-    int    n;                   /* 2048 or 8192. */
-    int    g;                   /* Guard interval: 4 to 32. */
-    int    con;                 /* TPS constellation field: 0 QPSK, 1 16QAM, 2 64QAM. */
-    int    hp;                  /* TPS code rate field: 0 (1/2) to 4 (7/8). */
-    int    start;               /* Symbol of the frame the capture starts with. */
-    double freq_hz;             /* Carrier offset. */
-    double snr_db;
-    double echo_us, echo_db;    /* A second path; echo_db -99 for none. */
-};
-
-static const int dvbt_cp[] = {
-       0,   48,   54,   87,  141,  156,  192,  201,  255,  279,  282,  333,  432,  450,  483,
-     525,  531,  618,  636,  714,  759,  765,  780,  804,  873,  888,  918,  939,  942,  969,
-     984, 1050, 1101, 1107, 1110, 1137, 1140, 1146, 1206, 1269, 1323, 1377, 1491, 1683, 1704,
-};
-static const int dvbt_tps[] = {
-      34,   50,  209,  346,  413,  569,  595,  688,  790,  901, 1073, 1219, 1262, 1286, 1469,
-    1594, 1687,
-};
-
-static size_t make_dvbt(float complex *x, size_t max, double fs, const struct dvbt_signal *sig)
-{
-    const int k = sig->n == 8192 ? 6817 : 1705, gl = sig->n / sig->g, l = sig->n + gl;
-    const int side = sig->con == 0 ? 2 : sig->con == 1 ? 4 : 8;
-    const double scale = 1.0 / sqrt(2.0 * (side * side - 1) / 3.0);
-    struct m2sdr_fft *ifft = m2sdr_fft_alloc((size_t)sig->n, true);
-    float complex *f = malloc((size_t)sig->n * sizeof(*f)), *t = malloc((size_t)sig->n * sizeof(*t));
-    uint8_t *w = malloc((size_t)k), *kind = calloc((size_t)k, 1), tps[68];
-    float tps_state = 1.0f;
-    const size_t nsym = max / (size_t)l;
-    const size_t echo = (size_t)lround(sig->echo_us * 1e-6 * fs);
-    const double echo_amp = pow(10.0, sig->echo_db / 20.0);
-    unsigned reg = 0x7ff;
-    size_t s, i, count = nsym * (size_t)l;
-    double power = 0;
-    int c, b;
-
-    for (c = 0; c < k; c++) {
-        w[c] = (uint8_t)((reg >> 10) & 1u);
-        reg = ((reg << 1) | (w[c] ^ ((reg >> 8) & 1u))) & 0x7ffu;
-    }
-    for (b = 0; b < k; b += 1704) {
-        for (c = 0; c < (int)(sizeof(dvbt_cp) / sizeof(dvbt_cp[0])); c++)
-            if (b + dvbt_cp[c] < k)
-                kind[b + dvbt_cp[c]] = 1;
-        for (c = 0; c < (int)(sizeof(dvbt_tps) / sizeof(dvbt_tps[0])); c++)
-            if (b + dvbt_tps[c] < k)
-                kind[b + dvbt_tps[c]] = 2;
-    }
-    memset(x, 0, max * sizeof(*x));
-    for (s = 0; s < nsym; s++) {
-        const int fsym = (int)((s + (size_t)sig->start) % 68), frame = (int)(((s + (size_t)sig->start) / 68) % 4);
-
-        if (fsym == 0 || s == 0) {
-            /* TPS of the frame: s0, the sync word (inverted in even frames), length 23, then the parameters. */
-            const unsigned sync = frame % 2 ? 0xca11u : 0x35eeu;
-            unsigned v[] = { 0x17, (unsigned)frame, (unsigned)sig->con, 0, (unsigned)sig->hp, (unsigned)sig->hp,
-                             (unsigned)(sig->g == 32 ? 0 : sig->g == 16 ? 1 : sig->g == 8 ? 2 : 3), sig->n == 8192 ? 1u : 0u };
-            const int bits[] = { 6, 2, 2, 3, 3, 3, 2, 2 };
-            int pos = 17, j;
-
-            memset(tps, 0, sizeof(tps));
-            for (j = 0; j < 16; j++)
-                tps[1 + j] = (uint8_t)((sync >> (15 - j)) & 1u);
-            for (j = 0; j < 8; j++) {
-                int q;
-
-                for (q = bits[j] - 1; q >= 0; q--)
-                    tps[pos++] = (uint8_t)((v[j] >> q) & 1u);
-            }
-        }
-        tps_state = fsym == 0 ? 1.0f : tps[fsym] ? -tps_state : tps_state;
-        memset(f, 0, (size_t)sig->n * sizeof(*f));
-        for (c = 0; c < k; c++) {
-            float complex v;
-
-            if (kind[c] == 1 || (c >= 3 * (fsym % 4) && (c - 3 * (fsym % 4)) % 12 == 0))
-                v = (4.0f / 3.0f) * (w[c] ? -1.0f : 1.0f);
-            else if (kind[c] == 2)
-                v = tps_state * (w[c] ? -1.0f : 1.0f);
-            else
-                v = (float complex)(scale * ((2 * (int)(rng_uniform() * side) - side + 1) +
-                                             I * (2 * (int)(rng_uniform() * side) - side + 1)));
-            f[(c - (k - 1) / 2 + sig->n) % sig->n] = v;
-        }
-        m2sdr_fft_run(ifft, f, t);
-        for (i = 0; i < (size_t)l; i++)
-            x[s * (size_t)l + i] = t[(i + (size_t)sig->n - (size_t)gl) % (size_t)sig->n];
-    }
-    if (sig->echo_db > -99.0)
-        for (i = count; i-- > echo;)
-            x[i] += (float)echo_amp * x[i - echo];
-    for (i = 0; i < count; i++) {
-        x[i] *= (float complex)cexp(I * 2.0 * M_PI * sig->freq_hz * (double)i / fs);
-        power += crealf(x[i] * conjf(x[i]));
-    }
-    power /= (double)count;
-    for (i = 0; i < count; i++)
-        x[i] *= (float)(0.1 / sqrt(power));
-    add_noise(x, count, 0.01 * pow(10.0, -sig->snr_db / 10.0));
-    m2sdr_fft_free(ifft);
-    free(f);
-    free(t);
-    free(w);
-    free(kind);
-    return count;
-}
 
 static void test_dvbt(void)
 {
@@ -1316,46 +1101,29 @@ static int write_dvbt(const char *path)
     const double fs = 64e6 / 7.0;
     const size_t max = (size_t)(0.16 * fs);
     float complex *x = malloc(max * sizeof(*x));
-    FILE *f = fopen(path, "wb");
-    size_t count, i;
+    size_t count;
+    int rc;
 
-    if (!x || !f)
+    if (!x)
         return 1;
     count = make_dvbt(x, max, fs, &sig);
-    for (i = 0; i < count; i++) {
-        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
-                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
-        if (fwrite(v, sizeof(v), 1, f) != 1)
-            return 1;
-    }
+    rc    = write_sc16(path, x, x, count);
     free(x);
-    return fclose(f) == 0 ? 0 : 1;
+    return rc;
 }
 
 static int check_dvbt_report(const char *path)
 {
-    static char json[32768];
-    FILE *f = fopen(path, "rb");
-    size_t n;
+    const char *json = read_report(path);
 
-    if (!f) {
-        printf("test_m2sdr_analysis: cannot open %s\n", path);
+    if (!json)
         return 1;
-    }
-    n = fread(json, 1, sizeof(json) - 1, f);
-    fclose(f);
-    json[n] = '\0';
     printf("DVB-T report of m2sdr_analyzer:\n");
     CHECK("mode 8k, guard 1/8", strstr(json, "\"mode\": \"8k\"") && strstr(json, "\"guard_interval\": \"1/8\""));
     CHECK("64QAM, code rate 3/4", strstr(json, "\"constellation\": \"64QAM\"") && strstr(json, "\"code_rate_hp\": \"3/4\""));
     CHECK_NEAR("carrier offset (Hz)", json_number(json, "dvbt", "carrier_offset_hz"), 166667.0, 20.0);
     CHECK("MER over 25 dB", json_number(json, "dvbt", "mer_db") > 25.0);
-    if (failures) {
-        printf("test_m2sdr_analysis: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis: DVB-T report checked\n");
-    return 0;
+    return report_done("DVB-T");
 }
 
 static int write_dab(const char *path)
@@ -1363,46 +1131,28 @@ static int write_dab(const char *path)
     static const struct dab_signal sig = { 50000, 4321.0, 25.0, 0.0, -99.0 };
     const size_t max = (size_t)(0.25 * M2SDR_DAB_SAMPLE_RATE);
     float complex *x = malloc(max * sizeof(*x));
-    FILE *f = fopen(path, "wb");
-    size_t i;
+    int rc;
 
-    if (!x || !f)
+    if (!x)
         return 1;
     make_dab(x, max, &sig);
-    for (i = 0; i < max; i++) {
-        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
-                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
-        if (fwrite(v, sizeof(v), 1, f) != 1)
-            return 1;
-    }
+    rc = write_sc16(path, x, x, max);
     free(x);
-    return fclose(f) == 0 ? 0 : 1;
+    return rc;
 }
 
 static int check_dab_report(const char *path)
 {
-    static char json[32768];
-    FILE *f = fopen(path, "rb");
-    size_t n;
+    const char *json = read_report(path);
 
-    if (!f) {
-        printf("test_m2sdr_analysis: cannot open %s\n", path);
+    if (!json)
         return 1;
-    }
-    n = fread(json, 1, sizeof(json) - 1, f);
-    fclose(f);
-    json[n] = '\0';
     printf("DAB report of m2sdr_analyzer:\n");
     CHECK("ensemble and phase reference", strstr(json, "\"found\": true") && strstr(json, "\"phase_reference\": true"));
     CHECK_NEAR("carrier offset (Hz)", json_number(json, "dab", "carrier_offset_hz"), 4321.0, 5.0);
     CHECK("MER over 24 dB", json_number(json, "dab", "mer_db") > 24.0);
     CHECK("SNR over 24 dB", json_number(json, "dab", "snr_db") > 24.0);
-    if (failures) {
-        printf("test_m2sdr_analysis: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis: DAB report checked\n");
-    return 0;
+    return report_done("DAB");
 }
 
 int main(int argc, char **argv)
@@ -1440,10 +1190,5 @@ int main(int argc, char **argv)
     test_lte_evm();
     test_dvbt();
     test_dab();
-    if (failures) {
-        printf("test_m2sdr_analysis: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis: all tests passed\n");
-    return 0;
+    return tests_done();
 }
