@@ -38,3 +38,4 @@ __pycache__
 /scripts/loopback_selftest
 /litex_m2sdr/software/soapysdr/build/
 /litex_m2sdr/software/soapysdr/build_liteeth/
+/litex_m2sdr/software/user/tests/gen_streams*.txt

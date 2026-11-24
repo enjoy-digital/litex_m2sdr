@@ -38,6 +38,15 @@
 #include "m2sdr_analysis.h"
 #include "m2sdr_cli.h"
 #include "m2sdr_tool.h"
+/* With SSE2, kiss_fft is used in its SIMD mode: an FFT per lane, four OFDM symbols per call,
+ * each lane with the operations of the scalar FFT. The tool is then linked with the kiss_fft
+ * object built that way (see the Makefile).
+ * M2SDR_GEN_NO_SIMD leaves all of it out: the build the tests compare this one with. */
+#if defined(__SSE2__) && !defined(M2SDR_GEN_NO_SIMD)
+#define GEN_SSE2
+#define USE_SIMD
+#include <emmintrin.h>
+#endif
 #include "kissfft/kiss_fft.h"
 #include "config.h"
 #include "csr.h"
@@ -78,8 +87,11 @@ struct ofdm_state {
     float *symbol_q;
     int symbol_len;
     int sample_index;
+    int lane;                        /* SIMD: symbol of the last four being given, */
+    int pos;                         /* and the place in it. */
 };
 
+#ifndef USE_SIMD
 static void *xcalloc(size_t nmemb, size_t size)
 {
     void *ptr = calloc(nmemb, size);
@@ -89,6 +101,7 @@ static void *xcalloc(size_t nmemb, size_t size)
     }
     return ptr;
 }
+#endif
 
 static uint32_t prng_next(uint32_t *state)
 {
@@ -102,27 +115,126 @@ static uint32_t prng_next(uint32_t *state)
     return x;
 }
 
-static kiss_fft_cpx ofdm_modulate_symbol(struct ofdm_state *st)
+/* One carrier, to its real and imaginary parts. */
+static inline void ofdm_modulate_symbol(struct ofdm_state *st, float *r, float *i)
 {
-    kiss_fft_cpx out = {0.0f, 0.0f};
-
     if (st->bits_per_symbol == 2) {
-        out.r = (prng_next(&st->lfsr) & 1) ? 0.70710678f : -0.70710678f;
-        out.i = (prng_next(&st->lfsr) & 1) ? 0.70710678f : -0.70710678f;
-        return out;
+        /* From a table: the bits are random, a branch on them is mispredicted half the time. */
+        static const float levels[2] = {-0.70710678f, 0.70710678f};
+        *r = levels[prng_next(&st->lfsr) & 1];
+        *i = levels[prng_next(&st->lfsr) & 1];
+        return;
     }
 
     if (st->bits_per_symbol == 4) {
         static const float levels[4] = {-3.0f, -1.0f, 3.0f, 1.0f};
-        out.r = levels[prng_next(&st->lfsr) & 3] * 0.31622777f;
-        out.i = levels[prng_next(&st->lfsr) & 3] * 0.31622777f;
-        return out;
+        *r = levels[prng_next(&st->lfsr) & 3] * 0.31622777f;
+        *i = levels[prng_next(&st->lfsr) & 3] * 0.31622777f;
+        return;
     }
 
-    out.r = (prng_next(&st->lfsr) & 1) ? 1.0f : -1.0f;
-    out.i = 0.0f;
-    return out;
+    *r = (float)(int)(2 * (prng_next(&st->lfsr) & 1)) - 1.0f;
+    *i = 0.0f;
 }
+
+#ifdef USE_SIMD
+
+#define OFDM_LANES 4
+
+/* Four symbols, one per lane: their carriers are drawn a symbol after the other, as when they
+ * are made one at a time, and each lane goes through what ofdm_generate_symbol() does below.
+ * They stay in time_bins, a lane per symbol: ofdm_next_sample() reads them there, the end of a
+ * symbol first as its cyclic prefix. */
+static void ofdm_generate_symbols(struct ofdm_state *st)
+{
+    const int n = st->fft_size, half = st->occupied_carriers / 2;
+    float max_mag[OFDM_LANES] = { 0 };
+    __m128d max_lo = _mm_setzero_pd(), max_hi = _mm_setzero_pd(), thr_lo, thr_hi;
+    __m128 vmax;
+
+    memset(st->freq_bins, 0, sizeof(*st->freq_bins) * n);
+    for (int lane = 0; lane < OFDM_LANES; lane++) {
+        for (int i = 0; i < half; i++) {
+            ofdm_modulate_symbol(st, (float *)&st->freq_bins[1 + i].r + lane, (float *)&st->freq_bins[1 + i].i + lane);
+            ofdm_modulate_symbol(st, (float *)&st->freq_bins[n - half + i].r + lane,
+                                 (float *)&st->freq_bins[n - half + i].i + lane);
+        }
+    }
+
+    kiss_fft(st->ifft_cfg, st->freq_bins, st->time_bins);
+
+    /* 1 / N: a product when N is a power of two, where it gives what the division gives. */
+    if ((n & (n - 1)) == 0) {
+        const __m128 inv = _mm_set1_ps(1.0f / (float)n);
+
+        for (int i = 0; i < n; i++) {
+            st->time_bins[i].r = _mm_mul_ps(st->time_bins[i].r, inv);
+            st->time_bins[i].i = _mm_mul_ps(st->time_bins[i].i, inv);
+        }
+    } else {
+        const __m128 size = _mm_set1_ps((float)n);
+
+        for (int i = 0; i < n; i++) {
+            st->time_bins[i].r = _mm_div_ps(st->time_bins[i].r, size);
+            st->time_bins[i].i = _mm_div_ps(st->time_bins[i].i, size);
+        }
+    }
+    /* The largest magnitude of each symbol: hypotf() only where it can be, see below. */
+    for (int i = 0; i < n; i++) {
+        const __m128 r = st->time_bins[i].r, q = st->time_bins[i].i;
+        const __m128d r_lo = _mm_cvtps_pd(r), r_hi = _mm_cvtps_pd(_mm_movehl_ps(r, r));
+        const __m128d q_lo = _mm_cvtps_pd(q), q_hi = _mm_cvtps_pd(_mm_movehl_ps(q, q));
+
+        max_lo = _mm_max_pd(max_lo, _mm_add_pd(_mm_mul_pd(r_lo, r_lo), _mm_mul_pd(q_lo, q_lo)));
+        max_hi = _mm_max_pd(max_hi, _mm_add_pd(_mm_mul_pd(r_hi, r_hi), _mm_mul_pd(q_hi, q_hi)));
+    }
+    thr_lo = _mm_mul_pd(max_lo, _mm_set1_pd(1.0 - 1e-6));
+    thr_hi = _mm_mul_pd(max_hi, _mm_set1_pd(1.0 - 1e-6));
+    for (int i = 0; i < n; i++) {
+        const __m128 r = st->time_bins[i].r, q = st->time_bins[i].i;
+        const __m128d r_lo = _mm_cvtps_pd(r), r_hi = _mm_cvtps_pd(_mm_movehl_ps(r, r));
+        const __m128d q_lo = _mm_cvtps_pd(q), q_hi = _mm_cvtps_pd(_mm_movehl_ps(q, q));
+        const int near = _mm_movemask_pd(_mm_cmpge_pd(_mm_add_pd(_mm_mul_pd(r_lo, r_lo), _mm_mul_pd(q_lo, q_lo)), thr_lo)) |
+                         _mm_movemask_pd(_mm_cmpge_pd(_mm_add_pd(_mm_mul_pd(r_hi, r_hi), _mm_mul_pd(q_hi, q_hi)), thr_hi)) << 2;
+
+        for (int lane = 0; near && lane < OFDM_LANES; lane++) {
+            if (near & (1 << lane)) {
+                const float mag = hypotf(((const float *)&st->time_bins[i].r)[lane], ((const float *)&st->time_bins[i].i)[lane]);
+
+                if (mag > max_mag[lane])
+                    max_mag[lane] = mag;
+            }
+        }
+    }
+    for (int lane = 0; lane < OFDM_LANES; lane++) {
+        if (max_mag[lane] < 1e-9f)
+            max_mag[lane] = 1.0f;
+    }
+    vmax = _mm_loadu_ps(max_mag);
+    for (int i = 0; i < n; i++) {
+        st->time_bins[i].r = _mm_div_ps(st->time_bins[i].r, vmax);
+        st->time_bins[i].i = _mm_div_ps(st->time_bins[i].i, vmax);
+    }
+    st->lane = 0;
+    st->pos  = 0;
+}
+
+static void ofdm_next_sample(struct ofdm_state *st, float *i_out, float *q_out)
+{
+    int k;
+
+    if (st->lane >= OFDM_LANES)
+        ofdm_generate_symbols(st);
+    k = st->pos < st->cp_len ? st->fft_size - st->cp_len + st->pos : st->pos - st->cp_len;
+    *i_out = ((const float *)&st->time_bins[k].r)[st->lane];
+    *q_out = ((const float *)&st->time_bins[k].i)[st->lane];
+    if (++st->pos >= st->symbol_len) {
+        st->pos = 0;
+        st->lane++;
+    }
+}
+
+#else /* USE_SIMD */
 
 static void ofdm_generate_symbol(struct ofdm_state *st)
 {
@@ -130,18 +242,27 @@ static void ofdm_generate_symbol(struct ofdm_state *st)
     int half = st->occupied_carriers / 2;
 
     memset(st->freq_bins, 0, sizeof(*st->freq_bins) * st->fft_size);
-    memset(st->time_bins, 0, sizeof(*st->time_bins) * st->fft_size);
 
     for (int i = 0; i < half; i++) {
-        st->freq_bins[1 + i] = ofdm_modulate_symbol(st);
-        st->freq_bins[st->fft_size - half + i] = ofdm_modulate_symbol(st);
+        ofdm_modulate_symbol(st, &st->freq_bins[1 + i].r, &st->freq_bins[1 + i].i);
+        ofdm_modulate_symbol(st, &st->freq_bins[st->fft_size - half + i].r, &st->freq_bins[st->fft_size - half + i].i);
     }
 
     kiss_fft(st->ifft_cfg, st->freq_bins, st->time_bins);
 
-    for (int i = 0; i < st->fft_size; i++) {
-        st->time_bins[i].r /= st->fft_size;
-        st->time_bins[i].i /= st->fft_size;
+    /* 1 / N: a product when N is a power of two, where it gives what the division gives. */
+    if ((st->fft_size & (st->fft_size - 1)) == 0) {
+        const float inv = 1.0f / (float)st->fft_size;
+
+        for (int i = 0; i < st->fft_size; i++) {
+            st->time_bins[i].r *= inv;
+            st->time_bins[i].i *= inv;
+        }
+    } else {
+        for (int i = 0; i < st->fft_size; i++) {
+            st->time_bins[i].r /= st->fft_size;
+            st->time_bins[i].i /= st->fft_size;
+        }
     }
     /* The largest magnitude: hypotf() only where it can be, the samples whose squared magnitude
      * is within 1e-6 of the largest one, instead of on every sample. */
@@ -168,23 +289,35 @@ static void ofdm_generate_symbol(struct ofdm_state *st)
     if (max_mag < 1e-9f)
         max_mag = 1.0f;
 
-    for (int i = 0; i < st->cp_len; i++) {
-        int src = st->fft_size - st->cp_len + i;
-        st->symbol_i[i] = st->time_bins[src].r / max_mag;
-        st->symbol_q[i] = st->time_bins[src].i / max_mag;
-    }
-    for (int i = 0; i < st->fft_size; i++) {
-        st->symbol_i[st->cp_len + i] = st->time_bins[i].r / max_mag;
-        st->symbol_q[st->cp_len + i] = st->time_bins[i].i / max_mag;
+    /* The symbol over its peak, then its end again in front of it as the cyclic prefix. */
+    {
+        float *const body_i = st->symbol_i + st->cp_len, *const body_q = st->symbol_q + st->cp_len;
+        int i = 0;
+
+        for (; i < st->fft_size; i++) {
+            body_i[i] = st->time_bins[i].r / max_mag;
+            body_q[i] = st->time_bins[i].i / max_mag;
+        }
+        memcpy(st->symbol_i, body_i + st->fft_size - st->cp_len, (size_t)st->cp_len * sizeof(*body_i));
+        memcpy(st->symbol_q, body_q + st->fft_size - st->cp_len, (size_t)st->cp_len * sizeof(*body_q));
     }
 
     st->sample_index = 0;
 }
 
+static void ofdm_next_sample(struct ofdm_state *st, float *i_out, float *q_out)
+{
+    if (st->sample_index >= st->symbol_len)
+        ofdm_generate_symbol(st);
+    *i_out = st->symbol_i[st->sample_index];
+    *q_out = st->symbol_q[st->sample_index];
+    st->sample_index++;
+}
+
+#endif /* USE_SIMD */
+
 static void ofdm_init(struct ofdm_state *st, int fft_size, int cp_len, int occupied_carriers, const char *modulation, uint32_t seed)
 {
-    size_t cfg_size = 0;
-
     memset(st, 0, sizeof(*st));
     st->fft_size = fft_size;
     st->cp_len = cp_len;
@@ -201,18 +334,21 @@ static void ofdm_init(struct ofdm_state *st, int fft_size, int cp_len, int occup
         exit(1);
     }
 
-    kiss_fft_alloc(st->fft_size, 1, NULL, &cfg_size);
-    st->ifft_cfg = kiss_fft_alloc(st->fft_size, 1, malloc(cfg_size), &cfg_size);
-    if (!st->ifft_cfg) {
+    /* kiss_fft allocates its state and the bins as it needs them (aligned for the SIMD mode). */
+    st->ifft_cfg  = kiss_fft_alloc(st->fft_size, 1, NULL, NULL);
+    st->freq_bins = KISS_FFT_MALLOC(st->fft_size * sizeof(*st->freq_bins));
+    st->time_bins = KISS_FFT_MALLOC(st->fft_size * sizeof(*st->time_bins));
+    if (!st->ifft_cfg || !st->freq_bins || !st->time_bins) {
         fprintf(stderr, "Failed to allocate OFDM IFFT state\n");
         exit(1);
     }
-
-    st->freq_bins = xcalloc(st->fft_size, sizeof(*st->freq_bins));
-    st->time_bins = xcalloc(st->fft_size, sizeof(*st->time_bins));
+#ifdef USE_SIMD
+    ofdm_generate_symbols(st);
+#else
     st->symbol_i = xcalloc(st->symbol_len, sizeof(*st->symbol_i));
     st->symbol_q = xcalloc(st->symbol_len, sizeof(*st->symbol_q));
     ofdm_generate_symbol(st);
+#endif
 }
 
 static void ofdm_cleanup(struct ofdm_state *st)
@@ -220,20 +356,11 @@ static void ofdm_cleanup(struct ofdm_state *st)
     if (!st)
         return;
     kiss_fft_free(st->ifft_cfg);
-    free(st->freq_bins);
-    free(st->time_bins);
+    KISS_FFT_FREE(st->freq_bins);
+    KISS_FFT_FREE(st->time_bins);
     free(st->symbol_i);
     free(st->symbol_q);
     memset(st, 0, sizeof(*st));
-}
-
-static void ofdm_next_sample(struct ofdm_state *st, float *i_out, float *q_out)
-{
-    if (st->sample_index >= st->symbol_len)
-        ofdm_generate_symbol(st);
-    *i_out = st->symbol_i[st->sample_index];
-    *q_out = st->symbol_q[st->sample_index];
-    st->sample_index++;
 }
 
 #ifdef CSR_GPIO_BASE
@@ -252,16 +379,32 @@ static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
 #define QAM_SPAN   8                 /* Symbols of the pulse on each side. */
 #define QAM_PHASES 64                /* Table points per symbol. */
 #define QAM_PEAK   1.8               /* Peaks of the filtered signal over its corner symbols. */
+#define QAM_BLOCK  4                 /* Samples computed together. */
+#define QAM_KEPT   64                /* Blocks whose pulses are kept. */
 
 struct qam_state {
     float complex points[256];
     int    npoints;
     double step;                     /* Symbols per sample. */
     double frac;                     /* Position in the current symbol. */
-    float complex symbols[2 * QAM_SPAN];
+    float complex symbols[2 * QAM_SPAN + QAM_BLOCK];  /* The current ones, and room for the new ones of a block. */
     float  pulse[2 * QAM_SPAN * QAM_PHASES + 2];
     float  scale;
     uint32_t lfsr;
+    /* The pulse under each symbol depends on the position in the symbol only, and most of the
+     * time goes into it. A block of QAM_BLOCK samples is known by the position of its first
+     * one: its pulses, where its new symbols fall and the position after it are kept. A symbol
+     * rate that divides the sample rate (the default is a sixteenth) comes back to the same few
+     * positions, bit for bit, and finds its blocks here; another rate computes each one. */
+    struct qam_kept {
+        double frac;                 /* Position of the first sample; -1: none. */
+        double frac_end;             /* Position after the block. */
+        int    shift[QAM_BLOCK];     /* New symbols before each sample, */
+        int    shifts;               /* and in the block. */
+        float  w[2 * QAM_SPAN][QAM_BLOCK];   /* By symbol, then by sample. */
+    } kept[QAM_KEPT];
+    float  out_i[QAM_BLOCK], out_q[QAM_BLOCK];        /* Samples of the last block, */
+    int    out_pos;                                   /* and the next one to give. */
 };
 
 /* Settings of --signal qam. */
@@ -304,6 +447,9 @@ static void qam_init(struct qam_state *st, double sample_rate, uint32_t seed)
             corner = cabsf(st->points[i]);
     }
     st->scale = 1.0f / (corner * (float)QAM_PEAK);
+    for (i = 0; i < QAM_KEPT; i++)
+        st->kept[i].frac = -1.0;
+    st->out_pos = QAM_BLOCK;
     for (i = 0; i < 2 * QAM_SPAN; i++)
         st->symbols[i] = qam_random_symbol(st);
 }
@@ -314,27 +460,166 @@ static inline float gen_clamp1(float x)
     return x > 1.0f ? 1.0f : x >= -1.0f ? x : -1.0f;
 }
 
-/* One sample: the symbols within QAM_SPAN of it, each under the pulse. */
-static void qam_next_sample(struct qam_state *st, float *i_out, float *q_out)
+/* The pulse under each of the 2 * QAM_SPAN symbols for a sample at `frac` in its symbol, to
+ * w[0], w[stride], ... */
+static void qam_pulse(const struct qam_state *st, double frac, float *w, int stride)
 {
-    float complex acc = 0;
+    int j = 0;
+
+#ifdef GEN_SSE2
+    /* Two symbols at a time, the same operations as below. */
+    {
+        const __m128d vfrac = _mm_set1_pd(frac), vphases = _mm_set1_pd((double)QAM_PHASES);
+
+        for (; j < 2 * QAM_SPAN; j += 2) {
+            const __m128d c = _mm_set_pd((double)(2 * QAM_SPAN - 2 - j), (double)(2 * QAM_SPAN - 1 - j));
+            const __m128d u = _mm_mul_pd(_mm_add_pd(vfrac, c), vphases);
+            const __m128i k = _mm_cvttpd_epi32(u);
+            const __m128  t = _mm_cvtpd_ps(_mm_sub_pd(u, _mm_cvtepi32_pd(k)));
+            const int k0 = _mm_cvtsi128_si32(k), k1 = _mm_cvtsi128_si32(_mm_srli_si128(k, 4));
+            const __m128 p0 = _mm_set_ps(0.0f, 0.0f, st->pulse[k1], st->pulse[k0]);
+            const __m128 p1 = _mm_set_ps(0.0f, 0.0f, st->pulse[k1 + 1], st->pulse[k0 + 1]);
+            const __m128 r  = _mm_add_ps(p0, _mm_mul_ps(t, _mm_sub_ps(p1, p0)));
+
+            _mm_store_ss(w + stride * j, r);
+            _mm_store_ss(w + stride * (j + 1), _mm_shuffle_ps(r, r, 1));
+        }
+    }
+#endif
+    for (; j < 2 * QAM_SPAN; j++) {
+        /* Symbol j is frac + QAM_SPAN - 1 - j symbols before the sample. */
+        const double u = (frac + (double)(2 * QAM_SPAN - 1 - j)) * QAM_PHASES;
+        const int k = (int)u;
+        w[stride * j] = st->pulse[k] + (float)(u - k) * (st->pulse[k + 1] - st->pulse[k]);
+    }
+}
+
+/* The block that starts at st->frac: the one kept, or computed in its place. */
+static const struct qam_kept *qam_block(struct qam_state *st)
+{
+    const double frac0 = st->frac;
+    struct qam_kept *b;
+    uint64_t bits;
+    double frac = frac0;
+    int l;
+
+    /* All the bits of the position choose the place: positions a rounding apart, as a rate
+     * that does not divide the sample rate gives, do not take the place of each other. */
+    memcpy(&bits, &frac0, sizeof(bits));
+    b = &st->kept[(bits * 0x9E3779B97F4A7C15ull) >> 58];      /* 6 bits: QAM_KEPT places. */
+    if (b->frac == frac0)
+        return b;
+    b->shifts = 0;
+    for (l = 0; l < QAM_BLOCK; l++) {
+        qam_pulse(st, frac, &b->w[0][l], QAM_BLOCK);
+        b->shift[l] = b->shifts;
+        frac += st->step;
+        if (frac >= 1.0) {
+            b->shifts++;
+            frac -= 1.0;
+        }
+    }
+    b->frac     = frac0;
+    b->frac_end = frac;
+    return b;
+}
+
+/* QAM_BLOCK samples: each is the symbols within QAM_SPAN of it, each under the pulse, summed
+ * in the order of the symbols. The sums of a sample wait on each other, the ones of different
+ * samples do not: taken together, a sample per lane, they cost a fraction of one after the
+ * other, and give the same samples. The new symbols of the block go after the current ones.
+ * A symbol rate above the sample rate (several new symbols per sample, of no use) is left to
+ * qam_next_single(). */
+static void qam_next_block(struct qam_state *st)
+{
+    const struct qam_kept *b = qam_block(st);
+    const float scale = st->scale;
+    float re[QAM_BLOCK], im[QAM_BLOCK];
+    int l, j;
+
+    for (l = 0; l < b->shifts; l++)
+        st->symbols[2 * QAM_SPAN + l] = qam_random_symbol(st);
+#if defined(GEN_SSE2) && QAM_BLOCK == 4
+    /* A sample per lane: each lane adds its products in the order of the symbols. */
+    {
+        __m128 vre = _mm_setzero_ps(), vim = _mm_setzero_ps();
+
+        if (b->shifts == 0) {
+            /* The same symbols for the four samples. */
+            for (j = 0; j < 2 * QAM_SPAN; j++) {
+                const __m128 vw = _mm_loadu_ps(b->w[j]);
+
+                vre = _mm_add_ps(vre, _mm_mul_ps(_mm_set1_ps(crealf(st->symbols[j])), vw));
+                vim = _mm_add_ps(vim, _mm_mul_ps(_mm_set1_ps(cimagf(st->symbols[j])), vw));
+            }
+        } else {
+            const float complex *s0 = st->symbols + b->shift[0], *s1 = st->symbols + b->shift[1];
+            const float complex *s2 = st->symbols + b->shift[2], *s3 = st->symbols + b->shift[3];
+
+            for (j = 0; j < 2 * QAM_SPAN; j++) {
+                const __m128 vw = _mm_loadu_ps(b->w[j]);
+
+                vre = _mm_add_ps(vre, _mm_mul_ps(_mm_setr_ps(crealf(s0[j]), crealf(s1[j]), crealf(s2[j]), crealf(s3[j])), vw));
+                vim = _mm_add_ps(vim, _mm_mul_ps(_mm_setr_ps(cimagf(s0[j]), cimagf(s1[j]), cimagf(s2[j]), cimagf(s3[j])), vw));
+            }
+        }
+        _mm_storeu_ps(re, vre);
+        _mm_storeu_ps(im, vim);
+    }
+#else
+    for (l = 0; l < QAM_BLOCK; l++)
+        re[l] = im[l] = 0;
+    for (j = 0; j < 2 * QAM_SPAN; j++) {
+        for (l = 0; l < QAM_BLOCK; l++) {
+            re[l] += crealf(st->symbols[b->shift[l] + j]) * b->w[j][l];
+            im[l] += cimagf(st->symbols[b->shift[l] + j]) * b->w[j][l];
+        }
+    }
+#endif
+    if (b->shifts)
+        memmove(st->symbols, st->symbols + b->shifts, 2 * QAM_SPAN * sizeof(st->symbols[0]));
+    for (l = 0; l < QAM_BLOCK; l++) {
+        st->out_i[l] = gen_clamp1(re[l] * scale);
+        st->out_q[l] = gen_clamp1(im[l] * scale);
+    }
+    st->frac    = b->frac_end;
+    st->out_pos = 0;
+}
+
+/* One sample, with as many new symbols after it as the symbol rate asks for. */
+static void qam_next_single(struct qam_state *st)
+{
+    float w[2 * QAM_SPAN], re = 0, im = 0;
     int j;
 
+    qam_pulse(st, st->frac, w, 1);
+
     for (j = 0; j < 2 * QAM_SPAN; j++) {
-        /* Symbol j is frac + QAM_SPAN - 1 - j symbols before the sample. */
-        const double u = (st->frac + (double)(2 * QAM_SPAN - 1 - j)) * QAM_PHASES;
-        const int k = (int)u;
-        acc += st->symbols[j] * (st->pulse[k] + (float)(u - k) * (st->pulse[k + 1] - st->pulse[k]));
+        re += crealf(st->symbols[j]) * w[j];
+        im += cimagf(st->symbols[j]) * w[j];
     }
-    acc *= st->scale;
-    *i_out = gen_clamp1(crealf(acc));
-    *q_out = gen_clamp1(cimagf(acc));
     st->frac += st->step;
     while (st->frac >= 1.0) {
         memmove(st->symbols, st->symbols + 1, (2 * QAM_SPAN - 1) * sizeof(st->symbols[0]));
         st->symbols[2 * QAM_SPAN - 1] = qam_random_symbol(st);
         st->frac -= 1.0;
     }
+    st->out_pos = QAM_BLOCK - 1;
+    st->out_i[st->out_pos] = gen_clamp1(re * st->scale);
+    st->out_q[st->out_pos] = gen_clamp1(im * st->scale);
+}
+
+static void qam_next_sample(struct qam_state *st, float *i_out, float *q_out)
+{
+    if (st->out_pos >= QAM_BLOCK) {
+        if (st->step <= 1.0)
+            qam_next_block(st);
+        else
+            qam_next_single(st);
+    }
+    *i_out = st->out_i[st->out_pos];
+    *q_out = st->out_q[st->out_pos];
+    st->out_pos++;
 }
 
 struct gen_signal_state {

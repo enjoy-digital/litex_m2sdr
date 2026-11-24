@@ -212,6 +212,7 @@ TEST_PROGS += tests/test_m2sdr_analysis_wireless
 TEST_PROGS += tests/test_m2sdr_analysis_dual
 TEST_PROGS += tests/test_m2sdr_analysis_lab
 TEST_PROGS += tests/test_m2sdr_gen
+TEST_PROGS += tests/test_m2sdr_gen_scalar
 
 core-tools: $(CORE_BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp test-analyzer test-fm
@@ -225,6 +226,10 @@ test-libm2sdr: $(TEST_PROGS)
 	./tests/test_m2sdr_cal
 	./tests/test_m2sdr_fm
 	./tests/test_m2sdr_gen
+	./tests/test_m2sdr_gen_scalar
+	./tests/test_m2sdr_gen --streams > tests/gen_streams.txt
+	./tests/test_m2sdr_gen_scalar --streams > tests/gen_streams_scalar.txt
+	cmp tests/gen_streams.txt tests/gen_streams_scalar.txt
 	./tests/test_m2sdr_analysis
 	./tests/test_m2sdr_analysis_dvbt2
 	./tests/test_m2sdr_analysis_fm
@@ -433,10 +438,30 @@ tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o $(THIRD_PARTY_DI
 tests/test_m2sdr_fm: $(LIBM2SDR_STATIC) tests/test_m2sdr_fm.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_fm.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
+# m2sdr_gen makes its OFDM symbols four at a time with kiss_fft in its SIMD mode (an FFT per SSE
+# lane, each with the operations of the scalar one) where the compiler has SSE2: m2sdr_gen.c
+# then defines USE_SIMD for kiss_fft.h, and is linked with kiss_fft.c built the same way.
+M2SDR_GEN_SSE2 := $(shell echo | $(CC) $(EXTRA_CFLAGS) -dM -E - 2>/dev/null | grep -c "define __SSE2__ ")
+ifeq ($(M2SDR_GEN_SSE2),1)
+M2SDR_GEN_KISS_FFT := $(THIRD_PARTY_DIR)/kissfft/kiss_fft_simd.o
+else
+M2SDR_GEN_KISS_FFT := $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o
+endif
+
+$(THIRD_PARTY_DIR)/kissfft/kiss_fft_simd.o: $(THIRD_PARTY_DIR)/kissfft/kiss_fft.c $(BUILD_FLAGS_FILE)
+	$(CC) -c $(CFLAGS) -DUSE_SIMD -o $@ $<
+
 # The generator of m2sdr_gen.c, included by its test.
 tests/test_m2sdr_gen.o: m2sdr_gen.c
-tests/test_m2sdr_gen: $(LIBM2SDR_STATIC) tests/test_m2sdr_gen.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_gen.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o $(M2SDR_LINK_LIBS)
+tests/test_m2sdr_gen: $(LIBM2SDR_STATIC) tests/test_m2sdr_gen.o $(M2SDR_GEN_KISS_FFT) | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_gen.o $(M2SDR_GEN_KISS_FFT) $(M2SDR_LINK_LIBS)
+
+# The same test without the SSE2 code of the generator, with the scalar kiss_fft: its QAM and
+# OFDM samples are compared with the ones of the build above.
+tests/test_m2sdr_gen_scalar.o: tests/test_m2sdr_gen.c m2sdr_gen.c $(BUILD_FLAGS_FILE)
+	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -DM2SDR_GEN_NO_SIMD -o $@ $<
+tests/test_m2sdr_gen_scalar: $(LIBM2SDR_STATIC) tests/test_m2sdr_gen_scalar.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_gen_scalar.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o $(M2SDR_LINK_LIBS)
 
 m2sdr_play: $(LIBM2SDR_STATIC) m2sdr_play.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_play.o $(M2SDR_LINK_LIBS) $(PTHREAD_LIBS)
@@ -471,8 +496,8 @@ m2sdr_fm_rx.o: m2sdr_fm_rx.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(SNDFILE_CFLAGS) $(SAMPLERATE_CFLAGS) -o $@ $<
 
 # Streaming/test tools.
-m2sdr_gen: $(LIBM2SDR_STATIC) m2sdr_gen.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_gen.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o $(M2SDR_LINK_LIBS)
+m2sdr_gen: $(LIBM2SDR_STATIC) m2sdr_gen.o $(M2SDR_GEN_KISS_FFT)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_gen.o $(M2SDR_GEN_KISS_FFT) $(M2SDR_LINK_LIBS)
 
 M2SDR_SCAN_SRCS := m2sdr_scan.c $(THIRD_PARTY_DIR)/kissfft/kiss_fft.c
 M2SDR_SCAN_OBJS := $(M2SDR_SCAN_SRCS:.c=.o)
@@ -606,3 +631,8 @@ check:
 	cmake --build ../soapysdr/build
 
 -include $(wildcard *.d tests/*.d libm2sdr/*.d libliteusb/*.d analyzer/*.d)
+
+.PHONY: clean-gen-streams
+clean: clean-gen-streams
+clean-gen-streams:
+	rm -f tests/gen_streams.txt tests/gen_streams_scalar.txt

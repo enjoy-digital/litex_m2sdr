@@ -70,6 +70,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - `m2sdr_analyzer --report` now fails (exit 1) when `--df-cal-store` or `--sweep-thru-save` could not store, as `--pn-floor-save` does.
 - The signal processing of `libm2sdr` is built with `-fcx-limited-range`: the pragma used so far was ignored by GCC (5G NR report 183 to 117 ms, GPS 350 to 201 ms).
 - `m2sdr_gen` generates its samples 2.5 to 5 times faster for the tone, the white noise and the PRBS (100 to 170 MSPS on a desktop CPU, from 30 to 70), with the same samples; a tone of negative frequency keeps its phase within a turn.
+- `m2sdr_gen` generates OFDM twice faster and QAM 3.5 times faster (about 75 MSPS on a desktop CPU, from 40 and 20), with the same samples: four OFDM symbols per FFT call (kiss_fft in its SIMD mode), four QAM samples at a time with the pulses of the positions that come back kept.
 - Added `m2sdr_gen --signal qam`: random PSK or QAM symbols under a root raised cosine, as a test source. `m2sdr_gen` now sends at the sample rate over Ethernet, where it used to send as fast as the host could and the board dropped most of the datagrams, and reports the TX underflows counted by the FPGA.
 
 **FM Utilities**

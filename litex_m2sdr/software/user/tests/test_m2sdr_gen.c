@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
  * M2SDR generator: the samples that gen_fill_payload() of m2sdr_gen.c writes, against the plain
- * computation of each sample (cos() and sin(), a shift register bit by bit, fmod(), lroundf()).
- * The fast paths of the tool must give the same bits.
+ * computation of each sample (cos() and sin(), a shift register bit by bit, fmod(), lroundf(),
+ * QAM a sample at a time). The fast paths of the tool must give the same bits. With --streams,
+ * the QAM and OFDM samples as hashes, to compare the builds with and without SSE2.
  *
  * This file is part of LiteX-M2SDR.
  */
@@ -261,13 +262,160 @@ static void test_clamp(void)
     CHECK(bad == 0, "gen_clamp1: %d values differ from fminf(fmaxf())", bad);
 }
 
-int main(void)
+/* QAM as it was written first: a sample at a time, the pulse under each symbol computed for
+ * each sample, one sum of complex products. */
+struct ref_qam {
+    float complex symbols[2 * QAM_SPAN];
+    double frac;
+    uint32_t lfsr;
+};
+
+static float complex ref_qam_symbol(struct ref_qam *r, const struct qam_state *st)
 {
+    r->lfsr ^= r->lfsr << 13;
+    r->lfsr ^= r->lfsr >> 17;
+    r->lfsr ^= r->lfsr << 5;
+    return st->points[(r->lfsr >> 8) % (uint32_t)st->npoints];
+}
+
+static void ref_qam_sample(struct ref_qam *r, const struct qam_state *st, float *i_out, float *q_out)
+{
+    float complex acc = 0;
+    int j;
+
+    for (j = 0; j < 2 * QAM_SPAN; j++) {
+        const double u = (r->frac + (double)(2 * QAM_SPAN - 1 - j)) * QAM_PHASES;
+        const int k = (int)u;
+        acc += r->symbols[j] * (st->pulse[k] + (float)(u - k) * (st->pulse[k + 1] - st->pulse[k]));
+    }
+    acc *= st->scale;
+    *i_out = fminf(fmaxf(crealf(acc), -1.0f), 1.0f);
+    *q_out = fminf(fmaxf(cimagf(acc), -1.0f), 1.0f);
+    r->frac += st->step;
+    while (r->frac >= 1.0) {
+        memmove(r->symbols, r->symbols + 1, (2 * QAM_SPAN - 1) * sizeof(r->symbols[0]));
+        r->symbols[2 * QAM_SPAN - 1] = ref_qam_symbol(r, st);
+        r->frac -= 1.0;
+    }
+}
+
+/* The symbol rates: ones that come back to the same positions in the symbol (the default, a
+ * sixteenth of the sample rate, and others), ones that never do, the sample rate itself and
+ * more (several new symbols per sample). */
+static void test_qam(void)
+{
+    static const double fs = 30.72e6;
+    static const double rates[] = { 0, 30.72e6 / 10, 1.2345e6, 30.72e6 / 20, 30.72e6 / 6, 30.72e6, 2 * 30.72e6,
+                                    3.7 * 30.72e6, 30.72e6 / 4, 30.72e6 / 64, 30.72e6 / 3, 1.0, 29.9e6, 7.3e6 };
+    static const enum m2sdr_modulation mods[] = { M2SDR_MOD_QPSK, M2SDR_MOD_16QAM, M2SDR_MOD_64QAM, M2SDR_MOD_BPSK };
+    static struct qam_state qam;
+    unsigned long samples = 0;
+
+    for (unsigned r = 0; r < sizeof(rates) / sizeof(rates[0]); r++) {
+        for (unsigned m = 0; m < sizeof(mods) / sizeof(mods[0]); m++) {
+            struct ref_qam ref;
+            int bad = 0;
+
+            qam_symbol_rate = rates[r];
+            qam_modulation  = mods[m];
+            qam_rolloff     = m == 2 ? 0.2 : 0.35;
+            qam_init(&qam, fs, 77 + r);
+            memcpy(ref.symbols, qam.symbols, sizeof(ref.symbols));
+            ref.frac = qam.frac;
+            ref.lfsr = qam.lfsr;
+            for (int n = 0; n < 200000; n++) {
+                float i_got, q_got, i_ref, q_ref;
+
+                qam_next_sample(&qam, &i_got, &q_got);
+                ref_qam_sample(&ref, &qam, &i_ref, &q_ref);
+                bad += memcmp(&i_got, &i_ref, sizeof(i_got)) != 0 || memcmp(&q_got, &q_ref, sizeof(q_got)) != 0;
+            }
+            samples += 200000;
+            CHECK(bad == 0, "qam at %g symbols/s, modulation %u: %d samples differ", rates[r], m, bad);
+        }
+    }
+    qam_symbol_rate = 0.0;
+    qam_modulation  = M2SDR_MOD_QPSK;
+    qam_rolloff     = 0.35;
+    printf("test_m2sdr_gen: qam, %lu samples checked\n", samples);
+}
+
+/* --streams: a hash of the QAM and OFDM samples of gen_fill_payload(), a line per case. The
+ * build with SSE2 (four samples or four symbols at a time, kiss_fft in its SIMD mode) and the
+ * one without (M2SDR_GEN_NO_SIMD) must print the same lines: the Makefile compares them. */
+static uint64_t stream_hash(uint64_t h, const uint8_t *p, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        h ^= p[i];
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+static void print_streams(void)
+{
+    static const int ffts[] = { 64, 100, 256, 600, 1024, 1536, 2048, 4096 };
+    static const double rates[] = { 0, 30.72e6 / 10, 1.2345e6, 2 * 30.72e6 };
+    static uint8_t buf[1 << 16];
+    static struct qam_state qam;
+
+    for (unsigned f = 0; f < sizeof(ffts) / sizeof(ffts[0]); f++) {
+        for (int v = 0; v < 6; v++) {
+            const int fft = ffts[f], use_8bit = v & 1, variant = v / 2;
+            struct gen_signal_state g;
+            struct ofdm_state ofdm;
+            uint64_t h = 1469598103934665603ull;
+
+            memset(&g, 0, sizeof(g));
+            g.signal_type = "ofdm";
+            g.amplitude   = variant == 0 ? 1.0 : 0.6;
+            g.use_8bit    = (uint8_t)use_8bit;
+            /* Cyclic prefixes and occupations of several sizes, both modulations. */
+            ofdm_init(&ofdm, fft, variant == 2 ? fft / 4 : fft * 72 / 1024, variant == 1 ? fft - 2 : fft * 600 / 1024,
+                      variant == 1 ? "16qam" : "qpsk", 5 + (uint32_t)v);
+            g.ofdm = &ofdm;
+            for (int n = 0; n < 60; n++) {
+                gen_fill_payload(buf, sizeof(buf) - (size_t)(n % 5) * 8, &g);
+                h = stream_hash(h, buf, sizeof(buf));
+            }
+            ofdm_cleanup(&ofdm);
+            printf("ofdm %d %d: %016llx\n", fft, v, (unsigned long long)h);
+        }
+    }
+    for (unsigned r = 0; r < sizeof(rates) / sizeof(rates[0]); r++) {
+        for (int use_8bit = 0; use_8bit <= 1; use_8bit++) {
+            struct gen_signal_state g;
+            uint64_t h = 1469598103934665603ull;
+
+            memset(&g, 0, sizeof(g));
+            qam_symbol_rate = rates[r];
+            qam_modulation  = r & 1 ? M2SDR_MOD_16QAM : M2SDR_MOD_QPSK;
+            g.signal_type = "qam";
+            g.amplitude   = 0.8;
+            g.use_8bit    = (uint8_t)use_8bit;
+            qam_init(&qam, 30.72e6, 77 + r);
+            g.qam = &qam;
+            for (int n = 0; n < 60; n++) {
+                gen_fill_payload(buf, sizeof(buf) - (size_t)(n % 7) * 8, &g);
+                h = stream_hash(h, buf, sizeof(buf));
+            }
+            printf("qam %g %d: %016llx\n", rates[r], use_8bit ? 8 : 16, (unsigned long long)h);
+        }
+    }
+}
+
+int main(int argc, char **argv)
+{
+    if (argc > 1 && strcmp(argv[1], "--streams") == 0) {
+        print_streams();
+        return 0;
+    }
     test_tone();
     test_tone_guard();
     test_prbs();
     test_sc8();
     test_clamp();
+    test_qam();
     if (failures) {
         printf("test_m2sdr_gen: %d FAILED\n", failures);
         return 1;
