@@ -8,25 +8,28 @@
  * an_core.c          Analysis of a capture, reports (text, JSON), --report and --watch.
  * an_gui.c           Window: worker, traces, waterfall, controls, views of the spectrum, tabs.
  * an_trend.c         What the OFDM views share: MER and traces over the results of a tuning.
- * mode_*.c           One mode each: options, help, analysis, report sections, view, figures.
- * mode_*.mk          Its report test, a target of test-analyzer (optional).
+ * mode_*.c           One mode each: its settings, result and view state, options, help,
+ *                    analysis, report sections, view, figures.
+ * mode_*.mk          Its report test, a target of test-analyzer.
  *
  * Adding a mode
  * -------------
- * 1. analyzer/mode_xxx.c, everything of the mode: its hooks, static, and its entry
- *    `const struct an_mode an_mode_xxx` (--view key, tab title, category, flag, result flag,
- *    report rank, options and their parser, defaults, help block...): see mode_dab.c. A mode
- *    that --watch follows has a watch_line hook and an option named as its key (--dab). A mode
- *    of RX1 and RX2 together sets .two_channels and .analyse_two: see mode_coherence.c.
- * 2. analyzer/modes.h: one line, AN_MODE(xxx), at its place in the tabs.
- * 3. Here: its flag and settings in struct an_settings, its result and result flag in
- *    struct an_result, and the state of its view in struct an_ui if it keeps one.
- * 4. Optional: analyzer/mode_xxx.mk with its test-analyzer-xxx target (see mode_lte.mk), and its
- *    line in the docs (the manual, the README of the utilities, the changelog).
- * Nothing else: the Makefile builds analyzer/mode_*.c, main takes its options, the help prints
- * its block, the core captures what it needs, analyses while it is on, prints its sections in
- * the reports after the ones of the spectrum, and shows its tab in its category, the mode on
- * while its view is shown.
+ * 1. analyzer/mode_xxx.c, everything of the mode: its settings (struct xxx_set, read with
+ *    SET()) and its result (struct xxx_res, read with RES()), each a block of its own in
+ *    struct an_settings and struct an_result; the state of its view, static; its hooks, static;
+ *    and its entry `const struct an_mode an_mode_xxx` (--view key, tab title, category,
+ *    settings_size and on flag, result_size, valid and found flags, report rank, options and
+ *    their parser, defaults, help block...): see mode_dab.c. A mode that --watch follows has a
+ *    watch_line hook and an option named as its key (--dab). A mode of RX1 and RX2 together
+ *    sets .two_channels and .analyse_two: see mode_coherence.c.
+ * 2. analyzer/mode_xxx.mk: its test-analyzer-xxx target (see mode_lte.mk).
+ * 3. analyzer/modes.h: one line, AN_MODE(xxx), at its place in the tabs.
+ * 4. Its lines in the manual (doc/manual/13_software.md) and the changelog.
+ * Nothing else, here or in the Makefile: the Makefile builds analyzer/mode_*.c, main takes its
+ * options, the help prints its block, the core places its settings and its result, captures
+ * what it needs, analyses while it is on, prints its sections in the reports after the ones of
+ * the spectrum, and shows its tab in its category, the mode on while its view is shown. Only
+ * the lab modes share settings here: their stimulus, struct an_lab_settings.
  *
  * This file is part of LiteX-M2SDR.
  *
