@@ -374,6 +374,7 @@ const struct an_mode an_mode_gnss = {
     .valid        = offsetof(struct an_result, gnss_valid),
     .report_rank  = 71,
     .default_rate = GNSS_RATE,
+    .default_freq = 1575.42e6,
     .options      = gnss_options,
     .option       = gnss_option,
     .help         = gnss_help,
