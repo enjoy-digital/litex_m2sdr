@@ -24,6 +24,28 @@
 #define FM_BS412_WINDOW_S 60.0      /* BS.412 integrates the MPX power over 60 s. */
 #define FM_HISTORY        512       /* Results kept for the 60 s mean and the trend. */
 
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_fm;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct fm_set {
+    bool   fm_on;                  /* FM broadcast station. */
+    double fm_tone_hz;             /* Its known test tone (stereo separation); 0: none. */
+    int    fm_deemph_us;           /* De-emphasis of its audio SNR: 0: 50 us, -1: none. */
+};
+
+#define SET(set) ((struct fm_set *)an_mode_settings(&an_mode_fm, (set)))
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct fm_res {
+    bool   fm_valid;               /* Measured: the sample rate was 240 kSPS or more; fm.found says the rest. */
+    struct m2sdr_fm_result fm;
+};
+
+#define RES(res) ((struct fm_res *)an_mode_result(&an_mode_fm, (res)))
+
 /* Analysis */
 /*----------*/
 
@@ -52,10 +74,11 @@ static void fm_analyse(const float complex *x, size_t count, const struct an_set
         fm_rds_channel = set->channel;
     }
     memset(&cfg, 0, sizeof(cfg));
-    cfg.tau     = set->fm_deemph_us < 0 ? 0.0 : (set->fm_deemph_us == 0 ? 50 : set->fm_deemph_us) * 1e-6;
-    cfg.tone_hz = set->fm_tone_hz;
+    cfg.tau     = SET(set)->fm_deemph_us < 0 ? 0.0 : (SET(set)->fm_deemph_us == 0 ? 50 : SET(set)->fm_deemph_us) * 1e-6;
+    cfg.tone_hz = SET(set)->fm_tone_hz;
     cfg.rds     = fm_rds;
-    res->fm_valid = m2sdr_fm_analyse(x, count < n ? count : n, set->sample_rate, &cfg, &res->fm) == 0;
+
+    RES(res)->fm_valid = m2sdr_fm_analyse(x, count < n ? count : n, set->sample_rate, &cfg, &RES(res)->fm) == 0;
 }
 
 /* Running mean of the MPX power over the last 60 s (BS.412), from the mean square of each
@@ -128,11 +151,11 @@ static void fm_json_string(const char *name, const char *s, bool last)
 static void fm_report_text(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_fm_result *f = &res->fm;
+    const struct m2sdr_fm_result *f = &RES(res)->fm;
     const struct m2sdr_fm_rds_info *r = &f->rds_info;
 
     printf("\nFM:\n");
-    if (!res->fm_valid) {
+    if (!RES(res)->fm_valid) {
         printf("  The sample rate must be 240 kSPS or more, with at least 50 ms of samples.\n");
         return;
     }
@@ -154,7 +177,7 @@ static void fm_report_text(const struct an_result *res, const struct an_report *
     printf("  Audio      : L+R %.1f kHz RMS, L-R %.1f kHz RMS (%+.1f dB), mono SNR %.1f dB\n", f->mono_rms_hz / 1e3,
            f->stereo_rms_hz / 1e3, f->stereo_ratio_db, f->audio_snr_db);
     if (f->tone)
-        printf("  Test tone  : %.0f Hz: left %.2f kHz, right %.2f kHz, separation %.1f dB\n", set->fm_tone_hz,
+        printf("  Test tone  : %.0f Hz: left %.2f kHz, right %.2f kHz, separation %.1f dB\n", SET(set)->fm_tone_hz,
                f->tone_left_hz / 1e3, f->tone_right_hz / 1e3, f->separation_db);
     if (f->rds || r->pi_valid) {
         printf("  RDS        : %.2f kHz deviation, %llu blocks, %llu errors (BLER %.2f %%), %llu groups, MER %.1f dB\n",
@@ -182,12 +205,12 @@ static void fm_report_text(const struct an_result *res, const struct an_report *
 static void fm_report_json(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_fm_result *f = &res->fm;
+    const struct m2sdr_fm_result *f = &RES(res)->fm;
     const struct m2sdr_fm_rds_info *r = &f->rds_info;
-    const bool ok = res->fm_valid && f->found;
+    const bool ok = RES(res)->fm_valid && f->found;
 
     printf("  \"fm\": {\n");
-    print_json_number("cnr_db", res->fm_valid ? f->cnr_db : 0.0, false);
+    print_json_number("cnr_db", RES(res)->fm_valid ? f->cnr_db : 0.0, false);
     printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
     if (ok) {
         char pi[8];
@@ -244,12 +267,12 @@ static struct fm_bs412 fm_watch_bs412;
 
 static int fm_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_fm_result *f = &res->fm;
+    const struct m2sdr_fm_result *f = &RES(res)->fm;
     const struct m2sdr_fm_rds_info *r = &f->rds_info;
-    const bool ok = res->fm_valid && f->found;
+    const bool ok = RES(res)->fm_valid && f->found;
     double mean = 0.0;
 
-    if (!res->fm_valid) {
+    if (!RES(res)->fm_valid) {
         fprintf(stderr, "The sample rate is below 240 kSPS: no FM analysis.\n");
         return -1;
     }
@@ -316,19 +339,19 @@ static int fm_option(int id, const char *arg, struct an_cli *cli)
 
     switch (id) {
     case FM_OPT_FM:
-        set->fm_on = true;
+        SET(set)->fm_on = true;
         break;
     case FM_OPT_TONE:
-        if (m2sdr_cli_parse_double(arg, &set->fm_tone_hz) != 0 || !(set->fm_tone_hz > 0.0 && set->fm_tone_hz < 15000.0)) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->fm_tone_hz) != 0 || !(SET(set)->fm_tone_hz > 0.0 && SET(set)->fm_tone_hz < 15000.0)) {
             m2sdr_cli_error("invalid FM test tone '%s' (expected 0 to 15000 Hz)", arg);
             return -1;
         }
         break;
     case FM_OPT_DEEMPH:
         if (strcmp(arg, "50") == 0 || strcmp(arg, "75") == 0) {
-            set->fm_deemph_us = arg[0] == '5' ? 50 : 75;
+            SET(set)->fm_deemph_us = arg[0] == '5' ? 50 : 75;
         } else if (strcmp(arg, "0") == 0) {
-            set->fm_deemph_us = -1;
+            SET(set)->fm_deemph_us = -1;
         } else {
             m2sdr_cli_invalid_choice("fm-deemph", arg, "50, 75 or 0");
             return -1;
@@ -357,6 +380,11 @@ static void fm_help(void)
 /* View */
 /*------*/
 
+/* State of the view, from a frame to the next (one window). */
+static struct {
+    struct an_fm_ui *fm;           /* Allocated with the first frame. */
+} fm_ui;
+
 #define FM_COL_MPX     0xff40c0ffu
 #define FM_COL_MEAN    0xffffb040u
 #define FM_COL_LIMIT   0xa04040ffu
@@ -375,19 +403,19 @@ struct an_fm_ui {
 static void fm_keep(struct an_ui *ui)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_fm_result *f = &res->fm;
+    const struct m2sdr_fm_result *f = &RES(res)->fm;
     struct an_fm_ui *v;
     int i;
 
-    if (!res->set.fm_on || !res->fm_valid)
+    if (!SET(&res->set)->fm_on || !RES(res)->fm_valid)
         return;
-    if (!ui->fm) {
-        ui->fm = calloc(1, sizeof(*ui->fm));
-        if (!ui->fm)
+    if (!fm_ui.fm) {
+        fm_ui.fm = calloc(1, sizeof(*fm_ui.fm));
+        if (!fm_ui.fm)
             return;
-        ui->fm->start_ms = now_ms();
+        fm_ui.fm->start_ms = now_ms();
     }
-    v = ui->fm;
+    v = fm_ui.fm;
     if (res->set.freq_hz != v->freq_hz || res->set.sample_rate != v->rate || res->set.channel != v->channel) {
         memset(&v->bs412, 0, sizeof(v->bs412));
         v->freq_hz = res->set.freq_hz;
@@ -414,8 +442,8 @@ static void fm_keep(struct an_ui *ui)
 
 static void fm_close(struct an_ui *ui)
 {
-    free(ui->fm);
-    ui->fm = NULL;
+    free(fm_ui.fm);
+    fm_ui.fm = NULL;
 }
 
 /* Station: frequency in MHz, steps of 100 and 50 kHz, and the centre on the carrier. */
@@ -523,20 +551,20 @@ static void fm_draw_power(const struct an_fm_ui *v, ImVec2 size)
 static void draw_fm(struct an_ui *ui, bool live, bool *changed)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_fm_result *f = &res->fm;
+    const struct m2sdr_fm_result *f = &RES(res)->fm;
     const struct m2sdr_fm_rds_info *r = &f->rds_info;
-    const struct an_fm_ui *v = ui->fm;
-    const bool ok = res->fm_valid && f->found;
+    const struct an_fm_ui *v = fm_ui.fm;
+    const bool ok = RES(res)->fm_valid && f->found;
     ImVec2 avail, sq;
     float side, w;
 
     if (live)
         fm_station(ui, f, ok, changed);
-    if (!res->set.fm_on) {
+    if (!SET(&res->set)->fm_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->fm_valid) {
+    if (!RES(res)->fm_valid) {
         igTextUnformatted("The sample rate must be 240 kSPS or more (0.96 MSPS).", NULL);
         return;
     }
@@ -593,12 +621,12 @@ static void draw_fm(struct an_ui *ui, bool live, bool *changed)
 static void draw_fm_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_fm_result *f = &res->fm;
+    const struct m2sdr_fm_result *f = &RES(res)->fm;
     const struct m2sdr_fm_rds_info *r = &f->rds_info;
-    const struct an_fm_ui *v = ui->fm;
+    const struct an_fm_ui *v = fm_ui.fm;
 
     igSeparatorText("FM");
-    if (!res->fm_valid || !f->found) {
+    if (!RES(res)->fm_valid || !f->found) {
         igTextUnformatted("No station.", NULL);
         return;
     }
@@ -642,27 +670,29 @@ static void draw_fm_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_fm = {
-    .key          = "fm",
-    .title        = "FM",
-    .category     = AN_CAT_BROADCAST,
-    .on           = offsetof(struct an_settings, fm_on),
-    .valid        = offsetof(struct an_result, fm_valid),
-    .found        = offsetof(struct an_result, fm.found),
-    .report_rank  = 40,
-    .default_rate = FM_DEFAULT_RATE,
-    .psd_short    = true,
-    .samples      = fm_samples,
-    .analyse      = fm_analyse,
-    .report_text  = fm_report_text,
-    .report_json  = fm_report_json,
-    .watch_line   = fm_watch_line,
-    .options      = fm_options,
-    .option       = fm_option,
-    .help         = fm_help,
+    .key           = "fm",
+    .title         = "FM",
+    .category      = AN_CAT_BROADCAST,
+    .settings_size = sizeof(struct fm_set),
+    .on            = offsetof(struct fm_set, fm_on),
+    .result_size   = sizeof(struct fm_res),
+    .valid         = offsetof(struct fm_res, fm_valid),
+    .found         = offsetof(struct fm_res, fm.found),
+    .report_rank   = 40,
+    .default_rate  = FM_DEFAULT_RATE,
+    .psd_short     = true,
+    .samples       = fm_samples,
+    .analyse       = fm_analyse,
+    .report_text   = fm_report_text,
+    .report_json   = fm_report_json,
+    .watch_line    = fm_watch_line,
+    .options       = fm_options,
+    .option        = fm_option,
+    .help          = fm_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_fm,
-    .results      = draw_fm_results,
-    .keep         = fm_keep,
-    .close        = fm_close,
+    .draw          = draw_fm,
+    .results       = draw_fm_results,
+    .keep          = fm_keep,
+    .close         = fm_close,
 #endif
 };

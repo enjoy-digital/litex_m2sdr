@@ -23,12 +23,33 @@
 
 #define GNSS_RATE 2048000.0
 
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_gnss;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct gnss_set {
+    bool   gnss_on;
+    int    gnss_ms;                /* Milliseconds integrated; 0: AN_GNSS_DEFAULT_MS. */
+};
+
+#define SET(set) ((struct gnss_set *)an_mode_settings(&an_mode_gnss, (set)))
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct gnss_res {
+    bool   gnss_valid;             /* Measured: the sample rate was 2.048 or 4.096 MSPS. */
+    struct m2sdr_gnss_result gnss;
+};
+
+#define RES(res) ((struct gnss_res *)an_mode_result(&an_mode_gnss, (res)))
+
 /* Analysis */
 /*----------*/
 
 static int gnss_ms(const struct an_settings *set)
 {
-    return set->gnss_ms > 0 ? set->gnss_ms : AN_GNSS_DEFAULT_MS;
+    return SET(set)->gnss_ms > 0 ? SET(set)->gnss_ms : AN_GNSS_DEFAULT_MS;
 }
 
 static size_t gnss_samples(const struct an_settings *set)
@@ -42,7 +63,7 @@ static void gnss_analyse(const float complex *x, size_t count, const struct an_s
 
     memset(&cfg, 0, sizeof(cfg));
     cfg.ms = gnss_ms(set);
-    res->gnss_valid = m2sdr_gnss_analyse(x, count, set->sample_rate, &cfg, &res->gnss) == 0;
+    RES(res)->gnss_valid = m2sdr_gnss_analyse(x, count, set->sample_rate, &cfg, &RES(res)->gnss) == 0;
 }
 
 /* Reports */
@@ -50,12 +71,12 @@ static void gnss_analyse(const float complex *x, size_t count, const struct an_s
 
 static void gnss_report_text(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_gnss_result *g = &res->gnss;
+    const struct m2sdr_gnss_result *g = &RES(res)->gnss;
     const struct m2sdr_gnss_jamming *j = &g->jamming;
     int i;
 
     printf("\nGPS L1 C/A:\n");
-    if (!res->gnss_valid) {
+    if (!RES(res)->gnss_valid) {
         printf("  The sample rate must be 2.048 or 4.096 MSPS, with %d ms of samples.\n", gnss_ms(&res->set));
         return;
     }
@@ -84,13 +105,13 @@ static void gnss_report_text(const struct an_result *res, const struct an_report
 
 static void gnss_report_json(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_gnss_result *g = &res->gnss;
+    const struct m2sdr_gnss_result *g = &RES(res)->gnss;
     const struct m2sdr_gnss_jamming *j = &g->jamming;
     int i, n = 0;
 
     printf("  \"gnss\": {\n");
-    printf("    \"valid\": %s%s\n", res->gnss_valid ? "true" : "false", res->gnss_valid ? "," : "");
-    if (!res->gnss_valid) {
+    printf("    \"valid\": %s%s\n", RES(res)->gnss_valid ? "true" : "false", RES(res)->gnss_valid ? "," : "");
+    if (!RES(res)->gnss_valid) {
         printf("  }");
         return;
     }
@@ -122,12 +143,12 @@ static unsigned gnss_watch_lines;
 
 static int gnss_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_gnss_result *g = &res->gnss;
+    const struct m2sdr_gnss_result *g = &RES(res)->gnss;
     const struct m2sdr_gnss_jamming *j = &g->jamming;
     const struct m2sdr_gnss_prn *best = g->best >= 0 ? &g->prn[g->best] : NULL;
     int i, n = 0;
 
-    if (!res->gnss_valid) {
+    if (!RES(res)->gnss_valid) {
         fprintf(stderr, "The sample rate is not one of GPS L1 C/A here (2.048 or 4.096 MSPS).\n");
         return -1;
     }
@@ -173,10 +194,10 @@ static int gnss_option(int id, const char *arg, struct an_cli *cli)
 {
     switch (id) {
     case 0:
-        cli->set->gnss_on = true;
+        SET(cli->set)->gnss_on = true;
         return 0;
     case 1:
-        if (m2sdr_cli_parse_int_range(arg, 1, 100, &cli->set->gnss_ms) != 0) {
+        if (m2sdr_cli_parse_int_range(arg, 1, 100, &SET(cli->set)->gnss_ms) != 0) {
             m2sdr_cli_error("invalid GNSS integration '%s' (expected 1 to 100 ms)", arg);
             return -1;
         }
@@ -204,7 +225,7 @@ static void gnss_help(void)
 static void draw_gnss(struct an_ui *ui, bool live, bool *changed)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_gnss_result *g = &res->gnss;
+    const struct m2sdr_gnss_result *g = &RES(res)->gnss;
     const struct m2sdr_gnss_jamming *j = &g->jamming;
     static float spec[M2SDR_GNSS_SPECTRUM];
     struct m2sdr_plot plot;
@@ -229,17 +250,17 @@ static void draw_gnss(struct an_ui *ui, bool live, bool *changed)
 
         igSetNextItemWidth(100.0f);
         if (igInputInt("ms integrated", &ms, 5, 10, 0)) {
-            ui->set.gnss_ms = ms < 1 ? 1 : ms > 100 ? 100 : ms;
+            SET(&ui->set)->gnss_ms = ms < 1 ? 1 : ms > 100 ? 100 : ms;
             *changed = true;
         }
     }
     igSameLine(0.0f, 16.0f);
     igTextDisabled("An active antenna needs a bias-T: the M2SDR has none.");
-    if (!res->set.gnss_on) {
+    if (!SET(&res->set)->gnss_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->gnss_valid) {
+    if (!RES(res)->gnss_valid) {
         igTextUnformatted("The sample rate must be 2.048 or 4.096 MSPS.", NULL);
         return;
     }
@@ -338,11 +359,11 @@ static void draw_gnss(struct an_ui *ui, bool live, bool *changed)
 static void draw_gnss_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_gnss_result *g = &res->gnss;
+    const struct m2sdr_gnss_result *g = &RES(res)->gnss;
     const struct m2sdr_gnss_jamming *j = &g->jamming;
 
     igSeparatorText("GPS L1 C/A");
-    if (!res->gnss_valid) {
+    if (!RES(res)->gnss_valid) {
         igTextUnformatted("Not measured.", NULL);
         return;
     }
@@ -367,25 +388,27 @@ static void draw_gnss_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_gnss = {
-    .key          = "gnss",
-    .title        = "GPS L1",
-    .category     = AN_CAT_TIMING,
-    .on           = offsetof(struct an_settings, gnss_on),
-    .valid        = offsetof(struct an_result, gnss_valid),
-    .found        = offsetof(struct an_result, gnss.found),
-    .report_rank  = 71,
-    .default_rate = GNSS_RATE,
-    .default_freq = 1575.42e6,
-    .options      = gnss_options,
-    .option       = gnss_option,
-    .help         = gnss_help,
-    .samples      = gnss_samples,
-    .analyse      = gnss_analyse,
-    .report_text  = gnss_report_text,
-    .report_json  = gnss_report_json,
-    .watch_line   = gnss_watch_line,
+    .key           = "gnss",
+    .title         = "GPS L1",
+    .category      = AN_CAT_TIMING,
+    .settings_size = sizeof(struct gnss_set),
+    .on            = offsetof(struct gnss_set, gnss_on),
+    .result_size   = sizeof(struct gnss_res),
+    .valid         = offsetof(struct gnss_res, gnss_valid),
+    .found         = offsetof(struct gnss_res, gnss.found),
+    .report_rank   = 71,
+    .default_rate  = GNSS_RATE,
+    .default_freq  = 1575.42e6,
+    .options       = gnss_options,
+    .option        = gnss_option,
+    .help          = gnss_help,
+    .samples       = gnss_samples,
+    .analyse       = gnss_analyse,
+    .report_text   = gnss_report_text,
+    .report_json   = gnss_report_json,
+    .watch_line    = gnss_watch_line,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_gnss,
-    .results      = draw_gnss_results,
+    .draw          = draw_gnss,
+    .results       = draw_gnss_results,
 #endif
 };

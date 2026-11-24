@@ -21,6 +21,26 @@
 
 #include "analyzer.h"
 
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_mimo;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct mimo_set {
+    bool   mimo_on;                /* 2x2 channel of an LTE cell. */
+};
+
+#define SET(set) ((struct mimo_set *)an_mode_settings(&an_mode_mimo, (set)))
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct mimo_res {
+    bool   mimo_valid;
+    struct m2sdr_mimo_result mimo;
+};
+
+#define RES(res) ((struct mimo_res *)an_mode_result(&an_mode_mimo, (res)))
+
 /* Command line */
 /*--------------*/
 
@@ -33,7 +53,7 @@ static int mimo_option(int id, const char *arg, struct an_cli *cli)
 {
     (void)id;
     (void)arg;
-    cli->set->mimo_on = true;
+    SET(cli->set)->mimo_on = true;
     return 0;
 }
 
@@ -60,7 +80,7 @@ static void mimo_analyse(const float complex *x1, const float complex *x2, size_
 {
     const size_t n = (size_t)(AN_LTE_SECONDS * set->sample_rate);
 
-    res->mimo_valid = m2sdr_mimo_analyse(x1, x2, count < n ? count : n, set->sample_rate, &res->mimo) == 0;
+    RES(res)->mimo_valid = m2sdr_mimo_analyse(x1, x2, count < n ? count : n, set->sample_rate, &RES(res)->mimo) == 0;
 }
 
 /* Reports */
@@ -68,13 +88,13 @@ static void mimo_analyse(const float complex *x1, const float complex *x2, size_
 
 static void mimo_report_text(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_mimo_result *m = &res->mimo;
+    const struct m2sdr_mimo_result *m = &RES(res)->mimo;
     int r, p;
 
     printf("\nLTE 2x2 channel (RX1, RX2):\n");
     if (!res->two_channels) {
         printf("  Needs both channels: a board, or a file of two channels.\n");
-    } else if (!res->mimo_valid) {
+    } else if (!RES(res)->mimo_valid) {
         printf("  The sample rate must be 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS, with at least 25 ms of samples.\n");
     } else if (!m->found) {
         printf("  No cell found on RX1 nor on RX2.\n");
@@ -104,8 +124,8 @@ static void mimo_report_text(const struct an_result *res, const struct an_report
 
 static void mimo_report_json(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_mimo_result *m = &res->mimo;
-    const bool ok = res->two_channels && res->mimo_valid && m->found;
+    const struct m2sdr_mimo_result *m = &RES(res)->mimo;
+    const bool ok = res->two_channels && RES(res)->mimo_valid && m->found;
     int b;
 
     printf("  \"mimo\": {\n");
@@ -150,11 +170,11 @@ static unsigned mimo_watch_lines;
 
 static int mimo_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_mimo_result *m = &res->mimo;
-    const bool ok = res->two_channels && res->mimo_valid && m->found && m->mimo;
+    const struct m2sdr_mimo_result *m = &RES(res)->mimo;
+    const bool ok = res->two_channels && RES(res)->mimo_valid && m->found && m->mimo;
 
     (void)set;
-    if (!res->mimo_valid) {
+    if (!RES(res)->mimo_valid) {
         fprintf(stderr, "The sample rate is not one of LTE (1.92 to 30.72 MSPS).\n");
         return -1;
     }
@@ -172,7 +192,7 @@ static int mimo_watch_line(const struct an_settings *set, const struct an_result
         if (ok)
             printf("%8.2f %5d %6.1f %6.1f %4d %6.1f %7.1f %7.1f %7.1f %7.1f\n", now, m->cell_id, m->cond_db, m->cond_max_db,
                    m->rank, m->snr_db, m->path_db[0][0], m->path_db[0][1], m->path_db[1][0], m->path_db[1][1]);
-        else if (res->mimo_valid && m->found)
+        else if (RES(res)->mimo_valid && m->found)
             printf("%8.2f %5d  one antenna port: no 2x2 channel\n", now, m->cell_id);
         else
             printf("%8.2f  no cell\n", now);
@@ -272,7 +292,7 @@ static void draw_mimo(struct an_ui *ui, bool live, bool *changed)
 {
     static const double rates[5] = { 1.92e6, 3.84e6, 7.68e6, 15.36e6, 30.72e6 };
     const struct an_result *res = &ui->res;
-    const struct m2sdr_mimo_result *m = &res->mimo;
+    const struct m2sdr_mimo_result *m = &RES(res)->mimo;
     ImVec2 avail, half;
     double top = -200.0, bottom = 0.0;
     char text[64];
@@ -293,7 +313,7 @@ static void draw_mimo(struct an_ui *ui, bool live, bool *changed)
         }
     }
     igTextDisabled("The cell search of LTE takes about 0.2 s a capture: a few results a second.");
-    if (!res->set.mimo_on) {
+    if (!SET(&res->set)->mimo_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -301,7 +321,7 @@ static void draw_mimo(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Needs both channels: a board, or a file of two channels.", NULL);
         return;
     }
-    if (!res->mimo_valid) {
+    if (!RES(res)->mimo_valid) {
         igTextUnformatted("The sample rate must be 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS.", NULL);
         return;
     }
@@ -349,10 +369,10 @@ static void draw_mimo(struct an_ui *ui, bool live, bool *changed)
 static void draw_mimo_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_mimo_result *m = &res->mimo;
+    const struct m2sdr_mimo_result *m = &RES(res)->mimo;
 
     igSeparatorText("LTE 2x2");
-    if (!res->two_channels || !res->mimo_valid || !m->found) {
+    if (!res->two_channels || !RES(res)->mimo_valid || !m->found) {
         igTextUnformatted("No cell.", NULL);
         return;
     }
@@ -378,26 +398,28 @@ static void draw_mimo_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_mimo = {
-    .key          = "mimo",
-    .title        = "LTE 2x2",
-    .category     = AN_CAT_TWO_CHANNEL,
-    .on           = offsetof(struct an_settings, mimo_on),
-    .valid        = offsetof(struct an_result, mimo_valid),
-    .found        = offsetof(struct an_result, mimo.found),
-    .report_rank  = 72,
-    .default_rate = 7680000.0,
-    .psd_short    = true,
-    .samples      = mimo_samples,
-    .two_channels = true,
-    .analyse_two  = mimo_analyse,
-    .report_text  = mimo_report_text,
-    .report_json  = mimo_report_json,
-    .watch_line   = mimo_watch_line,
-    .options      = mimo_options,
-    .option       = mimo_option,
-    .help         = mimo_help,
+    .key           = "mimo",
+    .title         = "LTE 2x2",
+    .category      = AN_CAT_TWO_CHANNEL,
+    .settings_size = sizeof(struct mimo_set),
+    .on            = offsetof(struct mimo_set, mimo_on),
+    .result_size   = sizeof(struct mimo_res),
+    .valid         = offsetof(struct mimo_res, mimo_valid),
+    .found         = offsetof(struct mimo_res, mimo.found),
+    .report_rank   = 72,
+    .default_rate  = 7680000.0,
+    .psd_short     = true,
+    .samples       = mimo_samples,
+    .two_channels  = true,
+    .analyse_two   = mimo_analyse,
+    .report_text   = mimo_report_text,
+    .report_json   = mimo_report_json,
+    .watch_line    = mimo_watch_line,
+    .options       = mimo_options,
+    .option        = mimo_option,
+    .help          = mimo_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_mimo,
-    .results      = draw_mimo_results,
+    .draw          = draw_mimo,
+    .results       = draw_mimo_results,
 #endif
 };

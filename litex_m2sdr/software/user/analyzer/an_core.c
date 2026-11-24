@@ -18,7 +18,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <time.h>
 
 #include "m2sdr_cal.h"
@@ -29,6 +28,129 @@
 /*----------*/
 
 const char *const window_names[] = { "Hann", "Flat-top", "Blackman-Harris", "Rectangular" };
+
+/* Results */
+/*---------*/
+
+static void *empty_result;         /* Zeroed, of the largest result_size: the result of a mode not measured. */
+static size_t settings_at[AN_MODES_MAX];   /* Place of the settings of each mode in an_settings.modes. */
+
+int an_registry_init(void)
+{
+    size_t size = 1, at = 0;
+    int m;
+
+    for (m = 0; an_modes[m]; m++) {
+        if (m >= AN_MODES_MAX) {
+            fprintf(stderr, "More than %d views and modes in analyzer/modes.h.\n", AN_MODES_MAX);
+            return -1;
+        }
+        if ((an_modes[m]->analyse || an_modes[m]->analyse_two) && !an_modes[m]->result_size) {
+            fprintf(stderr, "The mode %s analyses without a result_size.\n", an_modes[m]->key);
+            return -1;
+        }
+        if (an_modes[m]->result_size && an_modes[m]->valid != 0) {
+            /* A found flag at 0 would read as none. */
+            fprintf(stderr, "The result of the mode %s does not start with its valid flag.\n", an_modes[m]->key);
+            return -1;
+        }
+        if (an_modes[m]->on != AN_NONE && !an_modes[m]->settings_size) {
+            fprintf(stderr, "The mode %s has a flag without a settings_size.\n", an_modes[m]->key);
+            return -1;
+        }
+        if (an_modes[m]->result_size > size)
+            size = an_modes[m]->result_size;
+        /* The settings, one block after the other, each aligned as a struct may need. */
+        settings_at[m] = at;
+        at += (an_modes[m]->settings_size + 15) & ~(size_t)15;
+        if (at > AN_SETTINGS_MODES) {
+            fprintf(stderr, "The settings of the modes take more than %d bytes (AN_SETTINGS_MODES).\n", AN_SETTINGS_MODES);
+            return -1;
+        }
+    }
+    empty_result = calloc(1, size);
+    if (!empty_result) {
+        fprintf(stderr, "Out of memory\n");
+        return -1;
+    }
+    return 0;
+}
+
+int an_mode_index(const struct an_mode *m)
+{
+    int i;
+
+    for (i = 0; an_modes[i]; i++) {
+        if (an_modes[i] == m)
+            return i;
+    }
+    return -1;
+}
+
+void *an_mode_result(const struct an_mode *m, const struct an_result *res)
+{
+    const int i = an_mode_index(m);
+
+    return i >= 0 && res->mode[i] ? res->mode[i] : empty_result;
+}
+
+void *an_mode_settings(const struct an_mode *m, const struct an_settings *set)
+{
+    const int i = an_mode_index(m);
+
+    return (char *)set->modes + (i >= 0 ? settings_at[i] : 0);
+}
+
+bool an_mode_result_flag(const struct an_mode *m, const struct an_result *res, size_t off)
+{
+    return *(const bool *)((const char *)an_mode_result(m, res) + off);
+}
+
+int an_result_copy(struct an_result *dst, const struct an_result *src)
+{
+    float *power = dst->psd.power;
+    void *mode[AN_MODES_MAX];
+    int m;
+
+    /* The blocks of the modes of src, before anything of dst changes. */
+    for (m = 0; an_modes[m]; m++) {
+        if (src->mode[m] && !dst->mode[m] && !(dst->mode[m] = calloc(1, an_modes[m]->result_size)))
+            return -1;
+    }
+    if (dst->psd.bins != src->psd.bins) {
+        power = realloc(power, src->psd.bins * sizeof(*power));
+        if (!power)
+            return -1;
+    }
+    memcpy(mode, dst->mode, sizeof(mode));
+    *dst = *src;
+    dst->psd.power = power;
+    dst->psd.fft   = NULL;
+    dst->psd.win   = NULL;
+    dst->psd.work  = NULL;
+    memset(&dst->tone_psd, 0, sizeof(dst->tone_psd));
+    memcpy(power, src->psd.power, src->psd.bins * sizeof(*power));
+    for (m = 0; an_modes[m]; m++) {
+        dst->mode[m] = src->mode[m] ? mode[m] : NULL;
+        if (src->mode[m])
+            memcpy(mode[m], src->mode[m], an_modes[m]->result_size);
+        else
+            free(mode[m]);
+    }
+    return 0;
+}
+
+void an_result_free(struct an_result *res)
+{
+    int m;
+
+    m2sdr_psd_free(&res->psd);
+    m2sdr_psd_free(&res->tone_psd);
+    for (m = 0; m < AN_MODES_MAX; m++) {
+        free(res->mode[m]);
+        res->mode[m] = NULL;
+    }
+}
 
 /* Analysis */
 /*----------*/
@@ -142,9 +264,15 @@ int analyse_two(const float complex *x, const float complex *x2, size_t count, c
 
         if (!mode->analyse && !mode->analyse_two)
             continue;
-        *(bool *)((char *)res + mode->valid) = false;
-        if (!an_mode_on(mode, set))
+        /* Its block while it is on, kept from a capture to the next; none while it is off. */
+        if (!an_mode_on(mode, set)) {
+            free(res->mode[m]);
+            res->mode[m] = NULL;
             continue;
+        }
+        if (!res->mode[m] && !(res->mode[m] = calloc(1, mode->result_size)))
+            return -1;
+        *(bool *)((char *)res->mode[m] + mode->valid) = false;
         if (mode->analyse)
             mode->analyse(x, count, set, res);
         /* RX1 and RX2, whichever the spectrum shows. */
@@ -195,34 +323,6 @@ int floor_load(struct an_floor *fl, const char *path)
     fclose(f);
     snprintf(fl->path, sizeof(fl->path), "%.1023s", path);
     return fl->points >= 2 ? 0 : -1;
-}
-
-int floor_save(struct an_floor *fl, const char *path, const struct an_result *res)
-{
-    char dir[1024], *p;
-    FILE *f;
-    int i;
-
-    /* Directories of the path. */
-    if (snprintf(dir, sizeof(dir), "%s", path) < (int)sizeof(dir)) {
-        for (p = dir + 1; *p; p++) {
-            if (*p == '/') {
-                *p = '\0';
-                (void)mkdir(dir, 0755);
-                *p = '/';
-            }
-        }
-    }
-    f = fopen(path, "w");
-    if (!f)
-        return -1;
-    fprintf(f, "# M2SDR phase noise floor: offset_hz,l_dbc_hz\n");
-    fprintf(f, "# freq_hz=%.0f sample_rate=%.0f\n", res->set.freq_hz + res->pn.carrier_hz, res->set.sample_rate);
-    for (i = 0; i < res->pn.points; i++)
-        fprintf(f, "%.3f,%.3f\n", res->pn.offset_hz[i], res->pn.l_dbc_hz[i]);
-    if (fclose(f) != 0)
-        return -1;
-    return floor_load(fl, path);
 }
 
 /* Report */
@@ -451,11 +551,12 @@ int run_report(struct an_source *src, const struct an_settings *set, bool json, 
             goto out;
     }
     if (floor_save_path) {
-        if (!res->pn_valid) {
+        rc = floor_save(fl, floor_save_path, res);
+        if (rc == -2) {
             fprintf(stderr, "No carrier: no floor stored.\n");
             goto out;
         }
-        if (floor_save(fl, floor_save_path, res) != 0) {
+        if (rc != 0) {
             fprintf(stderr, "Could not write %s: %s\n", floor_save_path, strerror(errno));
             goto out;
         }
@@ -468,10 +569,8 @@ int run_report(struct an_source *src, const struct an_settings *set, bool json, 
     status = 0;
 
 out:
-    if (res) {
-        m2sdr_psd_free(&res->psd);
-        m2sdr_psd_free(&res->tone_psd);
-    }
+    if (res)
+        an_result_free(res);
     free(res);
     free(x);
     free(x2);
@@ -575,10 +674,8 @@ int run_watch(struct an_source *src, const struct an_settings *base, bool json)
     status = 0;
 
 out:
-    if (res) {
-        m2sdr_psd_free(&res->psd);
-        m2sdr_psd_free(&res->tone_psd);
-    }
+    if (res)
+        an_result_free(res);
     free(res);
     free(x);
     free(x2);

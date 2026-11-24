@@ -21,6 +21,29 @@
 
 #include "analyzer.h"
 
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_nr;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct nr_set {
+    bool   nr_on;
+    /* nr_scs_hz: spacing of the SSBs, 0 to find it; nr_scs_known: the one found on this
+     * tuning, set by the worker (0: none). */
+    double nr_scs_hz, nr_scs_known;
+};
+
+#define SET(set) ((struct nr_set *)an_mode_settings(&an_mode_nr, (set)))
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct nr_res {
+    bool   nr_valid;               /* Measured (rate and length right); nr.found says the rest. */
+    struct m2sdr_nr_result nr;
+};
+
+#define RES(res) ((struct nr_res *)an_mode_result(&an_mode_nr, (res)))
+
 /* Analysis */
 /*----------*/
 
@@ -43,30 +66,31 @@ static void nr_analyse(const float complex *x, size_t count, const struct an_set
     struct m2sdr_nr_config cfg;
 
     /* L_max (TS 38.213 4.1): 4 up to 3 GHz, 8 above (FR1). */
-    cfg.scs_hz    = set->nr_scs_hz > 0 ? set->nr_scs_hz : set->nr_scs_known;
+    cfg.scs_hz    = SET(set)->nr_scs_hz > 0 ? SET(set)->nr_scs_hz : SET(set)->nr_scs_known;
     cfg.search_hz = 0;
     cfg.lmax      = set->freq_hz <= 3e9 ? 4 : 8;
-    res->nr_valid = m2sdr_nr_analyse(x, count < n ? count : n, set->sample_rate, &cfg, &res->nr) == 0;
+
+    RES(res)->nr_valid = m2sdr_nr_analyse(x, count < n ? count : n, set->sample_rate, &cfg, &RES(res)->nr) == 0;
 }
 
 static void nr_track_prepare(struct an_settings *set)
 {
-    set->nr_scs_known = 0;
-    if (set->nr_on && nr_track.ok && set->freq_hz == nr_track.freq_hz && set->sample_rate == nr_track.rate &&
+    SET(set)->nr_scs_known = 0;
+    if (SET(set)->nr_on && nr_track.ok && set->freq_hz == nr_track.freq_hz && set->sample_rate == nr_track.rate &&
         set->channel == nr_track.channel)
-        set->nr_scs_known = nr_track.scs;
+        SET(set)->nr_scs_known = nr_track.scs;
 }
 
 static void nr_track_result(const struct an_settings *set, const struct an_result *res)
 {
-    if (!set->nr_on || !res->nr_valid)
+    if (!SET(set)->nr_on || !RES(res)->nr_valid)
         return;
-    nr_track.ok = res->nr.found;
-    if (res->nr.found) {
+    nr_track.ok = RES(res)->nr.found;
+    if (RES(res)->nr.found) {
         nr_track.freq_hz = set->freq_hz;
         nr_track.rate    = set->sample_rate;
         nr_track.channel = set->channel;
-        nr_track.scs     = res->nr.scs_hz;
+        nr_track.scs     = RES(res)->nr.scs_hz;
     }
 }
 
@@ -76,11 +100,11 @@ static void nr_track_result(const struct an_settings *set, const struct an_resul
 static void nr_report_text(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_nr_result *r = &res->nr;
+    const struct m2sdr_nr_result *r = &RES(res)->nr;
     int i;
 
     printf("\n5G NR SSB:\n");
-    if (!res->nr_valid) {
+    if (!RES(res)->nr_valid) {
         printf("  The sample rate must be the subcarrier spacing (15 or 30 kHz) times a power of two from 256\n"
                "  (7.68, 15.36 or 30.72 MSPS), with at least an SSB of samples.\n");
         return;
@@ -113,8 +137,8 @@ static void nr_report_text(const struct an_result *res, const struct an_report *
 static void nr_report_json(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_nr_result *r = &res->nr;
-    const bool ok = res->nr_valid && r->found;
+    const struct m2sdr_nr_result *r = &RES(res)->nr;
+    const bool ok = RES(res)->nr_valid && r->found;
     int i;
 
     printf("  \"nr\": {\n");
@@ -153,10 +177,10 @@ static unsigned nr_watch_lines;
 
 static int nr_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_nr_result *r = &res->nr;
+    const struct m2sdr_nr_result *r = &RES(res)->nr;
     const struct m2sdr_nr_ssb *b = r->best >= 0 ? &r->ssb[r->best] : NULL;
 
-    if (!res->nr_valid) {
+    if (!RES(res)->nr_valid) {
         fprintf(stderr, "The sample rate is not one of NR (15 or 30 kHz times a power of two).\n");
         return -1;
     }
@@ -195,14 +219,14 @@ static int nr_option(int id, const char *arg, struct an_cli *cli)
     double v;
 
     if (id == 0) {
-        cli->set->nr_on = true;
+        SET(cli->set)->nr_on = true;
         return 0;
     }
     if (m2sdr_cli_parse_double(arg, &v) != 0 || (v != 15000.0 && v != 30000.0)) {
         m2sdr_cli_error("invalid SSB spacing '%s' (expected 15000 or 30000)", arg);
         return -1;
     }
-    cli->set->nr_scs_hz = v;
+    SET(cli->set)->nr_scs_hz = v;
     return 0;
 }
 
@@ -221,6 +245,11 @@ static void nr_help(void)
 /* View */
 /*------*/
 
+/* State of the view, from a frame to the next (one window). */
+static struct {
+    GLuint nr_grid_tex;            /* Grid of the strongest SSB as a texture. */
+} nr_ui;
+
 #define NR_GRID_TOP_DB    10.0
 #define NR_GRID_BOTTOM_DB (-40.0)
 #define NR_COL_PBCH       0xc0ffd080u
@@ -235,12 +264,12 @@ static void nr_worker_prepare(struct an_settings *set, bool live)
 /* Grid of the strongest SSB: 4 symbols, 240 subcarriers, the highest at the top. */
 static void nr_keep(struct an_ui *ui)
 {
-    const struct m2sdr_nr_result *r = &ui->res.nr;
+    const struct m2sdr_nr_result *r = &RES(&ui->res)->nr;
     static uint32_t rgba[M2SDR_NR_SSB_CARRIERS * M2SDR_NR_SSB_SYMBOLS];
     double ref;
     int l, k;
 
-    if (!ui->res.set.nr_on || !ui->res.nr_valid || !r->found || r->best < 0)
+    if (!SET(&ui->res.set)->nr_on || !RES(&ui->res)->nr_valid || !r->found || r->best < 0)
         return;
     ref = r->ssb[r->best].rsrp_db;
     for (k = 0; k < M2SDR_NR_SSB_CARRIERS; k++)
@@ -248,15 +277,15 @@ static void nr_keep(struct an_ui *ui)
             rgba[(M2SDR_NR_SSB_CARRIERS - 1 - k) * M2SDR_NR_SSB_SYMBOLS + l] =
                 palette_color(ui->wf_palette, (float)((r->grid_db[l][k] - (ref + NR_GRID_BOTTOM_DB)) /
                                                       (NR_GRID_TOP_DB - NR_GRID_BOTTOM_DB)));
-    if (!ui->nr_grid_tex) {
-        glGenTextures(1, &ui->nr_grid_tex);
-        glBindTexture(GL_TEXTURE_2D, ui->nr_grid_tex);
+    if (!nr_ui.nr_grid_tex) {
+        glGenTextures(1, &nr_ui.nr_grid_tex);
+        glBindTexture(GL_TEXTURE_2D, nr_ui.nr_grid_tex);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
-    glBindTexture(GL_TEXTURE_2D, ui->nr_grid_tex);
+    glBindTexture(GL_TEXTURE_2D, nr_ui.nr_grid_tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, M2SDR_NR_SSB_SYMBOLS, M2SDR_NR_SSB_CARRIERS, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
 }
 
@@ -271,8 +300,8 @@ static void nr_controls(struct an_ui *ui, bool *changed)
     igTextUnformatted("SSB spacing:", NULL);
     for (i = 0; i < 3; i++) {
         igSameLine(0.0f, 8.0f);
-        if (igRadioButton_Bool(names[i], ui->set.nr_scs_hz == spacings[i])) {
-            ui->set.nr_scs_hz = spacings[i];
+        if (igRadioButton_Bool(names[i], SET(&ui->set)->nr_scs_hz == spacings[i])) {
+            SET(&ui->set)->nr_scs_hz = spacings[i];
             *changed = true;
         }
     }
@@ -301,7 +330,7 @@ static void nr_points(struct m2sdr_plot *plot, const float complex *p, int n, fl
 static void draw_nr(struct an_ui *ui, bool live, bool *changed)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_nr_result *r = &res->nr;
+    const struct m2sdr_nr_result *r = &RES(res)->nr;
     struct m2sdr_plot plot;
     ImTextureRef tex;
     ImVec2 avail, sq;
@@ -311,11 +340,11 @@ static void draw_nr(struct an_ui *ui, bool live, bool *changed)
 
     if (live)
         nr_controls(ui, changed);
-    if (!res->set.nr_on) {
+    if (!SET(&res->set)->nr_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->nr_valid) {
+    if (!RES(res)->nr_valid) {
         igPushTextWrapPos(0.0f);
         igTextUnformatted("The sample rate must be the SSB spacing (15 or 30 kHz) times a power of two from 256: 7.68, "
                           "15.36 or 30.72 MSPS.", NULL);
@@ -346,8 +375,8 @@ static void draw_nr(struct an_ui *ui, bool live, bool *changed)
     snprintf(text, sizeof(text), "SSB of PCI %d, index %d: MHz from SSREF by symbol, dB over SS-RSRP", r->ssb[r->best].pci, r->ssb[r->best].ssb_index);
     if (m2sdr_plot_begin(&plot, "##nrgrid", (ImVec2){ gw, sq.y }, -0.5, 3.5, M2SDR_PLOT_PLAIN,
                          -120.0 * r->scs_hz / 1e6, 120.0 * r->scs_hz / 1e6, text)) {
-        tex._TexID = (ImTextureID)(uintptr_t)ui->nr_grid_tex;
-        if (ui->nr_grid_tex)
+        tex._TexID = (ImTextureID)(uintptr_t)nr_ui.nr_grid_tex;
+        if (nr_ui.nr_grid_tex)
             ImDrawList_AddImage(plot.dl, tex, plot.p0, plot.p1, (ImVec2){ 0.0f, 0.0f }, (ImVec2){ 1.0f, 1.0f }, 0xffffffffu);
         if (plot.hovered) {
             const int l = (int)lround(plot.mouse_x), k = (int)floor(plot.mouse_y * 1e6 / r->scs_hz) + 120;
@@ -415,11 +444,11 @@ static void draw_nr(struct an_ui *ui, bool live, bool *changed)
 static void draw_nr_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_nr_result *r = &res->nr;
+    const struct m2sdr_nr_result *r = &RES(res)->nr;
     const struct m2sdr_nr_ssb *b;
 
     igSeparatorText("5G NR SSB");
-    if (!res->nr_valid || !r->found || r->best < 0) {
+    if (!RES(res)->nr_valid || !r->found || r->best < 0) {
         igTextUnformatted("No SSB.", NULL);
         return;
     }
@@ -454,9 +483,11 @@ const struct an_mode an_mode_nr = {
     .key            = "nr",
     .title          = "5G NR",
     .category       = AN_CAT_CELLULAR,
-    .on             = offsetof(struct an_settings, nr_on),
-    .valid          = offsetof(struct an_result, nr_valid),
-    .found          = offsetof(struct an_result, nr.found),
+    .settings_size  = sizeof(struct nr_set),
+    .on             = offsetof(struct nr_set, nr_on),
+    .result_size    = sizeof(struct nr_res),
+    .valid          = offsetof(struct nr_res, nr_valid),
+    .found          = offsetof(struct nr_res, nr.found),
     .report_rank    = 11,
     .default_rate   = AN_NR_RATE,
     .psd_short      = true,

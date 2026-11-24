@@ -8,25 +8,28 @@
  * an_core.c          Analysis of a capture, reports (text, JSON), --report and --watch.
  * an_gui.c           Window: worker, traces, waterfall, controls, views of the spectrum, tabs.
  * an_trend.c         What the OFDM views share: MER and traces over the results of a tuning.
- * mode_*.c           One mode each: options, help, analysis, report sections, view, figures.
- * mode_*.mk          Its report test, a target of test-analyzer (optional).
+ * mode_*.c           One mode each: its settings, result and view state, options, help,
+ *                    analysis, report sections, view, figures.
+ * mode_*.mk          Its report test, a target of test-analyzer.
  *
  * Adding a mode
  * -------------
- * 1. analyzer/mode_xxx.c, everything of the mode: its hooks, static, and its entry
- *    `const struct an_mode an_mode_xxx` (--view key, tab title, category, flag, result flag,
- *    report rank, options and their parser, defaults, help block...): see mode_dab.c. A mode
- *    that --watch follows has a watch_line hook and an option named as its key (--dab). A mode
- *    of RX1 and RX2 together sets .two_channels and .analyse_two: see mode_coherence.c.
- * 2. analyzer/modes.h: one line, AN_MODE(xxx), at its place in the tabs.
- * 3. Here: its flag and settings in struct an_settings, its result and result flag in
- *    struct an_result, and the state of its view in struct an_ui if it keeps one.
- * 4. Optional: analyzer/mode_xxx.mk with its test-analyzer-xxx target (see mode_lte.mk), and its
- *    line in the docs (the manual, the README of the utilities, the changelog).
- * Nothing else: the Makefile builds analyzer/mode_*.c, main takes its options, the help prints
- * its block, the core captures what it needs, analyses while it is on, prints its sections in
- * the reports after the ones of the spectrum, and shows its tab in its category, the mode on
- * while its view is shown.
+ * 1. analyzer/mode_xxx.c, everything of the mode: its settings (struct xxx_set, read with
+ *    SET()) and its result (struct xxx_res, read with RES()), each a block of its own in
+ *    struct an_settings and struct an_result; the state of its view, static; its hooks, static;
+ *    and its entry `const struct an_mode an_mode_xxx` (--view key, tab title, category,
+ *    settings_size and on flag, result_size, valid and found flags, report rank, options and
+ *    their parser, defaults, help block...): see mode_dab.c. A mode that --watch follows has a
+ *    watch_line hook and an option named as its key (--dab). A mode of RX1 and RX2 together
+ *    sets .two_channels and .analyse_two: see mode_coherence.c.
+ * 2. analyzer/mode_xxx.mk: its test-analyzer-xxx target (see mode_lte.mk).
+ * 3. analyzer/modes.h: one line, AN_MODE(xxx), at its place in the tabs.
+ * 4. Its lines in the manual (doc/manual/13_software.md) and the changelog.
+ * Nothing else, here or in the Makefile: the Makefile builds analyzer/mode_*.c, main takes its
+ * options, the help prints its block, the core places its settings and its result, captures
+ * what it needs, analyses while it is on, prints its sections in the reports after the ones of
+ * the spectrum, and shows its tab in its category, the mode on while its view is shown. Only
+ * the lab modes share settings here: their stimulus, struct an_lab_settings.
  *
  * This file is part of LiteX-M2SDR.
  *
@@ -62,6 +65,8 @@
 #include "m2sdr_analysis_dual.h"
 #include "m2sdr_analysis_lab.h"
 
+#define AN_MODES_MAX           64            /* Views and modes. */
+#define AN_SETTINGS_MODES      4096          /* Bytes of the settings of all the modes. */
 #define AN_DEFAULT_FREQ_HZ     2400e6
 #define AN_DEFAULT_SAMPLE_RATE 7680000.0
 #define AN_DEFAULT_FFT_LEN     16384
@@ -170,63 +175,10 @@ struct an_settings {
     double chan_bw_hz;             /* 0: no channel measurement. */
     double chan_spacing_hz;        /* 0: the bandwidth. */
     double ref_offset_db;          /* Added to the levels: dBFS to dBm at the connector. */
-    bool   pn_on;                  /* Phase noise of the strongest carrier. */
-    int    pn_log2;                /* Its capture: 2^pn_log2 samples. */
-    double pn_lo_hz, pn_hi_hz;     /* Integration limits; 0: the offsets measured. */
-    bool   demod_on;               /* Demodulation of the strongest signal. */
-    int    demod_log2;             /* Its capture: 2^demod_log2 samples. */
-    struct m2sdr_demod_config demod;
-    bool   lte_on;                 /* LTE downlink carrier. */
-    bool   dvbt_on;                /* DVB-T multiplex. */
-    bool   dab_on;                 /* DAB ensemble. */
-    bool   fm_on;                  /* FM broadcast station. */
-    double fm_tone_hz;             /* Its known test tone (stereo separation); 0: none. */
-    int    fm_deemph_us;           /* De-emphasis of its audio SNR: 0: 50 us, -1: none. */
-    /* Monitoring: pulses and EMC pre-compliance. */
-    bool   pulse_on;               /* Pulsed signals. */
-    double pulse_threshold_db;     /* Over the noise floor; 0: the default of libm2sdr. */
-    double pulse_seconds;          /* Capture; 0: AN_PULSE_SECONDS. */
-    bool   emc_on;                 /* EMC pre-compliance. */
-    int    emc_log2;               /* Its capture: 2^emc_log2 samples; 0: the default. */
-    double emc_span_hz;            /* Channels over this span around the centre; 0: the default, < 0: all. */
-    struct m2sdr_emc_config emc;   /* Band, unit offset, factors and limit lines (centre and channels set per capture). */
-    /* Cellular. nr_scs_hz: spacing of the SSBs, 0 to find it; nr_scs_known: the one found
-     * on this tuning, set by the worker (0: none). */
-    bool   nr_on, gsm_on, tetra_on;
-    double nr_scs_hz, nr_scs_known;
-    bool   wifi_on;                /* Wi-Fi channel. */
-    bool   adsb_on;                /* ADS-B at 1090 MHz. */
-    struct m2sdr_adsb_config adsb; /* Its receiver position. */
-    bool   lora_on;                /* LoRa channel. */
-    /* Timing: stability of a carrier, GPS L1 C/A. */
-    bool   adev_on;
-    double adev_carrier_hz;        /* Nominal RF frequency of the carrier; 0: the first one found. */
-    bool   gnss_on;
-    int    gnss_ms;                /* Milliseconds integrated; 0: AN_GNSS_DEFAULT_MS. */
-    /* Two channels: RX1 and RX2 captured together. */
-    bool   coherence_on;           /* Coherence, gain, phase and delay between RX1 and RX2. */
-    int    coherence_fft_len;
-    bool   df_on;                  /* Direction finding with two antennas. */
-    double df_spacing_m;           /* 0: half the wavelength. */
-    double df_freq_hz;             /* Signal, from the centre; 0: the strongest. */
-    double df_bw_hz;               /* 0: the main lobe of its peak. */
-    bool   df_cal_given;           /* df_cal_deg given: the stored calibration is not used. */
-    double df_cal_deg;
-    bool   df_cal_store;           /* --report: store the phase read as the calibration (source at broadside). */
-    bool   mimo_on;                /* 2x2 channel of an LTE cell. */
-    bool   sweep_on;               /* Lab: scalar network analysis, TX to RX. */
-    bool   compression_on;         /* Lab: gain against the input level. */
-    bool   imd_on;                 /* Lab: two-tone intermodulation. */
-    bool   amam_on;                /* Lab: AM/AM, AM/PM of a wideband signal. */
-    struct an_lab_settings lab;
-    /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
-     * nothing), and whether the capture is a short one. */
-    bool   dvbt_fast;
-    struct m2sdr_dvbt_config dvbt_hint;
-    /* DVB-T2 multiplex; set by the worker once its mode and pattern are known: short captures. */
-    bool   dvbt2_on;
-    bool   dvbt2_fast;
-    struct m2sdr_dvbt2_config dvbt2_hint;
+    struct an_lab_settings lab;    /* Shared by the lab modes, the TX of the source and the window. */
+    /* Settings of each mode that has some, a block of its settings_size at the place
+     * an_registry_init() gives it, read with an_mode_settings(): copied with the rest. */
+    _Alignas(16) unsigned char modes[AN_SETTINGS_MODES];
 };
 
 extern const char *const window_names[];  /* enum m2sdr_window. */
@@ -318,77 +270,20 @@ struct an_result {
     double obw_lo_hz, obw_hi_hz;
     bool   obw_valid;
     double noise_db_hz;
-    struct m2sdr_phase_noise pn;
-    bool   pn_valid;               /* Measured, with a carrier. */
-    struct m2sdr_demod_result demod;
-    bool   demod_valid;            /* Measured; demod.signal and demod.locked say what was found. */
-    struct m2sdr_lte_result lte;
-    bool   lte_valid;              /* Measured: the sample rate was one of LTE; lte.found says the rest. */
-    struct m2sdr_dvbt_result dvbt;
-    bool   dvbt_valid;             /* Measured: the sample rate was one of DVB-T; dvbt.found says the rest. */
-    struct m2sdr_dab_result dab;
-    bool   dab_valid;              /* Measured: the sample rate was 2.048 MSPS; dab.found says the rest. */
-    struct m2sdr_fm_result fm;
-    bool   fm_valid;               /* Measured: the sample rate was 240 kSPS or more; fm.found says the rest. */
-    struct m2sdr_pulse_result pulse;
-    bool   pulse_valid;            /* Measured; pulse.found says whether there were pulses. */
-    float  pulse_env_db[AN_PULSE_ENV_POINTS];   /* Highest power per point of the capture, dBFS. */
-    double pulse_env_s;            /* Time of the capture over them. */
-    struct m2sdr_emc_result emc;
-    bool   emc_valid;              /* Measured: the band fits the sample rate and the capture. */
-    /* Cellular: measured (rate and length right); found says the rest. */
-    struct m2sdr_nr_result nr;
-    bool   nr_valid;
-    struct m2sdr_gsm_result gsm;
-    bool   gsm_valid;
-    struct m2sdr_tetra_result tetra;
-    bool   tetra_valid;
-    struct m2sdr_wifi_result wifi;
-    bool   wifi_valid;             /* Measured: the sample rate was 20 MSPS. */
-    bool   wifi_no_psdu;           /* The data was not decoded: it took longer than the capture. */
-    struct m2sdr_adsb_result adsb;
-    struct m2sdr_adsb_state adsb_state;   /* Aircraft of the captures so far. */
-    bool   adsb_valid;             /* Measured: the sample rate was 2 MSPS or more. */
-    struct m2sdr_lora_result lora;
-    bool   lora_valid;             /* Measured: a LoRa bandwidth divides the sample rate by a power of two. */
     struct an_capture_time capture;  /* Set from the source before the analysis. */
-    /* Stability of a carrier: this capture, and the series of the captures of one tuning. */
-    struct m2sdr_carrier_result adev;
-    bool   adev_valid;             /* Measured; adev.found says whether a carrier was. */
-    bool   adev_series_ok;         /* 3 captures or more: adev_series holds their figures. */
-    struct m2sdr_adev_result adev_series;
-    double adev_nominal_hz;        /* Nominal frequency the offsets are taken from. */
-    bool   adev_nominal_given;     /* From the settings; else the first carrier found. */
-    int    adev_npoints;           /* History, oldest first: time from the first point, offset. */
-    float  adev_t_s[AN_ADEV_HISTORY], adev_ppb[AN_ADEV_HISTORY];
-    struct m2sdr_gnss_result gnss;
-    bool   gnss_valid;             /* Measured: the sample rate was 2.048 or 4.096 MSPS. */
     bool   two_channels;           /* The capture had both channels: the modes of two are measured. */
-    struct m2sdr_coherence_result coherence;
-    bool   coherence_valid;
-    struct m2sdr_df_result df;
-    bool   df_valid;
-    double df_spacing_m;           /* Used. */
-    double df_cal_deg;             /* Used, */
-    int    df_cal_source;          /* from: 0 none, 1 the command line or the view, 2 the store. */
-    double df_cal_freq_hz;         /* The frequency of the stored one. */
-    struct m2sdr_mimo_result mimo;
-    bool   mimo_valid;
-    struct m2sdr_sweep_result sweep;
-    bool   sweep_valid;            /* Measured: the settings make a sweep; sweep.found says the rest. */
-    struct m2sdr_compression_result compression;
-    bool   compression_valid;
-    double compression_freq_hz;    /* Of its tone. */
-    struct m2sdr_imd_result imd;
-    bool   imd_valid;
-    struct m2sdr_amam_result amam;
-    bool   amam_valid;
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
-    struct m2sdr_dvbt2_result dvbt2;
-    bool   dvbt2_valid;            /* Measured: the sample rate was one of DVB-T2; dvbt2.found says the rest. */
+    /* Result of each mode on, by its index in an_modes[], NULL for the others: a block of the
+     * result_size of the mode, of a type of its own, read with an_mode_result(). */
+    void  *mode[AN_MODES_MAX];
 };
+
+/* A copy of a result, with its own spectrum and the results of its modes (dst: zeroed, or an
+ * earlier copy). Returns 0, or -1 out of memory, dst left valid. Then what a result holds. */
+int    an_result_copy(struct an_result *dst, const struct an_result *src);
+void   an_result_free(struct an_result *res);
 
 size_t capture_samples(const struct an_settings *set);
 int    analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);
@@ -413,6 +308,8 @@ struct an_floor {
 
 int  floor_default_path(uint64_t dna, char *path, size_t len);
 int  floor_load(struct an_floor *fl, const char *path);
+/* The phase noise of res stored as the floor (analyzer/mode_pn.c). Returns 0, -2 when it has no
+ * carrier, -1 when the file is not written (errno). */
 int  floor_save(struct an_floor *fl, const char *path, const struct an_result *res);
 
 /* Modes */
@@ -433,7 +330,6 @@ enum an_category {
 };
 
 #define AN_NONE      ((size_t)-1)  /* Offset of a flag a mode does not have. */
-#define AN_MODES_MAX 64            /* Views and modes. */
 
 /* What the reports of the modes get besides the result. */
 struct an_report {
@@ -463,9 +359,17 @@ struct an_mode {
     const char *key;               /* --view name: "dvbt". */
     const char *title;             /* Its tab: "DVB-T". */
     enum an_category category;
-    size_t on;                     /* offsetof(struct an_settings, <flag>); AN_NONE: always measured. */
-    size_t valid;                  /* offsetof(struct an_result, <flag>): cleared before each analysis. */
-    size_t found;                  /* offsetof(struct an_result, <flag>): something was found (a cell, a
+    /* Its settings: settings_size bytes of a type of its own (in its file) in struct an_settings,
+     * read with an_mode_settings(). A mode with a flag has some. */
+    size_t settings_size;
+    size_t on;                     /* offsetof(<its settings>, <flag>); AN_NONE: always measured. */
+    /* Its result: result_size bytes of a type of its own (in its file), flat (copied with
+     * memcpy), allocated zeroed when it is turned on and freed when it is off, read with
+     * an_mode_result(). A mode that analyses has one. */
+    size_t result_size;
+    size_t valid;                  /* offsetof(<its result>, <flag>): cleared before each analysis. The
+                                    * first field of the result, so that found is never 0. */
+    size_t found;                  /* offsetof(<its result>, <flag>): something was found (a cell, a
                                     * carrier), see AN_PANEL_HOLD_S; 0: its results are shown as they come. */
     int    report_rank;            /* Place of its section in the reports: lower first. */
     double default_rate;           /* Sample rate when it is on and none is given; 0: none. */
@@ -550,15 +454,27 @@ static inline const char *lab_input_unit(const struct an_settings *set)
 /* JSON: "name": [v, ...] in a section. */
 void lab_json_array(const char *name, const double *v, int n, double add, bool last);
 
+/* The registry: what the core needs before the first capture. Returns 0, or -1 with a message. */
+int    an_registry_init(void);
+/* Index of a mode in an_modes[]. */
+int    an_mode_index(const struct an_mode *m);
+/* The result of a mode in res: its block, or a zeroed one (nothing valid, nothing found) when
+ * it was not measured. Written only by its analysis, where it is its own block. */
+void  *an_mode_result(const struct an_mode *m, const struct an_result *res);
+/* A flag of the result of a mode, at an offset of its result (valid, found). */
+bool   an_mode_result_flag(const struct an_mode *m, const struct an_result *res, size_t off);
+/* The settings of a mode in set: its block. */
+void  *an_mode_settings(const struct an_mode *m, const struct an_settings *set);
+
 /* The flag of a mode in settings; NULL for a view of the spectrum. */
 static inline bool *an_mode_flag(const struct an_mode *m, struct an_settings *set)
 {
-    return m->on == AN_NONE ? NULL : (bool *)((char *)set + m->on);
+    return m->on == AN_NONE ? NULL : (bool *)((char *)an_mode_settings(m, set) + m->on);
 }
 
 static inline bool an_mode_on(const struct an_mode *m, const struct an_settings *set)
 {
-    return m->on != AN_NONE && *(const bool *)((const char *)set + m->on);
+    return m->on != AN_NONE && *(const bool *)((const char *)an_mode_settings(m, set) + m->on);
 }
 
 /* Reports */
@@ -647,35 +563,11 @@ struct an_ui {
     bool   wf_on;
     bool   wf_auto;                /* Levels to be set from the next result. */
     int    tab;                    /* View shown: its index in an_modes[]. */
-    /* Phase noise. */
-    bool   pn_am;
+    /* Phase noise: the floor of the board. */
     struct an_floor *fl;
     const char *floor_path;        /* Where "Store as floor" writes; NULL: nowhere. */
-    /* LTE: resource grid and blocks as textures, redrawn with each result that has a cell. */
-    GLuint lte_grid_tex, lte_block_tex;
-    uint32_t *lte_rgba;
-    /* Last frame with a cell, and symbols of the last one with data read: held, see lte_keep(). */
-    struct m2sdr_lte_result *lte_last;
-    unsigned lte_last_seq;
-    bool   lte_last_ok;
-    double lte_freq_hz, lte_rate;  /* What they were read on: nothing is held for another signal. */
-    int    lte_channel;
-    float complex lte_points[M2SDR_LTE_MAX_POINTS];
-    uint8_t lte_points_mod[M2SDR_LTE_MAX_POINTS];
-    int    lte_npoints, lte_points_sfn;
-    unsigned lte_points_seq;
-    /* DVB-T and DAB: MER and traces over the results of one tuning. */
-    struct an_trend dvbt, dab;
-    /* Last capture whose TPS was read: the short ones between carry none. */
-    struct m2sdr_dvbt_result *dvbt_tps;
-    struct an_fm_ui *fm;           /* FM: its view, see mode_fm.c. */
-    /* NR: grid of the strongest SSB as a texture. */
-    GLuint nr_grid_tex;
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
-    /* DVB-T2: MER over the results of one tuning, and the last capture with a P1. */
-    struct an_trend dvbt2;
-    struct m2sdr_dvbt2_result *dvbt2_p1;
 };
 
 int  run_gui(struct an_source *src, const struct an_settings *set, int first_view, struct an_floor *fl,

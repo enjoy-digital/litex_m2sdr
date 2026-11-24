@@ -25,6 +25,26 @@
 #define IMD_PERIODS    4
 #define IMD_LEVEL_DBFS -12.0
 
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_imd;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct imd_set {
+    bool   imd_on;                 /* Lab: two-tone intermodulation. */
+};
+
+#define SET(set) ((struct imd_set *)an_mode_settings(&an_mode_imd, (set)))
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct imd_res {
+    bool   imd_valid;
+    struct m2sdr_imd_result imd;
+};
+
+#define RES(res) ((struct imd_res *)an_mode_result(&an_mode_imd, (res)))
+
 /* Stimulus */
 /*----------*/
 
@@ -88,7 +108,8 @@ static void imd_analyse(const float complex *x, size_t count, const struct an_se
         return;
     cfg.input_known = true;
     cfg.input_dbfs  = p.level + lab_input_offset(set);
-    res->imd_valid  = m2sdr_imd_analyse(x, count, set->sample_rate, &cfg, &res->imd) == 0;
+
+    RES(res)->imd_valid = m2sdr_imd_analyse(x, count, set->sample_rate, &cfg, &RES(res)->imd) == 0;
 }
 
 /* Reports */
@@ -97,7 +118,7 @@ static void imd_analyse(const float complex *x, size_t count, const struct an_se
 static void imd_report_text(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_imd_result *d = &res->imd;
+    const struct m2sdr_imd_result *d = &RES(res)->imd;
     const char *iu = lab_input_unit(set);
     const double off = rep->off;
     struct imd_plan p;
@@ -107,7 +128,7 @@ static void imd_report_text(const struct an_result *res, const struct an_report 
     printf("\nIMD:\n");
     printf("  Stimulus   : two tones %.3f kHz apart around %+.3f kHz, %.1f dBFS each, TX attenuation %d dB\n",
            p.spacing / 1e3, p.centre / 1e3, p.level, set->lab.tx_att);
-    if (!res->imd_valid) {
+    if (!RES(res)->imd_valid) {
         printf("  These settings do not make a two-tone measurement (tones out of the span or too close).\n");
         return;
     }
@@ -133,8 +154,8 @@ static void imd_report_text(const struct an_result *res, const struct an_report 
 
 static void imd_report_json(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_imd_result *d = &res->imd;
-    const bool ok = res->imd_valid && d->found;
+    const struct m2sdr_imd_result *d = &RES(res)->imd;
+    const bool ok = RES(res)->imd_valid && d->found;
     const double off = rep->off;
     int i;
 
@@ -203,7 +224,7 @@ static int imd_option(int id, const char *arg, struct an_cli *cli)
     struct an_lab_settings *lab = &cli->set->lab;
 
     switch (id) {
-    case IM_OPT_ON:      cli->set->imd_on = true; return 0;
+    case IM_OPT_ON:      SET(cli->set)->imd_on = true; return 0;
     case IM_OPT_SPACING: return lab_value(arg, &lab->imd_spacing_hz, true);
     case IM_OPT_LEVEL:   return lab_level(arg, &lab->imd_level_dbfs);
     }
@@ -228,7 +249,7 @@ static void draw_imd(struct an_ui *ui, bool live, bool *changed)
 {
     static float trace[8192];
     const struct an_result *res = &ui->res;
-    const struct m2sdr_imd_result *d = &res->imd;
+    const struct m2sdr_imd_result *d = &RES(res)->imd;
     const struct m2sdr_psd *psd = &res->psd;
     struct m2sdr_plot plot;
     struct imd_plan p;
@@ -257,11 +278,11 @@ static void draw_imd(struct an_ui *ui, bool live, bool *changed)
         *changed = true;
     }
 
-    if (!res->set.imd_on) {
+    if (!SET(&res->set)->imd_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->imd_valid || !d->found) {
+    if (!RES(res)->imd_valid || !d->found) {
         igTextUnformatted("The two tones are not in the capture: TX to RX through the device.", NULL);
         return;
     }
@@ -309,12 +330,12 @@ static void draw_imd(struct an_ui *ui, bool live, bool *changed)
 static void draw_imd_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_imd_result *d = &res->imd;
+    const struct m2sdr_imd_result *d = &RES(res)->imd;
     const char *iu = lab_input_unit(&res->set);
     int i;
 
     igSeparatorText("IMD");
-    if (!res->imd_valid || !d->found) {
+    if (!RES(res)->imd_valid || !d->found) {
         igTextUnformatted("No tones.", NULL);
         return;
     }
@@ -342,22 +363,24 @@ static void draw_imd_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_imd = {
-    .key          = "imd",
-    .title        = "IMD",
-    .category     = AN_CAT_LAB,
-    .on           = offsetof(struct an_settings, imd_on),
-    .valid        = offsetof(struct an_result, imd_valid),
-    .report_rank  = 42,
-    .options      = imd_options,
-    .option       = imd_option,
-    .help         = imd_help,
-    .samples      = imd_samples,
-    .analyse      = imd_analyse,
-    .stimulus     = imd_stimulus,
-    .report_text  = imd_report_text,
-    .report_json  = imd_report_json,
+    .key           = "imd",
+    .title         = "IMD",
+    .category      = AN_CAT_LAB,
+    .settings_size = sizeof(struct imd_set),
+    .on            = offsetof(struct imd_set, imd_on),
+    .result_size   = sizeof(struct imd_res),
+    .valid         = offsetof(struct imd_res, imd_valid),
+    .report_rank   = 42,
+    .options       = imd_options,
+    .option        = imd_option,
+    .help          = imd_help,
+    .samples       = imd_samples,
+    .analyse       = imd_analyse,
+    .stimulus      = imd_stimulus,
+    .report_text   = imd_report_text,
+    .report_json   = imd_report_json,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_imd,
-    .results      = draw_imd_results,
+    .draw          = draw_imd,
+    .results       = draw_imd_results,
 #endif
 };

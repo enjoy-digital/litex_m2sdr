@@ -23,6 +23,26 @@
 #define LORA_HISTORY       300       /* Results of the busy trace. */
 #define LORA_LIST          100       /* Packets of the list of the view. */
 
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_lora;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct lora_set {
+    bool   lora_on;                /* LoRa channel. */
+};
+
+#define SET(set) ((struct lora_set *)an_mode_settings(&an_mode_lora, (set)))
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct lora_res {
+    bool   lora_valid;             /* Measured: a LoRa bandwidth divides the sample rate by a power of two. */
+    struct m2sdr_lora_result lora;
+};
+
+#define RES(res) ((struct lora_res *)an_mode_result(&an_mode_lora, (res)))
+
 /* Analysis */
 /*----------*/
 
@@ -35,7 +55,7 @@ static void lora_analyse(const float complex *x, size_t count, const struct an_s
 {
     const size_t n = lora_samples(set);
 
-    res->lora_valid = m2sdr_lora_analyse(x, count < n ? count : n, set->sample_rate, NULL, &res->lora) == 0;
+    RES(res)->lora_valid = m2sdr_lora_analyse(x, count < n ? count : n, set->sample_rate, NULL, &RES(res)->lora) == 0;
 }
 
 static const char *sync_text(const struct m2sdr_lora_packet *p, char *text, size_t len)
@@ -54,12 +74,12 @@ static const char *sync_text(const struct m2sdr_lora_packet *p, char *text, size
 
 static void lora_report_text(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_lora_result *l = &res->lora;
+    const struct m2sdr_lora_result *l = &RES(res)->lora;
     char sw[32];
     int i;
 
     printf("\nLoRa:\n");
-    if (!res->lora_valid) {
+    if (!RES(res)->lora_valid) {
         printf("  The sample rate must be 125, 250 or 500 kHz times a power of two (1 MSPS by default).\n");
         return;
     }
@@ -79,12 +99,12 @@ static void lora_report_text(const struct an_result *res, const struct an_report
 
 static void lora_report_json(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_lora_result *l = &res->lora;
+    const struct m2sdr_lora_result *l = &RES(res)->lora;
     int i, k;
 
     printf("  \"lora\": {\n");
-    printf("    \"valid\": %s%s\n", res->lora_valid ? "true" : "false", res->lora_valid ? "," : "");
-    if (res->lora_valid) {
+    printf("    \"valid\": %s%s\n", RES(res)->lora_valid ? "true" : "false", RES(res)->lora_valid ? "," : "");
+    if (RES(res)->lora_valid) {
         printf("    \"packets\": %d,\n", l->packets);
         print_json_number("busy_fraction", l->busy_fraction, false);
         printf("    \"packet_list\": [");
@@ -113,11 +133,11 @@ static unsigned lora_watch_lines;
 
 static int lora_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_lora_result *l = &res->lora;
+    const struct m2sdr_lora_result *l = &RES(res)->lora;
     char sw[32];
     int i;
 
-    if (!res->lora_valid) {
+    if (!RES(res)->lora_valid) {
         fprintf(stderr, "The sample rate must be 125, 250 or 500 kHz times a power of two for LoRa.\n");
         return -1;
     }
@@ -153,7 +173,7 @@ static int lora_option(int id, const char *arg, struct an_cli *cli)
 {
     (void)id;
     (void)arg;
-    cli->set->lora_on = true;
+    SET(cli->set)->lora_on = true;
     return 0;
 }
 
@@ -187,11 +207,11 @@ static bool lora_have_last;
 static void lora_keep(struct an_ui *ui)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_lora_result *l = &res->lora;
+    const struct m2sdr_lora_result *l = &RES(res)->lora;
     const double now = now_ms() / 1e3, span = AN_LORA_SECONDS;
     int i;
 
-    if (!res->set.lora_on || !res->lora_valid)
+    if (!SET(&res->set)->lora_on || !RES(res)->lora_valid)
         return;
     for (i = 0; i < l->npackets; i++) {
         if (lora_nlist == LORA_LIST) {
@@ -239,11 +259,11 @@ static void draw_lora(struct an_ui *ui, bool live, bool *changed)
                 view_rate(ui, AN_LORA_SAMPLE_RATE, changed);
         }
     }
-    if (!res->set.lora_on) {
+    if (!SET(&res->set)->lora_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->lora_valid) {
+    if (!RES(res)->lora_valid) {
         igTextUnformatted("The sample rate must be 125, 250 or 500 kHz times a power of two (1 MSPS takes all three).", NULL);
         return;
     }
@@ -321,10 +341,10 @@ static void draw_lora(struct an_ui *ui, bool live, bool *changed)
 static void draw_lora_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_lora_result *l = &res->lora;
+    const struct m2sdr_lora_result *l = &RES(res)->lora;
 
     igSeparatorText("LoRa");
-    if (!res->lora_valid) {
+    if (!RES(res)->lora_valid) {
         igTextUnformatted("No analysis.", NULL);
         return;
     }
@@ -348,26 +368,28 @@ static void draw_lora_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_lora = {
-    .key          = "lora",
-    .title        = "LoRa",
-    .category     = AN_CAT_MONITORING,
-    .on           = offsetof(struct an_settings, lora_on),
-    .valid        = offsetof(struct an_result, lora_valid),
-    .report_rank  = 42,
-    .default_rate = AN_LORA_SAMPLE_RATE,
-    .default_freq = 868.1e6,
-    .psd_short    = true,
-    .samples      = lora_samples,
-    .analyse      = lora_analyse,
-    .report_text  = lora_report_text,
-    .report_json  = lora_report_json,
-    .watch_line   = lora_watch_line,
-    .options      = lora_options,
-    .option       = lora_option,
-    .help         = lora_help,
+    .key           = "lora",
+    .title         = "LoRa",
+    .category      = AN_CAT_MONITORING,
+    .settings_size = sizeof(struct lora_set),
+    .on            = offsetof(struct lora_set, lora_on),
+    .result_size   = sizeof(struct lora_res),
+    .valid         = offsetof(struct lora_res, lora_valid),
+    .report_rank   = 42,
+    .default_rate  = AN_LORA_SAMPLE_RATE,
+    .default_freq  = 868.1e6,
+    .psd_short     = true,
+    .samples       = lora_samples,
+    .analyse       = lora_analyse,
+    .report_text   = lora_report_text,
+    .report_json   = lora_report_json,
+    .watch_line    = lora_watch_line,
+    .options       = lora_options,
+    .option        = lora_option,
+    .help          = lora_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_lora,
-    .results      = draw_lora_results,
-    .keep         = lora_keep,
+    .draw          = draw_lora,
+    .results       = draw_lora_results,
+    .keep          = lora_keep,
 #endif
 };

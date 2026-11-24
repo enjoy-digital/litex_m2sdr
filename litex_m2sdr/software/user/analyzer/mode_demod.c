@@ -21,19 +21,41 @@
 
 #include "analyzer.h"
 
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_demod;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct demod_set {
+    bool   demod_on;               /* Demodulation of the strongest signal. */
+    int    demod_log2;             /* Its capture: 2^demod_log2 samples. */
+    struct m2sdr_demod_config demod;
+};
+
+#define SET(set) ((struct demod_set *)an_mode_settings(&an_mode_demod, (set)))
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct demod_res {
+    bool   demod_valid;            /* Measured; demod.signal and demod.locked say what was found. */
+    struct m2sdr_demod_result demod;
+};
+
+#define RES(res) ((struct demod_res *)an_mode_result(&an_mode_demod, (res)))
+
 /* Analysis */
 /*----------*/
 
 static size_t demod_samples(const struct an_settings *set)
 {
-    return (size_t)1 << set->demod_log2;
+    return (size_t)1 << SET(set)->demod_log2;
 }
 
 static void demod_analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res)
 {
-    const size_t n = count < ((size_t)1 << set->demod_log2) ? count : (size_t)1 << set->demod_log2;
+    const size_t n = count < ((size_t)1 << SET(set)->demod_log2) ? count : (size_t)1 << SET(set)->demod_log2;
 
-    res->demod_valid = m2sdr_demod(x, n, set->sample_rate, &set->demod, &res->demod) == 0;
+    RES(res)->demod_valid = m2sdr_demod(x, n, set->sample_rate, &SET(set)->demod, &RES(res)->demod) == 0;
 }
 
 /* Reports */
@@ -44,10 +66,10 @@ static void demod_report_text(const struct an_result *res, const struct an_repor
     const struct an_settings *set = &res->set;
     const double off = rep->off;
     const char *unit = rep->unit;
-    const struct m2sdr_demod_result *d = &res->demod;
+    const struct m2sdr_demod_result *d = &RES(res)->demod;
 
     printf("\nModulation:\n");
-    if (!res->demod_valid || !d->signal) {
+    if (!RES(res)->demod_valid || !d->signal) {
         printf("  No signal with a symbol rate was found: tune on it, with a sample rate of a few\n"
                "  times its bandwidth, or give --symbol-rate.\n");
     } else {
@@ -68,13 +90,13 @@ static void demod_report_json(const struct an_result *res, const struct an_repor
 {
     const struct an_settings *set = &res->set;
     const double off = rep->off;
-    const struct m2sdr_demod_result *d = &res->demod;
+    const struct m2sdr_demod_result *d = &RES(res)->demod;
 
     printf("  \"modulation\": {\n");
-    printf("    \"signal\": %s,\n", res->demod_valid && d->signal ? "true" : "false");
-    printf("    \"locked\": %s%s\n", res->demod_valid && d->locked ? "true" : "false",
-           res->demod_valid && d->signal ? "," : "");
-    if (res->demod_valid && d->signal) {
+    printf("    \"signal\": %s,\n", RES(res)->demod_valid && d->signal ? "true" : "false");
+    printf("    \"locked\": %s%s\n", RES(res)->demod_valid && d->locked ? "true" : "false",
+           RES(res)->demod_valid && d->signal ? "," : "");
+    if (RES(res)->demod_valid && d->signal) {
         printf("    \"type\": \"%s\",\n", m2sdr_modulation_name(d->modulation));
         print_json_number("symbol_rate", d->symbol_rate, false);
         print_json_number("rolloff", d->rolloff, false);
@@ -111,7 +133,7 @@ static const struct option demod_options[] = {
 
 static void demod_defaults(struct an_settings *set)
 {
-    set->demod_log2 = AN_DEMOD_DEFAULT_LOG2;
+    SET(set)->demod_log2 = AN_DEMOD_DEFAULT_LOG2;
 }
 
 static int demod_option(int id, const char *arg, struct an_cli *cli)
@@ -121,7 +143,7 @@ static int demod_option(int id, const char *arg, struct an_cli *cli)
     int n;
 
     switch (id) {
-    case DEMOD_OPT_ON: set->demod_on = true; break;
+    case DEMOD_OPT_ON: SET(set)->demod_on = true; break;
     case DEMOD_OPT_MODULATION:
         for (n = M2SDR_MOD_AUTO; n < M2SDR_MOD_COUNT; n++) {
             if (strcasecmp(arg, m2sdr_modulation_name((enum m2sdr_modulation)n)) == 0)
@@ -131,28 +153,28 @@ static int demod_option(int id, const char *arg, struct an_cli *cli)
             m2sdr_cli_invalid_choice("modulation", arg, "auto, bpsk, qpsk, 8psk, 16qam, 32qam, 64qam, 128qam or 256qam");
             return -1;
         }
-        set->demod.modulation = (enum m2sdr_modulation)n;
+        SET(set)->demod.modulation = (enum m2sdr_modulation)n;
         break;
     case DEMOD_OPT_SYMBOL_RATE:
-        if (m2sdr_cli_parse_double(arg, &set->demod.symbol_rate) != 0 || set->demod.symbol_rate < 0) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->demod.symbol_rate) != 0 || SET(set)->demod.symbol_rate < 0) {
             m2sdr_cli_error("invalid symbol rate '%s'", arg);
             return -1;
         }
         break;
     case DEMOD_OPT_ROLLOFF:
-        if (m2sdr_cli_parse_double(arg, &set->demod.rolloff) != 0 ||
-            (set->demod.rolloff != 0 && (set->demod.rolloff < 0.05 || set->demod.rolloff > 1.0))) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->demod.rolloff) != 0 ||
+            (SET(set)->demod.rolloff != 0 && (SET(set)->demod.rolloff < 0.05 || SET(set)->demod.rolloff > 1.0))) {
             m2sdr_cli_error("invalid roll-off '%s' (expected 0.05 to 1, or 0 to find it)", arg);
             return -1;
         }
         break;
     case DEMOD_OPT_PULSE:
         if (strcmp(arg, "rrc") == 0) {
-            set->demod.pulse = M2SDR_PULSE_RRC;
+            SET(set)->demod.pulse = M2SDR_PULSE_RRC;
         } else if (strcmp(arg, "rc") == 0) {
-            set->demod.pulse = M2SDR_PULSE_RC;
+            SET(set)->demod.pulse = M2SDR_PULSE_RC;
         } else if (strcmp(arg, "rect") == 0) {
-            set->demod.pulse = M2SDR_PULSE_RECT;
+            SET(set)->demod.pulse = M2SDR_PULSE_RECT;
         } else {
             m2sdr_cli_invalid_choice("pulse", arg, "rrc, rc or rect");
             return -1;
@@ -164,7 +186,7 @@ static int demod_option(int id, const char *arg, struct an_cli *cli)
                             1 << AN_DEMOD_MIN_LOG2, 1 << AN_DEMOD_MAX_LOG2);
             return -1;
         }
-        for (set->demod_log2 = AN_DEMOD_MIN_LOG2; (double)((size_t)2 << set->demod_log2) <= v; set->demod_log2++)
+        for (SET(set)->demod_log2 = AN_DEMOD_MIN_LOG2; (double)((size_t)2 << SET(set)->demod_log2) <= v; SET(set)->demod_log2++)
             ;
         break;
     }
@@ -198,49 +220,49 @@ static void draw_modulation(struct an_ui *ui, bool live, bool *changed)
     static float sx[M2SDR_DEMOD_MAX_SYMBOLS], sy[M2SDR_DEMOD_MAX_SYMBOLS], evm[M2SDR_DEMOD_MAX_SYMBOLS];
     static float complex points[256];
     static float px[256], py[256];
-    const struct m2sdr_demod_result *d = &ui->res.demod;
+    const struct m2sdr_demod_result *d = &RES(&ui->res)->demod;
     struct m2sdr_plot plot;
     ImVec2 avail, sq;
     float side, lim = 1.0f, far = 0.0f, eye_h;
-    int mod = (int)ui->set.demod.modulation, pulse = (int)ui->set.demod.pulse;
-    int idx = ui->set.demod_log2 - AN_DEMOD_MIN_LOG2, npoints, i, m, rail;
+    int mod = (int)SET(&ui->set)->demod.modulation, pulse = (int)SET(&ui->set)->demod.pulse;
+    int idx = SET(&ui->set)->demod_log2 - AN_DEMOD_MIN_LOG2, npoints, i, m, rail;
     float evm_top = 1.0f;
     size_t k;
 
     (void)live;
     igSetNextItemWidth(90.0f);
     if (igCombo_Str_arr("Type", &mod, mods, M2SDR_MOD_COUNT, -1)) {
-        ui->set.demod.modulation = (enum m2sdr_modulation)mod;
+        SET(&ui->set)->demod.modulation = (enum m2sdr_modulation)mod;
         *changed = true;
     }
     same_line_or_wrap(12.0f, 215.0f);
     igSetNextItemWidth(170.0f);
     if (igCombo_Str_arr("Pulse", &pulse, pulses, 3, -1)) {
-        ui->set.demod.pulse = (enum m2sdr_pulse)pulse;
+        SET(&ui->set)->demod.pulse = (enum m2sdr_pulse)pulse;
         *changed = true;
     }
     same_line_or_wrap(12.0f, 295.0f);
-    if (input_scaled("Symbols/s (0: auto)", &ui->set.demod.symbol_rate, 1.0, "%.1f"))
+    if (input_scaled("Symbols/s (0: auto)", &SET(&ui->set)->demod.symbol_rate, 1.0, "%.1f"))
         *changed = true;
     same_line_or_wrap(12.0f, 285.0f);
     {
-        double a = ui->set.demod.rolloff;
+        double a = SET(&ui->set)->demod.rolloff;
         if (input_scaled("Roll-off (0: auto)", &a, 1.0, "%.2f") && (a == 0 || (a >= 0.05 && a <= 1.0))) {
-            ui->set.demod.rolloff = a;
+            SET(&ui->set)->demod.rolloff = a;
             *changed = true;
         }
     }
     igSetNextItemWidth(110.0f);
     if (igCombo_Str_arr("Samples", &idx, sizes, AN_DEMOD_MAX_LOG2 - AN_DEMOD_MIN_LOG2 + 1, -1)) {
-        ui->set.demod_log2 = idx + AN_DEMOD_MIN_LOG2;
+        SET(&ui->set)->demod_log2 = idx + AN_DEMOD_MIN_LOG2;
         *changed = true;
     }
 
-    if (!ui->res.set.demod_on) {
+    if (!SET(&ui->res.set)->demod_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!ui->res.demod_valid || !d->signal) {
+    if (!RES(&ui->res)->demod_valid || !d->signal) {
         igPushTextWrapPos(0.0f);
         igTextUnformatted("No signal with a symbol rate was found: tune on it, with a sample rate of a few times its "
                           "bandwidth, or give the symbol rate.", NULL);
@@ -334,10 +356,10 @@ static void draw_modulation(struct an_ui *ui, bool live, bool *changed)
 static void draw_modulation_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_demod_result *d = &res->demod;
+    const struct m2sdr_demod_result *d = &RES(res)->demod;
 
     igSeparatorText("Modulation");
-    if (!res->demod_valid || !d->signal) {
+    if (!RES(res)->demod_valid || !d->signal) {
         igTextUnformatted("No signal.", NULL);
         return;
     }
@@ -367,23 +389,25 @@ static void draw_modulation_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_demod = {
-    .key         = "modulation",
-    .title       = "Modulation",
-    .category    = AN_CAT_SIGNAL,
-    .on          = offsetof(struct an_settings, demod_on),
-    .valid       = offsetof(struct an_result, demod_valid),
-    .found       = offsetof(struct an_result, demod.locked),
-    .report_rank = 40,
-    .samples     = demod_samples,
-    .analyse     = demod_analyse,
-    .report_text = demod_report_text,
-    .report_json = demod_report_json,
-    .defaults    = demod_defaults,
-    .options     = demod_options,
-    .option      = demod_option,
-    .help        = demod_help,
+    .key           = "modulation",
+    .title         = "Modulation",
+    .category      = AN_CAT_SIGNAL,
+    .settings_size = sizeof(struct demod_set),
+    .on            = offsetof(struct demod_set, demod_on),
+    .result_size   = sizeof(struct demod_res),
+    .valid         = offsetof(struct demod_res, demod_valid),
+    .found         = offsetof(struct demod_res, demod.locked),
+    .report_rank   = 40,
+    .samples       = demod_samples,
+    .analyse       = demod_analyse,
+    .report_text   = demod_report_text,
+    .report_json   = demod_report_json,
+    .defaults      = demod_defaults,
+    .options       = demod_options,
+    .option        = demod_option,
+    .help          = demod_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw        = draw_modulation,
-    .results     = draw_modulation_results,
+    .draw          = draw_modulation,
+    .results       = draw_modulation_results,
 #endif
 };

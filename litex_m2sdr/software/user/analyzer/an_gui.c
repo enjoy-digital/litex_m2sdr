@@ -35,45 +35,17 @@ static const char *const trace_names[UI_TRACES] = { "Live", "Average", "Max hold
 static const ImU32 trace_colors[UI_TRACES] = { 0xff40d0ffu, 0xff60ff60u, 0xff6060ffu, 0xffffa040u };
 static const ImU32 marker_colors[UI_MARKERS] = { 0xffffffffu, 0xff80ffffu, 0xffff80ffu, 0xffffff80u };
 
-/* Worker */
-/*--------*/
-
-/* Copy of a result, with its own spectrum. */
-static int result_copy(struct an_result *dst, const struct an_result *src)
-{
-    float *power = dst->psd.power;
-
-    if (dst->psd.bins != src->psd.bins) {
-        power = realloc(power, src->psd.bins * sizeof(*power));
-        if (!power)
-            return -1;
-    }
-    *dst = *src;
-    dst->psd.power = power;
-    dst->psd.fft   = NULL;
-    dst->psd.win   = NULL;
-    dst->psd.work  = NULL;
-    memset(&dst->tone_psd, 0, sizeof(dst->tone_psd));
-    memcpy(power, src->psd.power, src->psd.bins * sizeof(*power));
-    return 0;
-}
-
 /* Results panel */
 /*---------------*/
-
-static bool flag_at(const struct an_result *res, size_t off)
-{
-    return *(const bool *)((const char *)res + off);
-}
 
 /* The mode found something in res: what its panel holds through short misses. */
 static bool mode_found(const struct an_mode *m, const struct an_result *res)
 {
     if (!m->found)
         return true;
-    if (m->valid != AN_NONE && !flag_at(res, m->valid))
+    if (m->valid != AN_NONE && !an_mode_result_flag(m, res, m->valid))
         return false;
-    return flag_at(res, m->found);
+    return an_mode_result_flag(m, res, m->found);
 }
 
 /* With each new result: the panel takes it at most every AN_PANEL_PERIOD_MS, at once when the
@@ -99,7 +71,7 @@ static void panel_update(struct an_ui *ui)
         return;
     if (same && found == ui->panel_found && now - ui->panel_t < AN_PANEL_PERIOD_MS)
         return;
-    if (result_copy(ui->panel, &ui->res) != 0) {
+    if (an_result_copy(ui->panel, &ui->res) != 0) {
         ui->panel_ok = false;
         return;
     }
@@ -114,6 +86,9 @@ static const struct an_result *panel_result(const struct an_ui *ui)
 {
     return ui->panel_ok && ui->panel_tab == ui->tab ? ui->panel : &ui->res;
 }
+
+/* Worker */
+/*--------*/
 
 /* A capture and its analysis. The worker captures into one job while the other is analysed in
  * its own thread: a result every max(capture, analysis) instead of their sum. */
@@ -162,7 +137,7 @@ static void job_publish(struct an_shared *sh, struct an_job *j)
             an_modes[m]->worker_result(&j->set, j->res);
     }
     pthread_mutex_lock(&sh->lock);
-    if (result_copy(&sh->res, j->res) == 0)
+    if (an_result_copy(&sh->res, j->res) == 0)
         sh->seq++;
     snprintf(sh->status, sizeof(sh->status), "%s", j->capture_rc > 0 ? j->err : "");
     sh->capture_ms  = j->capture_ms;
@@ -182,10 +157,8 @@ static void job_finish(struct an_shared *sh, struct an_job *j)
 
 static void job_free(struct an_job *j)
 {
-    if (j->res) {
-        m2sdr_psd_free(&j->res->psd);
-        m2sdr_psd_free(&j->res->tone_psd);
-    }
+    if (j->res)
+        an_result_free(j->res);
     free(j->res);
     free(j->x);
     free(j->x2);
@@ -1285,7 +1258,7 @@ int run_gui(struct an_source *src, const struct an_settings *set, int first_view
 
         /* New result of the worker. */
         pthread_mutex_lock(&sh.lock);
-        if (sh.seq != ui.seq && result_copy(&ui.res, &sh.res) == 0) {
+        if (sh.seq != ui.seq && an_result_copy(&ui.res, &sh.res) == 0) {
             ui.seq = sh.seq;
             pthread_mutex_unlock(&sh.lock);
             if (traces_update(&ui) == 0)
@@ -1364,11 +1337,11 @@ int run_gui(struct an_source *src, const struct an_settings *set, int first_view
         if (an_modes[m]->close)
             an_modes[m]->close(&ui);
     }
-    free(ui.res.psd.power);
+    an_result_free(&ui.res);
     if (ui.panel)
-        free(ui.panel->psd.power);
+        an_result_free(ui.panel);
     free(ui.panel);
-    free(sh.res.psd.power);
+    an_result_free(&sh.res);
     pthread_mutex_destroy(&sh.lock);
     return 0;
 }

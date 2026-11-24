@@ -32,13 +32,36 @@
 static const char *const emc_band_names[] = { "auto", "A", "B", "C/D" };
 static const char *const emc_band_keys[]  = { "auto", "a", "b", "cd" };
 
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_emc;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct emc_set {
+    bool   emc_on;                 /* EMC pre-compliance. */
+    int    emc_log2;               /* Its capture: 2^emc_log2 samples; 0: the default. */
+    double emc_span_hz;            /* Channels over this span around the centre; 0: the default, < 0: all. */
+    struct m2sdr_emc_config emc;   /* Band, unit offset, factors and limit lines (centre and channels set per capture). */
+};
+
+#define SET(set) ((struct emc_set *)an_mode_settings(&an_mode_emc, (set)))
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct emc_res {
+    bool   emc_valid;              /* Measured: the band fits the sample rate and the capture. */
+    struct m2sdr_emc_result emc;
+};
+
+#define RES(res) ((struct emc_res *)an_mode_result(&an_mode_emc, (res)))
+
 /* Files of the lines, for the view. */
 static char emc_paths[3][512];
 
 /* Settings */
 /*----------*/
 
-/* A line of set->emc from a text file, a frequency in Hz and a level in dB per line ('#'
+/* A line of SET(set)->emc from a text file, a frequency in Hz and a level in dB per line ('#'
  * comments), in ascending frequency: the quasi-peak limit, the average limit or the factors.
  * NULL or "" clears it. Returns 0, or -1 with err set. */
 enum { AN_EMC_QP_LIMIT = 0, AN_EMC_AV_LIMIT = 1, AN_EMC_FACTORS = 2 };
@@ -89,16 +112,16 @@ static int emc_load_line(struct an_settings *set, int which, const char *path, c
     }
     switch (which) {
     case AN_EMC_QP_LIMIT:
-        memcpy(set->emc.qp_limit, pts, (size_t)n * sizeof(pts[0]));
-        set->emc.nqp_limit = n;
+        memcpy(SET(set)->emc.qp_limit, pts, (size_t)n * sizeof(pts[0]));
+        SET(set)->emc.nqp_limit = n;
         break;
     case AN_EMC_AV_LIMIT:
-        memcpy(set->emc.av_limit, pts, (size_t)n * sizeof(pts[0]));
-        set->emc.nav_limit = n;
+        memcpy(SET(set)->emc.av_limit, pts, (size_t)n * sizeof(pts[0]));
+        SET(set)->emc.nav_limit = n;
         break;
     default:
-        memcpy(set->emc.factor, pts, (size_t)n * sizeof(pts[0]));
-        set->emc.nfactor = n;
+        memcpy(SET(set)->emc.factor, pts, (size_t)n * sizeof(pts[0]));
+        SET(set)->emc.nfactor = n;
         break;
     }
     snprintf(emc_paths[which], sizeof(emc_paths[which]), "%s", path ? path : "");
@@ -108,8 +131,8 @@ static int emc_load_line(struct an_settings *set, int which, const char *path, c
 /* Band of the settings: given, or the one of the centre. */
 static enum m2sdr_emc_band emc_band(const struct an_settings *set)
 {
-    if (set->emc.band != M2SDR_EMC_BAND_AUTO)
-        return set->emc.band;
+    if (SET(set)->emc.band != M2SDR_EMC_BAND_AUTO)
+        return SET(set)->emc.band;
     if (!(set->freq_hz > 0))
         return M2SDR_EMC_BAND_B;   /* A file that does not give it. */
     return set->freq_hz < 150e3 ? M2SDR_EMC_BAND_A : set->freq_hz < 30e6 ? M2SDR_EMC_BAND_B : M2SDR_EMC_BAND_CD;
@@ -142,7 +165,7 @@ static double emc_level(const struct m2sdr_emc_config *cfg, double freq_hz, doub
 static size_t emc_samples(const struct an_settings *set)
 {
     const double rbw = emc_rbw(set);
-    int log2 = set->emc_log2 > 0 ? set->emc_log2 : AN_EMC_DEFAULT_LOG2;
+    int log2 = SET(set)->emc_log2 > 0 ? SET(set)->emc_log2 : AN_EMC_DEFAULT_LOG2;
 
     while (log2 < AN_EMC_MAX_LOG2 && set->sample_rate / (double)((size_t)1 << log2) > rbw / 8.0)
         log2++;
@@ -151,7 +174,7 @@ static size_t emc_samples(const struct an_settings *set)
 
 static void emc_analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res)
 {
-    struct m2sdr_emc_config cfg = set->emc;
+    struct m2sdr_emc_config cfg = SET(set)->emc;
     const double rbw = emc_rbw(set);
     const double edge = 0.5 * set->sample_rate - 1.5 * rbw;
     size_t n = 1;
@@ -161,8 +184,8 @@ static void emc_analyse(const float complex *x, size_t count, const struct an_se
     /* Span: AN_EMC_DEFAULT_CHANNELS channels by default, for a live speed; all of the capture
      * with a span < 0. */
     cfg.start_hz = cfg.stop_hz = cfg.step_hz = 0.0;
-    if (set->emc_span_hz >= 0 && edge > 0) {
-        double half = set->emc_span_hz > 0 ? 0.5 * set->emc_span_hz : 0.25 * (AN_EMC_DEFAULT_CHANNELS - 1) * rbw;
+    if (SET(set)->emc_span_hz >= 0 && edge > 0) {
+        double half = SET(set)->emc_span_hz > 0 ? 0.5 * SET(set)->emc_span_hz : 0.25 * (AN_EMC_DEFAULT_CHANNELS - 1) * rbw;
 
         if (half > edge)
             half = edge;
@@ -174,7 +197,7 @@ static void emc_analyse(const float complex *x, size_t count, const struct an_se
     }
     while (n * 2 <= count && n * 2 <= emc_samples(set))
         n *= 2;
-    res->emc_valid = m2sdr_emc_analyse(x, n, set->sample_rate, &cfg, &res->emc) == 0;
+    RES(res)->emc_valid = m2sdr_emc_analyse(x, n, set->sample_rate, &cfg, &RES(res)->emc) == 0;
 }
 
 /* Reports */
@@ -206,14 +229,14 @@ static int emc_worst(const struct m2sdr_emc_result *e, int *idx, int max)
 
 static void emc_report_text(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_emc_config *cfg = &res->set.emc;
-    const struct m2sdr_emc_result *e = &res->emc;
+    const struct m2sdr_emc_config *cfg = &SET(&res->set)->emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
     const char *unit = emc_unit(cfg);
     int idx[EMC_REPORT_WORST], n, i;
 
     (void)rep;
     printf("\nEMC (pre-compliance, CISPR 16-1-1 receiver%s):\n", cfg->offset_db == 0.0 && cfg->nfactor == 0 ? ", uncalibrated" : "");
-    if (!res->emc_valid) {
+    if (!RES(res)->emc_valid) {
         printf("  The band does not fit the capture: its sample rate must be 3 RBW at least, with 8 FFT bins in the RBW.\n");
         return;
     }
@@ -253,14 +276,14 @@ static void emc_report_text(const struct an_result *res, const struct an_report 
 
 static void emc_report_json(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_emc_config *cfg = &res->set.emc;
-    const struct m2sdr_emc_result *e = &res->emc;
+    const struct m2sdr_emc_config *cfg = &SET(&res->set)->emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
     int c;
 
     (void)rep;
     printf("  \"emc\": {\n");
-    printf("    \"valid\": %s%s\n", res->emc_valid ? "true" : "false", res->emc_valid ? "," : "");
-    if (!res->emc_valid) {
+    printf("    \"valid\": %s%s\n", RES(res)->emc_valid ? "true" : "false", RES(res)->emc_valid ? "," : "");
+    if (!RES(res)->emc_valid) {
         printf("  }");
         return;
     }
@@ -319,29 +342,29 @@ static int emc_option(int id, const char *arg, struct an_cli *cli)
     double v;
 
     switch (id) {
-    case EMC_OPT_ON: set->emc_on = true; break;
+    case EMC_OPT_ON: SET(set)->emc_on = true; break;
     case EMC_OPT_BAND:
         if (strcmp(arg, "auto") == 0) {
-            set->emc.band = M2SDR_EMC_BAND_AUTO;
+            SET(set)->emc.band = M2SDR_EMC_BAND_AUTO;
         } else if (strcasecmp(arg, "a") == 0) {
-            set->emc.band = M2SDR_EMC_BAND_A;
+            SET(set)->emc.band = M2SDR_EMC_BAND_A;
         } else if (strcasecmp(arg, "b") == 0) {
-            set->emc.band = M2SDR_EMC_BAND_B;
+            SET(set)->emc.band = M2SDR_EMC_BAND_B;
         } else if (strcasecmp(arg, "cd") == 0 || strcasecmp(arg, "c") == 0 || strcasecmp(arg, "d") == 0) {
-            set->emc.band = M2SDR_EMC_BAND_CD;
+            SET(set)->emc.band = M2SDR_EMC_BAND_CD;
         } else {
             m2sdr_cli_invalid_choice("EMC band", arg, "auto, a, b or cd");
             return -1;
         }
         break;
     case EMC_OPT_SPAN:
-        if (m2sdr_cli_parse_double(arg, &set->emc_span_hz) != 0) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->emc_span_hz) != 0) {
             m2sdr_cli_error("invalid EMC span '%s'", arg);
             return -1;
         }
         break;
     case EMC_OPT_OFFSET:
-        if (m2sdr_cli_parse_double(arg, &set->emc.offset_db) != 0) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->emc.offset_db) != 0) {
             m2sdr_cli_error("invalid EMC offset '%s'", arg);
             return -1;
         }
@@ -360,7 +383,7 @@ static int emc_option(int id, const char *arg, struct an_cli *cli)
             m2sdr_cli_error("invalid EMC samples '%s' (expected %d to %d)", arg, 1 << AN_EMC_MIN_LOG2, 1 << AN_EMC_MAX_LOG2);
             return -1;
         }
-        for (set->emc_log2 = AN_EMC_MIN_LOG2; (double)((size_t)2 << set->emc_log2) <= v; set->emc_log2++)
+        for (SET(set)->emc_log2 = AN_EMC_MIN_LOG2; (double)((size_t)2 << SET(set)->emc_log2) <= v; SET(set)->emc_log2++)
             ;
         break;
     default:
@@ -394,12 +417,12 @@ static unsigned emc_watch_lines;
 
 static int emc_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_emc_config *cfg = &set->emc;
-    const struct m2sdr_emc_result *e = &res->emc;
+    const struct m2sdr_emc_config *cfg = &SET(set)->emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
     double qp = NAN, av = NAN;
     int c;
 
-    if (!res->emc_valid) {
+    if (!RES(res)->emc_valid) {
         fprintf(stderr, "The EMC band does not fit the sample rate.\n");
         return -1;
     }
@@ -470,8 +493,8 @@ static void draw_emc_plot(const struct an_result *res, ImVec2 size)
 {
     static float fx[M2SDR_EMC_MAX_CHANNELS], pk[M2SDR_EMC_MAX_CHANNELS], qp[M2SDR_EMC_MAX_CHANNELS], av[M2SDR_EMC_MAX_CHANNELS];
     static float lq[M2SDR_EMC_MAX_CHANNELS], la[M2SDR_EMC_MAX_CHANNELS];
-    const struct m2sdr_emc_config *cfg = &res->set.emc;
-    const struct m2sdr_emc_result *e = &res->emc;
+    const struct m2sdr_emc_config *cfg = &SET(&res->set)->emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
     const int n = e->nchannels;
     double top = -300.0, bottom = 300.0;
     struct m2sdr_plot plot;
@@ -528,8 +551,8 @@ static void draw_emc_plot(const struct an_result *res, ImVec2 size)
 static void draw_emc_margins(const struct an_result *res, ImVec2 size)
 {
     static const char *const heads[] = { "MHz", "peak", "QP", "AV", "margin QP", "margin AV" };
-    const struct m2sdr_emc_config *cfg = &res->set.emc;
-    const struct m2sdr_emc_result *e = &res->emc;
+    const struct m2sdr_emc_config *cfg = &SET(&res->set)->emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
     int idx[64], n, i, c;
 
     if (!e->limits) {
@@ -572,24 +595,24 @@ static void draw_emc(struct an_ui *ui, bool live, bool *changed)
 {
     static const char *const bands[] = { "Auto", "A: 9-150 kHz", "B: 0.15-30 MHz", "C/D: 30-1000 MHz" };
     const struct an_result *res = &ui->res;
-    const struct m2sdr_emc_result *e = &res->emc;
-    int band = (int)ui->set.emc.band;
-    double span_mhz = ui->set.emc_span_hz / 1e6;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
+    int band = (int)SET(&ui->set)->emc.band;
+    double span_mhz = SET(&ui->set)->emc_span_hz / 1e6;
     ImVec2 avail;
 
     (void)live;
     igSetNextItemWidth(170.0f);
     if (igCombo_Str_arr("Band", &band, bands, 4, -1)) {
-        ui->set.emc.band = (enum m2sdr_emc_band)band;
+        SET(&ui->set)->emc.band = (enum m2sdr_emc_band)band;
         *changed = true;
     }
     same_line_or_wrap(16.0f, 230.0f);
     if (input_scaled("Span (MHz)", &span_mhz, 1.0, "%.3f")) {
-        ui->set.emc_span_hz = span_mhz * 1e6;
+        SET(&ui->set)->emc_span_hz = span_mhz * 1e6;
         *changed = true;
     }
     same_line_or_wrap(16.0f, 230.0f);
-    if (input_scaled("Offset (dB)", &ui->set.emc.offset_db, 1.0, "%.1f"))
+    if (input_scaled("Offset (dB)", &SET(&ui->set)->emc.offset_db, 1.0, "%.1f"))
         *changed = true;
     draw_emc_files(ui, changed);
     igPushTextWrapPos(0.0f);
@@ -598,11 +621,11 @@ static void draw_emc(struct an_ui *ui, bool live, bool *changed)
                    "generator. Span 0: %d channels (100 RBW) for a live speed, < 0: the whole capture.", AN_EMC_DEFAULT_CHANNELS);
     igPopTextWrapPos();
 
-    if (!res->set.emc_on) {
+    if (!SET(&res->set)->emc_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->emc_valid) {
+    if (!RES(res)->emc_valid) {
         igTextUnformatted("The band does not fit the capture: the sample rate must be 3 RBW at least.", NULL);
         return;
     }
@@ -625,11 +648,11 @@ static void draw_emc(struct an_ui *ui, bool live, bool *changed)
 static void draw_emc_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_emc_result *e = &res->emc;
-    const struct m2sdr_emc_config *cfg = &res->set.emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
+    const struct m2sdr_emc_config *cfg = &SET(&res->set)->emc;
 
     igSeparatorText("EMC");
-    if (!res->emc_valid) {
+    if (!RES(res)->emc_valid) {
         igTextUnformatted("Band out of the capture.", NULL);
         return;
     }
@@ -655,23 +678,25 @@ static void draw_emc_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_emc = {
-    .key          = "emc",
-    .title        = "EMC",
-    .category     = AN_CAT_MONITORING,
-    .on           = offsetof(struct an_settings, emc_on),
-    .valid        = offsetof(struct an_result, emc_valid),
-    .report_rank  = 81,
-    .psd_short    = true,
-    .samples      = emc_samples,
-    .analyse      = emc_analyse,
-    .report_text  = emc_report_text,
-    .report_json  = emc_report_json,
-    .watch_line   = emc_watch_line,
-    .options      = emc_options,
-    .option       = emc_option,
-    .help         = emc_help,
+    .key           = "emc",
+    .title         = "EMC",
+    .category      = AN_CAT_MONITORING,
+    .settings_size = sizeof(struct emc_set),
+    .on            = offsetof(struct emc_set, emc_on),
+    .result_size   = sizeof(struct emc_res),
+    .valid         = offsetof(struct emc_res, emc_valid),
+    .report_rank   = 81,
+    .psd_short     = true,
+    .samples       = emc_samples,
+    .analyse       = emc_analyse,
+    .report_text   = emc_report_text,
+    .report_json   = emc_report_json,
+    .watch_line    = emc_watch_line,
+    .options       = emc_options,
+    .option        = emc_option,
+    .help          = emc_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_emc,
-    .results      = draw_emc_results,
+    .draw          = draw_emc,
+    .results       = draw_emc_results,
 #endif
 };

@@ -33,6 +33,27 @@
 #define COMP_RANGE_DB   30.0
 #define COMP_STEP_DB    1.0
 
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_compression;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct compression_set {
+    bool   compression_on;         /* Lab: gain against the input level. */
+};
+
+#define SET(set) ((struct compression_set *)an_mode_settings(&an_mode_compression, (set)))
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct compression_res {
+    bool   compression_valid;
+    struct m2sdr_compression_result compression;
+    double compression_freq_hz;    /* Of its tone. */
+};
+
+#define RES(res) ((struct compression_res *)an_mode_result(&an_mode_compression, (res)))
+
 /* Stimulus */
 /*----------*/
 
@@ -123,7 +144,7 @@ static void comp_analyse(const float complex *x, size_t count, const struct an_s
 
     comp_plan(set, &p);
     period = (size_t)p.steps * COMP_STEP;
-    res->compression_freq_hz = p.freq;
+    RES(res)->compression_freq_hz = p.freq;
     if (count < period + COMP_STEP)
         return;
     start = comp_start(x, count, period);
@@ -134,7 +155,7 @@ static void comp_analyse(const float complex *x, size_t count, const struct an_s
         steps[k].x          = x + start + (size_t)k * COMP_STEP + COMP_EDGE;
         steps[k].count      = COMP_STEP - 2 * COMP_EDGE;
     }
-    res->compression_valid = m2sdr_compression_analyse(steps, p.steps, set->sample_rate, p.freq, &res->compression) == 0;
+    RES(res)->compression_valid = m2sdr_compression_analyse(steps, p.steps, set->sample_rate, p.freq, &RES(res)->compression) == 0;
 }
 
 /* Reports */
@@ -143,7 +164,7 @@ static void comp_analyse(const float complex *x, size_t count, const struct an_s
 static void comp_report_text(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_compression_result *c = &res->compression;
+    const struct m2sdr_compression_result *c = &RES(res)->compression;
     const char *iu = lab_input_unit(set);
     struct comp_plan p;
 
@@ -151,7 +172,7 @@ static void comp_report_text(const struct an_result *res, const struct an_report
     printf("\nCompression:\n");
     printf("  Stimulus   : tone at %+.3f kHz, %d steps of %.1f dB up to %.1f dBFS, TX attenuation %d dB\n", p.freq / 1e3,
            p.steps, p.step_db, p.top, set->lab.tx_att);
-    if (!res->compression_valid || !c->found) {
+    if (!RES(res)->compression_valid || !c->found) {
         printf("  No tone in the steps: TX to RX through the device, the TX attenuation low enough?\n");
         return;
     }
@@ -168,11 +189,11 @@ static void comp_report_text(const struct an_result *res, const struct an_report
 
 static void comp_report_json(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_compression_result *c = &res->compression;
-    const bool ok = res->compression_valid && c->found;
+    const struct m2sdr_compression_result *c = &RES(res)->compression;
+    const bool ok = RES(res)->compression_valid && c->found;
 
     printf("  \"compression\": {\n");
-    print_json_number("tone_offset_hz", res->compression_freq_hz, false);
+    print_json_number("tone_offset_hz", RES(res)->compression_freq_hz, false);
     printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
     if (ok) {
         printf("    \"steps\": %d,\n", c->steps);
@@ -234,7 +255,7 @@ static int comp_option(int id, const char *arg, struct an_cli *cli)
     struct an_lab_settings *lab = &cli->set->lab;
 
     switch (id) {
-    case CP_OPT_ON:    cli->set->compression_on = true; return 0;
+    case CP_OPT_ON:    SET(cli->set)->compression_on = true; return 0;
     case CP_OPT_TONE:  return lab_value(arg, &lab->tone_offset_hz, false);
     case CP_OPT_TOP:   return lab_level(arg, &lab->comp_top_dbfs);
     case CP_OPT_RANGE: return lab_value(arg, &lab->comp_range_db, true);
@@ -263,7 +284,7 @@ static void draw_compression(struct an_ui *ui, bool live, bool *changed)
 {
     static float fx[M2SDR_COMPRESSION_MAX_STEPS], fg[M2SDR_COMPRESSION_MAX_STEPS], fo[M2SDR_COMPRESSION_MAX_STEPS];
     const struct an_result *res = &ui->res;
-    const struct m2sdr_compression_result *c = &res->compression;
+    const struct m2sdr_compression_result *c = &RES(res)->compression;
     struct m2sdr_plot plot;
     struct comp_plan p;
     ImVec2 avail;
@@ -297,11 +318,11 @@ static void draw_compression(struct an_ui *ui, bool live, bool *changed)
         *changed = true;
     }
 
-    if (!res->set.compression_on) {
+    if (!SET(&res->set)->compression_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->compression_valid || !c->found) {
+    if (!RES(res)->compression_valid || !c->found) {
         igTextUnformatted("No tone in the steps: TX to RX through the device.", NULL);
         return;
     }
@@ -342,11 +363,11 @@ static void draw_compression(struct an_ui *ui, bool live, bool *changed)
 static void draw_compression_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_compression_result *c = &res->compression;
+    const struct m2sdr_compression_result *c = &RES(res)->compression;
     const char *iu = lab_input_unit(&res->set);
 
     igSeparatorText("Compression");
-    if (!res->compression_valid || !c->found) {
+    if (!RES(res)->compression_valid || !c->found) {
         igTextUnformatted("No tone.", NULL);
         return;
     }
@@ -372,23 +393,25 @@ static void draw_compression_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_compression = {
-    .key          = "compression",
-    .title        = "Compression",
-    .category     = AN_CAT_LAB,
-    .on           = offsetof(struct an_settings, compression_on),
-    .valid        = offsetof(struct an_result, compression_valid),
-    .report_rank  = 41,
-    .psd_short    = true,
-    .options      = comp_options,
-    .option       = comp_option,
-    .help         = comp_help,
-    .samples      = comp_samples,
-    .analyse      = comp_analyse,
-    .stimulus     = comp_stimulus,
-    .report_text  = comp_report_text,
-    .report_json  = comp_report_json,
+    .key           = "compression",
+    .title         = "Compression",
+    .category      = AN_CAT_LAB,
+    .settings_size = sizeof(struct compression_set),
+    .on            = offsetof(struct compression_set, compression_on),
+    .result_size   = sizeof(struct compression_res),
+    .valid         = offsetof(struct compression_res, compression_valid),
+    .report_rank   = 41,
+    .psd_short     = true,
+    .options       = comp_options,
+    .option        = comp_option,
+    .help          = comp_help,
+    .samples       = comp_samples,
+    .analyse       = comp_analyse,
+    .stimulus      = comp_stimulus,
+    .report_text   = comp_report_text,
+    .report_json   = comp_report_json,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_compression,
-    .results      = draw_compression_results,
+    .draw          = draw_compression,
+    .results       = draw_compression_results,
 #endif
 };
