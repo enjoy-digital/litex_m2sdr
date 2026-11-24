@@ -319,10 +319,6 @@ struct an_result {
     double obw_lo_hz, obw_hi_hz;
     bool   obw_valid;
     double noise_db_hz;
-    struct m2sdr_phase_noise pn;
-    bool   pn_valid;               /* Measured, with a carrier. */
-    struct m2sdr_demod_result demod;
-    bool   demod_valid;            /* Measured; demod.signal and demod.locked say what was found. */
     struct m2sdr_lte_result lte;
     bool   lte_valid;              /* Measured: the sample rate was one of LTE; lte.found says the rest. */
     struct m2sdr_dvbt_result dvbt;
@@ -422,6 +418,8 @@ struct an_floor {
 
 int  floor_default_path(uint64_t dna, char *path, size_t len);
 int  floor_load(struct an_floor *fl, const char *path);
+/* The phase noise of res stored as the floor (analyzer/mode_pn.c). Returns 0, -2 when it has no
+ * carrier, -1 when the file is not written (errno). */
 int  floor_save(struct an_floor *fl, const char *path, const struct an_result *res);
 
 /* Modes */

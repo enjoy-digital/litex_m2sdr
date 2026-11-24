@@ -21,6 +21,18 @@
 
 #include "analyzer.h"
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct demod_res {
+    bool   demod_valid;            /* Measured; demod.signal and demod.locked say what was found. */
+    struct m2sdr_demod_result demod;
+};
+
+extern const struct an_mode an_mode_demod;
+#define RES(res) ((struct demod_res *)an_mode_result(&an_mode_demod, (res)))
+
 /* Analysis */
 /*----------*/
 
@@ -33,7 +45,7 @@ static void demod_analyse(const float complex *x, size_t count, const struct an_
 {
     const size_t n = count < ((size_t)1 << set->demod_log2) ? count : (size_t)1 << set->demod_log2;
 
-    res->demod_valid = m2sdr_demod(x, n, set->sample_rate, &set->demod, &res->demod) == 0;
+    RES(res)->demod_valid = m2sdr_demod(x, n, set->sample_rate, &set->demod, &RES(res)->demod) == 0;
 }
 
 /* Reports */
@@ -44,10 +56,10 @@ static void demod_report_text(const struct an_result *res, const struct an_repor
     const struct an_settings *set = &res->set;
     const double off = rep->off;
     const char *unit = rep->unit;
-    const struct m2sdr_demod_result *d = &res->demod;
+    const struct m2sdr_demod_result *d = &RES(res)->demod;
 
     printf("\nModulation:\n");
-    if (!res->demod_valid || !d->signal) {
+    if (!RES(res)->demod_valid || !d->signal) {
         printf("  No signal with a symbol rate was found: tune on it, with a sample rate of a few\n"
                "  times its bandwidth, or give --symbol-rate.\n");
     } else {
@@ -68,13 +80,13 @@ static void demod_report_json(const struct an_result *res, const struct an_repor
 {
     const struct an_settings *set = &res->set;
     const double off = rep->off;
-    const struct m2sdr_demod_result *d = &res->demod;
+    const struct m2sdr_demod_result *d = &RES(res)->demod;
 
     printf("  \"modulation\": {\n");
-    printf("    \"signal\": %s,\n", res->demod_valid && d->signal ? "true" : "false");
-    printf("    \"locked\": %s%s\n", res->demod_valid && d->locked ? "true" : "false",
-           res->demod_valid && d->signal ? "," : "");
-    if (res->demod_valid && d->signal) {
+    printf("    \"signal\": %s,\n", RES(res)->demod_valid && d->signal ? "true" : "false");
+    printf("    \"locked\": %s%s\n", RES(res)->demod_valid && d->locked ? "true" : "false",
+           RES(res)->demod_valid && d->signal ? "," : "");
+    if (RES(res)->demod_valid && d->signal) {
         printf("    \"type\": \"%s\",\n", m2sdr_modulation_name(d->modulation));
         print_json_number("symbol_rate", d->symbol_rate, false);
         print_json_number("rolloff", d->rolloff, false);
@@ -198,7 +210,7 @@ static void draw_modulation(struct an_ui *ui, bool live, bool *changed)
     static float sx[M2SDR_DEMOD_MAX_SYMBOLS], sy[M2SDR_DEMOD_MAX_SYMBOLS], evm[M2SDR_DEMOD_MAX_SYMBOLS];
     static float complex points[256];
     static float px[256], py[256];
-    const struct m2sdr_demod_result *d = &ui->res.demod;
+    const struct m2sdr_demod_result *d = &RES(&ui->res)->demod;
     struct m2sdr_plot plot;
     ImVec2 avail, sq;
     float side, lim = 1.0f, far = 0.0f, eye_h;
@@ -240,7 +252,7 @@ static void draw_modulation(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!ui->res.demod_valid || !d->signal) {
+    if (!RES(&ui->res)->demod_valid || !d->signal) {
         igPushTextWrapPos(0.0f);
         igTextUnformatted("No signal with a symbol rate was found: tune on it, with a sample rate of a few times its "
                           "bandwidth, or give the symbol rate.", NULL);
@@ -334,10 +346,10 @@ static void draw_modulation(struct an_ui *ui, bool live, bool *changed)
 static void draw_modulation_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_demod_result *d = &res->demod;
+    const struct m2sdr_demod_result *d = &RES(res)->demod;
 
     igSeparatorText("Modulation");
-    if (!res->demod_valid || !d->signal) {
+    if (!RES(res)->demod_valid || !d->signal) {
         igTextUnformatted("No signal.", NULL);
         return;
     }
@@ -371,8 +383,9 @@ const struct an_mode an_mode_demod = {
     .title       = "Modulation",
     .category    = AN_CAT_SIGNAL,
     .on          = offsetof(struct an_settings, demod_on),
-    .valid       = offsetof(struct an_result, demod_valid),
-    .found       = offsetof(struct an_result, demod.locked),
+    .result_size = sizeof(struct demod_res),
+    .valid       = offsetof(struct demod_res, demod_valid),
+    .found       = offsetof(struct demod_res, demod.locked),
     .report_rank = 40,
     .samples     = demod_samples,
     .analyse     = demod_analyse,

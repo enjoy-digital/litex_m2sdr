@@ -18,7 +18,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <time.h>
 
 #include "m2sdr_cal.h"
@@ -306,34 +305,6 @@ int floor_load(struct an_floor *fl, const char *path)
     return fl->points >= 2 ? 0 : -1;
 }
 
-int floor_save(struct an_floor *fl, const char *path, const struct an_result *res)
-{
-    char dir[1024], *p;
-    FILE *f;
-    int i;
-
-    /* Directories of the path. */
-    if (snprintf(dir, sizeof(dir), "%s", path) < (int)sizeof(dir)) {
-        for (p = dir + 1; *p; p++) {
-            if (*p == '/') {
-                *p = '\0';
-                (void)mkdir(dir, 0755);
-                *p = '/';
-            }
-        }
-    }
-    f = fopen(path, "w");
-    if (!f)
-        return -1;
-    fprintf(f, "# M2SDR phase noise floor: offset_hz,l_dbc_hz\n");
-    fprintf(f, "# freq_hz=%.0f sample_rate=%.0f\n", res->set.freq_hz + res->pn.carrier_hz, res->set.sample_rate);
-    for (i = 0; i < res->pn.points; i++)
-        fprintf(f, "%.3f,%.3f\n", res->pn.offset_hz[i], res->pn.l_dbc_hz[i]);
-    if (fclose(f) != 0)
-        return -1;
-    return floor_load(fl, path);
-}
-
 /* Report */
 /*--------*/
 
@@ -560,11 +531,12 @@ int run_report(struct an_source *src, const struct an_settings *set, bool json, 
             goto out;
     }
     if (floor_save_path) {
-        if (!res->pn_valid) {
+        rc = floor_save(fl, floor_save_path, res);
+        if (rc == -2) {
             fprintf(stderr, "No carrier: no floor stored.\n");
             goto out;
         }
-        if (floor_save(fl, floor_save_path, res) != 0) {
+        if (rc != 0) {
             fprintf(stderr, "Could not write %s: %s\n", floor_save_path, strerror(errno));
             goto out;
         }

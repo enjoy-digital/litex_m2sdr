@@ -14,10 +14,23 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <sys/stat.h>
 
 #include "m2sdr_cli.h"
 
 #include "analyzer.h"
+
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct pn_res {
+    bool   pn_valid;               /* Measured, with a carrier. */
+    struct m2sdr_phase_noise pn;
+};
+
+extern const struct an_mode an_mode_pn;
+#define RES(res) ((struct pn_res *)an_mode_result(&an_mode_pn, (res)))
 
 /* Analysis */
 /*----------*/
@@ -31,11 +44,11 @@ static void pn_analyse(const float complex *x, size_t count, const struct an_set
 {
     const size_t n = count < ((size_t)1 << set->pn_log2) ? count : (size_t)1 << set->pn_log2;
 
-    res->pn_valid = m2sdr_phase_noise(x, n, set->sample_rate, set->freq_hz, set->pn_lo_hz, set->pn_hi_hz,
-                                      &res->pn) == 0 && res->pn.found;
+    RES(res)->pn_valid = m2sdr_phase_noise(x, n, set->sample_rate, set->freq_hz, set->pn_lo_hz, set->pn_hi_hz,
+                                           &RES(res)->pn) == 0 && RES(res)->pn.found;
     /* The jitter needs the RF frequency of the carrier, known once it is found. */
-    if (res->pn_valid && set->freq_hz + res->pn.carrier_hz > 0)
-        res->pn.jitter_s = res->pn.rms_rad / (2.0 * M_PI * (set->freq_hz + res->pn.carrier_hz));
+    if (RES(res)->pn_valid && set->freq_hz + RES(res)->pn.carrier_hz > 0)
+        RES(res)->pn.jitter_s = RES(res)->pn.rms_rad / (2.0 * M_PI * (set->freq_hz + RES(res)->pn.carrier_hz));
 }
 
 /* Reports */
@@ -66,11 +79,11 @@ static void pn_report_text(const struct an_result *res, const struct an_report *
     const double off = rep->off;
     const char *unit = rep->unit;
     const struct an_floor *fl = rep->fl;
-    const struct m2sdr_phase_noise *pn = &res->pn;
+    const struct m2sdr_phase_noise *pn = &RES(res)->pn;
     int i;
 
     printf("\nPhase noise:\n");
-    if (!res->pn_valid) {
+    if (!RES(res)->pn_valid) {
         printf("  No carrier stands %.0f dB above the rest of the capture.\n", 10.0);
         return;
     }
@@ -109,12 +122,12 @@ static void pn_report_json(const struct an_result *res, const struct an_report *
     const struct an_settings *set = &res->set;
     const double off = rep->off;
     const struct an_floor *fl = rep->fl;
-    const struct m2sdr_phase_noise *pn = &res->pn;
+    const struct m2sdr_phase_noise *pn = &RES(res)->pn;
     int i;
 
     printf("  \"phase_noise\": {\n");
-    printf("    \"found\": %s,\n", res->pn_valid ? "true" : "false");
-    if (res->pn_valid) {
+    printf("    \"found\": %s,\n", RES(res)->pn_valid ? "true" : "false");
+    if (RES(res)->pn_valid) {
         print_json_number("carrier_hz", set->freq_hz + pn->carrier_hz, false);
         print_json_number("carrier_db", pn->carrier_db + off, false);
         print_json_number("integrated_from_hz", pn->lo_hz, false);
@@ -220,6 +233,40 @@ static void pn_help(void)
            "\n", 1 << AN_PN_DEFAULT_LOG2);
 }
 
+/* Floor of the board */
+/*----------------------*/
+
+int floor_save(struct an_floor *fl, const char *path, const struct an_result *res)
+{
+    const struct m2sdr_phase_noise *pn = &RES(res)->pn;
+    char dir[1024], *p;
+    FILE *f;
+    int i;
+
+    if (!RES(res)->pn_valid)
+        return -2;
+    /* Directories of the path. */
+    if (snprintf(dir, sizeof(dir), "%s", path) < (int)sizeof(dir)) {
+        for (p = dir + 1; *p; p++) {
+            if (*p == '/') {
+                *p = '\0';
+                (void)mkdir(dir, 0755);
+                *p = '/';
+            }
+        }
+    }
+    f = fopen(path, "w");
+    if (!f)
+        return -1;
+    fprintf(f, "# M2SDR phase noise floor: offset_hz,l_dbc_hz\n");
+    fprintf(f, "# freq_hz=%.0f sample_rate=%.0f\n", res->set.freq_hz + pn->carrier_hz, res->set.sample_rate);
+    for (i = 0; i < pn->points; i++)
+        fprintf(f, "%.3f,%.3f\n", pn->offset_hz[i], pn->l_dbc_hz[i]);
+    if (fclose(f) != 0)
+        return -1;
+    return floor_load(fl, path);
+}
+
 #ifdef M2SDR_ANALYZER_GUI
 
 /* View */
@@ -230,7 +277,7 @@ static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
     static const char *const sizes[] = { "65536", "131072", "262144", "524288", "1048576", "2097152", "4194304", "8388608" };
     static float lx[M2SDR_PN_MAX_POINTS], l[M2SDR_PN_MAX_POINTS], am[M2SDR_PN_MAX_POINTS];
     static float fx[M2SDR_PN_MAX_POINTS], fy[M2SDR_PN_MAX_POINTS];
-    const struct m2sdr_phase_noise *pn = &ui->res.pn;
+    const struct m2sdr_phase_noise *pn = &RES(&ui->res)->pn;
     const struct an_floor *fl = ui->fl;
     struct m2sdr_plot plot;
     double top = -200.0, bottom = 0.0;
@@ -253,7 +300,7 @@ static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
     igCheckbox("AM noise", &ui->pn_am);
     if (ui->floor_path) {
         same_line_or_wrap(16.0f, 115.0f);
-        if (igButton("Store as floor", (ImVec2){ 0.0f, 0.0f }) && ui->res.pn_valid) {
+        if (igButton("Store as floor", (ImVec2){ 0.0f, 0.0f }) && RES(&ui->res)->pn_valid) {
             if (floor_save(ui->fl, ui->floor_path, &ui->res) == 0)
                 snprintf(ui->message, sizeof(ui->message), "Floor written to %.200s", ui->floor_path);
             else
@@ -265,7 +312,7 @@ static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!ui->res.pn_valid) {
+    if (!RES(&ui->res)->pn_valid) {
         igPushTextWrapPos(0.0f);
         igTextUnformatted("No carrier stands 10 dB above the rest of the capture: lower the sample rate around it, "
                           "or tune on it.", NULL);
@@ -330,13 +377,13 @@ static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
 static void draw_pn_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_phase_noise *pn = &res->pn;
+    const struct m2sdr_phase_noise *pn = &RES(res)->pn;
     const struct an_floor *fl = ui->fl;
     char name[32];
     int i;
 
     igSeparatorText("Phase noise");
-    if (!res->pn_valid) {
+    if (!RES(res)->pn_valid) {
         igTextUnformatted("No carrier.", NULL);
         return;
     }
@@ -382,7 +429,8 @@ const struct an_mode an_mode_pn = {
     .title       = "Phase noise",
     .category    = AN_CAT_SIGNAL,
     .on          = offsetof(struct an_settings, pn_on),
-    .valid       = offsetof(struct an_result, pn_valid),
+    .result_size = sizeof(struct pn_res),
+    .valid       = offsetof(struct pn_res, pn_valid),
     .report_rank = 50,
     .samples     = pn_samples,
     .analyse     = pn_analyse,
