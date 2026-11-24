@@ -59,8 +59,9 @@ int main(void)
         port[i] = liteeth_udp_listen_port(&u[i]);
     }
 
-    if (port[0] != PORT || port[1] == 0 || port[1] == PORT) {
-        fprintf(stderr, "test_liteeth_udp_port: ports %u %u (expected %u, then a free one)\n",
+    /* The first gets PORT, unless another run of the tests holds it; the second a free one. */
+    if (port[0] == 0 || port[1] == 0 || port[1] == port[0] || port[1] == PORT) {
+        fprintf(stderr, "test_liteeth_udp_port: ports %u %u (expected %u or a free one, then another free one)\n",
             port[0], port[1], PORT);
         return 1;
     }
