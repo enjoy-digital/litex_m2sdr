@@ -22,14 +22,14 @@
 /*-------*/
 
 /* Downlink of the ARFCNs of a band (TS 45.005 2): first and last ARFCN, frequency of the
- * first, 200 kHz apart. E-GSM 900 also has 975 to 1023 below ARFCN 0. */
+ * first, 200 kHz apart. GSM 900: P-GSM is 1 to 124, E-GSM adds 0 and 975 to 1023 below it. */
 static const struct gsm_band {
     const char *name;
     int    first, last;
     double first_hz;
 } gsm_bands[] = {
     { "GSM 850",    128, 251,  869.2e6 },
-    { "E-GSM 900",    0, 124,  935.0e6 },
+    { "GSM 900",      0, 124,  935.0e6 },
     { "DCS 1800",   512, 885, 1805.2e6 },
     { "PCS 1900",   512, 810, 1930.2e6 },
 };
@@ -46,6 +46,14 @@ static double gsm_arfcn_hz(int band, int arfcn)
     if (arfcn < b->first || arfcn > b->last)
         return 0.0;
     return b->first_hz + 0.2e6 * (arfcn - b->first);
+}
+
+/* Name of the band of an ARFCN: P-GSM or E-GSM in the 900 MHz band. */
+static const char *gsm_band_name(int band, int arfcn)
+{
+    if (band == 1)
+        return arfcn >= 1 && arfcn <= 124 ? "P-GSM 900" : "E-GSM 900";
+    return gsm_bands[band].name;
 }
 
 /* ARFCN of a frequency, its band in *band; -1 off the raster of the bands. DCS 1800 and PCS 1900
@@ -104,7 +112,7 @@ static void gsm_report_text(const struct an_result *res, const struct an_report 
 
     printf("\nGSM:\n");
     if (arfcn >= 0)
-        printf("  Channel    : ARFCN %d (%s)\n", arfcn, gsm_bands[band].name);
+        printf("  Channel    : ARFCN %d (%s)\n", arfcn, gsm_band_name(band, arfcn));
     if (!res->gsm_valid) {
         printf("  The sample rate must be 0.5 to 8 MSPS (1.92 MSPS), with at least two frames of samples.\n");
         return;
@@ -148,7 +156,7 @@ static void gsm_report_json(const struct an_result *res, const struct an_report 
 
     printf("  \"gsm\": {\n");
     if (arfcn >= 0)
-        printf("    \"arfcn\": %d,\n    \"band\": \"%s\",\n", arfcn, gsm_bands[band].name);
+        printf("    \"arfcn\": %d,\n    \"band\": \"%s\",\n", arfcn, gsm_band_name(band, arfcn));
     printf("    \"fcch\": %s,\n", fcch ? "true" : "false");
     printf("    \"found\": %s%s\n", res->gsm_valid && g->found ? "true" : "false", fcch ? "," : "");
     if (fcch) {
@@ -303,7 +311,7 @@ static void gsm_controls(struct an_ui *ui, bool *changed)
     }
     if (arfcn >= 0) {
         igSameLine(0.0f, 16.0f);
-        igText("Tuned: ARFCN %d (%s)", arfcn, gsm_bands[band].name);
+        igText("Tuned: ARFCN %d (%s)", arfcn, gsm_band_name(band, arfcn));
     }
     if (fabs(ui->set.sample_rate - AN_GSM_RATE) > 1.0) {
         igSameLine(0.0f, 16.0f);
@@ -432,7 +440,7 @@ static void draw_gsm_results(struct an_ui *ui)
     }
     if (igBeginTable("##gsm", 2, ImGuiTableFlags_SizingStretchProp, (ImVec2){ 0.0f, 0.0f }, 0.0f)) {
         if (arfcn >= 0)
-            label_value("ARFCN", "%d (%s)", arfcn, gsm_bands[band].name);
+            label_value("ARFCN", "%d (%s)", arfcn, gsm_band_name(band, arfcn));
         label_value("Carrier", "%.6f MHz", (res->set.freq_hz + g->freq_error_hz) / 1e6);
         label_value("Offset", "%+.1f Hz", g->freq_error_hz);
         label_value("FCCH", "%d, coherence %.2f", g->fcch_bursts, g->fcch_quality);

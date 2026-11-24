@@ -911,6 +911,7 @@ static int check_file(const char *path, int which)
         printf("GSM report of m2sdr_analyzer:\n");
         CHECK("FCCH and SCH", strstr(json, "\"fcch\": true") && strstr(json, "\"found\": true"));
         CHECK_NEAR("ARFCN", json_number(json, "gsm", "arfcn"), 62, 0.0);
+        CHECK("band P-GSM 900", strstr(json, "\"band\": \"P-GSM 900\"") != NULL);
         CHECK_NEAR("BSIC", json_number(json, "gsm", "bsic"), file_gsm.bsic, 0.0);
         CHECK_NEAR("frame number", json_number(json, "gsm", "fn"), 1010, 0.0);
         CHECK_NEAR("carrier offset (Hz)", json_number(json, "gsm", "carrier_offset_hz"), file_gsm.freq_hz, 10.0);

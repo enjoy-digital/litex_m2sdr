@@ -1009,7 +1009,7 @@ same N_ID_2 at the same time and frequency read as the stronger one. One search 
 The GSM view, and `--gsm` with `--report` (and `--watch`), read a BCCH carrier (C0): its
 frequency correction bursts (FCCH) and the synchronisation bursts (SCH) one frame after them.
 A capture is 60 ms, an FCCH and its SCH wherever it starts. The scan of a band is left to the
-caller (or to [m2sdr_cal](#sw-cal)); the view tunes to an ARFCN of GSM 850, E-GSM 900, DCS 1800
+caller (or to [m2sdr_cal](#sw-cal)); the view tunes to an ARFCN of GSM 850, GSM 900 (P-GSM, E-GSM), DCS 1800
 or PCS 1900.
 
 ```sh
