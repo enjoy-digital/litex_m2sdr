@@ -68,40 +68,6 @@ static std::vector<size_t> parse_channel_list(const std::string &channels_str)
     return chans;
 }
 
-static inline int32_t arithmetic_shift_right(int32_t value, unsigned shift)
-{
-    if (value >= 0)
-        return value >> shift;
-    return -(((-value) + ((1 << shift) - 1)) >> shift);
-}
-
-static inline int8_t clamp_to_sc8(int32_t value)
-{
-    if (value > 127)
-        return 127;
-    if (value < -128)
-        return -128;
-    return static_cast<int8_t>(value);
-}
-
-static inline int8_t cf32_to_sc8(float sample, double scale)
-{
-    if (!std::isfinite(sample))
-        return 0;
-    const double scaled = sample * scale;
-    if (scaled > 127.0)
-        return 127;
-    if (scaled < -128.0)
-        return -128;
-    return static_cast<int8_t>(std::lround(scaled));
-}
-
-static inline int8_t sc16_q11_to_sc8(int16_t sample)
-{
-    const int32_t offset = sample < 0 ? 7 : 8;
-    return clamp_to_sc8(arithmetic_shift_right(static_cast<int32_t>(sample) + offset, 4));
-}
-
 static enum m2sdr_format soapy_stream_format_to_m2sdr(const std::string &format, uint32_t bit_mode);
 
 static std::string get_kwargs_string(
@@ -1797,13 +1763,8 @@ void SoapyLiteXM2SDR::interleaveCF32(
         litex_m2sdr::cf32_to_sc12_block(samples_cf32, reinterpret_cast<int16_t*>(dst), len,
             _nChannels * _samplesPerComplex, tx_scale, _samplesScaling);
     } else if (_bytesPerSample == 1) {
-        int8_t *dst_int8 = reinterpret_cast<int8_t*>(dst);
-        for (uint32_t i = 0; i < len; i++) {
-            dst_int8[0] = cf32_to_sc8(samples_cf32[0] * tx_scale, _samplesScaling); /* I. */
-            dst_int8[1] = cf32_to_sc8(samples_cf32[1] * tx_scale, _samplesScaling); /* Q. */
-            samples_cf32 += 2;
-            dst_int8 += _nChannels * _samplesPerComplex;
-        }
+        litex_m2sdr::cf32_to_sc8_block(samples_cf32, reinterpret_cast<int8_t*>(dst), len,
+            _nChannels * _samplesPerComplex, tx_scale, _samplesScaling);
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported _bytesPerSample value: %u.", _bytesPerSample);
     }
@@ -1822,15 +1783,9 @@ void SoapyLiteXM2SDR::deinterleaveCF32(
         litex_m2sdr::sc12_to_cf32_block(reinterpret_cast<const int16_t*>(src), samples_cf32, len,
             _nChannels * _samplesPerComplex, _samplesScaling);
     } else if (_bytesPerSample == 1) {
-        const int8_t *src_int8 = reinterpret_cast<const int8_t*>(src);
-
-        for (uint32_t i = 0; i < len; i++) {
-            /* Scale to float (-1.0 to 1.0 range) */
-            samples_cf32[0] = static_cast<float>(src_int8[0]) / _samplesScaling; /* I. */
-            samples_cf32[1] = static_cast<float>(src_int8[1]) / _samplesScaling; /* Q. */
-            samples_cf32 += 2;
-            src_int8 += _nChannels * _samplesPerComplex;
-        }
+        /* Scale to float (-1.0 to 1.0 range) */
+        litex_m2sdr::sc8_to_cf32_block(reinterpret_cast<const int8_t*>(src), samples_cf32, len,
+            _nChannels * _samplesPerComplex, _samplesScaling);
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported _bytesPerSample value: %u.", _bytesPerSample);
     }
@@ -1854,14 +1809,8 @@ void SoapyLiteXM2SDR::interleaveCS16(
             dst_int16 += _nChannels * _samplesPerComplex;
         }
     } else if (_bytesPerSample == 1) {
-        int8_t *dst_int8 = reinterpret_cast<int8_t*>(dst);
-
-        for (uint32_t i = 0; i < len; i++) {
-            dst_int8[0] = sc16_q11_to_sc8(samples_cs16[0]); /* I. */
-            dst_int8[1] = sc16_q11_to_sc8(samples_cs16[1]); /* Q. */
-            samples_cs16 += 2;
-            dst_int8 += _nChannels * _samplesPerComplex;
-        }
+        litex_m2sdr::sc16_q11_to_sc8_block(samples_cs16, reinterpret_cast<int8_t*>(dst), len,
+            2, _nChannels * _samplesPerComplex);
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported _bytesPerSample value: %u.", _bytesPerSample);
     }
@@ -1908,13 +1857,8 @@ void SoapyLiteXM2SDR::interleaveCS8(
     const int8_t *samples_cs8 = reinterpret_cast<const int8_t*>(src) + (offset * _samplesPerComplex);
 
     if (_bytesPerSample == 1) {
-        int8_t *dst_int8 = reinterpret_cast<int8_t*>(dst);
-        for (uint32_t i = 0; i < len; i++) {
-            dst_int8[0] = samples_cs8[0]; /* I. */
-            dst_int8[1] = samples_cs8[1]; /* Q. */
-            samples_cs8 += 2;
-            dst_int8 += _nChannels * _samplesPerComplex;
-        }
+        litex_m2sdr::sc8_copy_block(samples_cs8, reinterpret_cast<int8_t*>(dst), len,
+            2, _nChannels * _samplesPerComplex);
     } else if (_bytesPerSample == 2) {
         int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst);
         for (uint32_t i = 0; i < len; i++) {
@@ -1937,21 +1881,11 @@ void SoapyLiteXM2SDR::deinterleaveCS8(
     int8_t *samples_cs8 = reinterpret_cast<int8_t*>(dst) + (offset * _samplesPerComplex);
 
     if (_bytesPerSample == 1) {
-        const int8_t *src_int8 = reinterpret_cast<const int8_t*>(src);
-        for (uint32_t i = 0; i < len; i++) {
-            samples_cs8[0] = src_int8[0]; /* I. */
-            samples_cs8[1] = src_int8[1]; /* Q. */
-            samples_cs8 += 2;
-            src_int8 += _nChannels * _samplesPerComplex;
-        }
+        litex_m2sdr::sc8_copy_block(reinterpret_cast<const int8_t*>(src), samples_cs8, len,
+            _nChannels * _samplesPerComplex, 2);
     } else if (_bytesPerSample == 2) {
-        const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
-        for (uint32_t i = 0; i < len; i++) {
-            samples_cs8[0] = sc16_q11_to_sc8(src_int16[0]); /* I. */
-            samples_cs8[1] = sc16_q11_to_sc8(src_int16[1]); /* Q. */
-            samples_cs8 += 2;
-            src_int16 += _nChannels * _samplesPerComplex;
-        }
+        litex_m2sdr::sc16_q11_to_sc8_block(reinterpret_cast<const int16_t*>(src), samples_cs8, len,
+            _nChannels * _samplesPerComplex, 2);
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported _bytesPerSample value: %u.", _bytesPerSample);
     }
