@@ -1522,11 +1522,11 @@ static int64_t pcie_live_cursor(struct m2sdr_dev *dev, uint32_t loop_status_addr
 /* The RFIC DMA writes each buffer's header at buffer START, before the completion cursor
  * increments, so slot (rx_user_count)%count already holds the in-flight header when the host is
  * caught up -- monitoring it would wait a full ring. Slot (rx_user_count + OFFSET)%count instead
- * changes exactly when the wanted buffer completes (the device starts the next one). The RFIC's
- * header pipeline is 2 buffers deep here (measured: offset 2 => monitor fires ~98%, overflow 0,
- * keeps up; offset 0/1 => ~0-4% fire, overflow). The pipeline depth may differ at other sample
- * rates/gateware. */
-static const int m2sdr_rx_slot_offset = 2;
+ * changes exactly when the wanted buffer completes (the device starts the next one): offset 1.
+ * It was 2 while the completion count was one buffer behind (the DMA status is the position of
+ * the last buffer written, read as a number of buffers): the buffer delivered was then the one
+ * before the last complete one. */
+static const int m2sdr_rx_slot_offset = 1;
 
 /* Low-latency zero-copy RX wait. With M2SDR_RX_WAIT=mwaitx on an MWAITX-capable CPU, sleep on
  * the next RX ring slot's DMA-header cache line and wake the instant the device DMA-writes that
@@ -2395,7 +2395,12 @@ static int64_t pcie_live_cursor(struct m2sdr_dev *dev, uint32_t loop_status_addr
     uint32_t loop_status = 0;
     if (buf_count <= 0 || m2sdr_reg_read(dev, loop_status_addr, &loop_status) != 0)
         return stale;
-    int64_t live_index  = (int64_t)(loop_status & 0xffff);
+    /* The live index is the position of the last buffer written, so the buffers written are one
+     * more (as in the kernel interrupt handler). Before the first interrupt the position reads 0
+     * with no buffer or with one buffer written: keep the count then. */
+    if (stale <= 0)
+        return stale;
+    int64_t live_index  = ((int64_t)(loop_status & 0xffff) + 1) % buf_count;
     int64_t stale_index = stale % buf_count;
     int64_t delta       = (live_index - stale_index + buf_count) % buf_count;
     /* The live index can read a little behind the IRQ-updated count. Taken modulo the ring,

@@ -1016,6 +1016,7 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 	struct litepcie_device *s = (struct litepcie_device *) data;
 	struct litepcie_chan *chan;
 	uint32_t loop_status;
+	int64_t hw_pos;
 	uint32_t clear_mask, irq_vector, irq_enable;
 	int i;
 
@@ -1073,11 +1074,20 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 		if (irq_vector & (1 << chan->dma.writer_interrupt)) {
 			loop_status = litepcie_readl(s, chan->dma.base +
 				PCIE_DMA_WRITER_TABLE_LOOP_STATUS_OFFSET);
-			chan->dma.writer_hw_count &= ((~(dma_buffer_count - 1) << 16) & 0xffffffffffff0000);
-			chan->dma.writer_hw_count |= (loop_status >> 16) * dma_buffer_count + (loop_status & 0xffff);
-			if (chan->dma.writer_hw_count_last > chan->dma.writer_hw_count)
-				chan->dma.writer_hw_count += (1 << (ilog2(dma_buffer_count) + 16));
-			chan->dma.writer_hw_count_last = chan->dma.writer_hw_count;
+			/* The loop status is the position of the last descriptor the writer executed, not
+			 * a number of buffers: (index, count) is (0, 0) once the first buffer is written,
+			 * and this interrupt is raised at the end of a buffer. The buffers written are
+			 * one more than the position. Without the +1, each buffer was only handed to
+			 * the application when the next one was complete (one buffer of RX latency).
+			 * writer_hw_count_last keeps the position, to extend it beyond its 32 bits.
+			 */
+			hw_pos = chan->dma.writer_hw_count_last;
+			hw_pos &= ((~(dma_buffer_count - 1) << 16) & 0xffffffffffff0000);
+			hw_pos |= (loop_status >> 16) * dma_buffer_count + (loop_status & 0xffff);
+			if (chan->dma.writer_hw_count_last > hw_pos)
+				hw_pos += (1 << (ilog2(dma_buffer_count) + 16));
+			chan->dma.writer_hw_count_last = hw_pos;
+			chan->dma.writer_hw_count      = hw_pos + 1;
 			litepcie_dma_update_level_stats(&chan->dma);
 #ifdef DEBUG_MSI
 			dev_dbg(&s->dev->dev, "MSI DMA%d Writer buf: %lld\n", i,
