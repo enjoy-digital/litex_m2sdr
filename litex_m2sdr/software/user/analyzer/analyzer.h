@@ -63,6 +63,7 @@
 #include "m2sdr_analysis_lab.h"
 
 #define AN_MODES_MAX           64            /* Views and modes. */
+#define AN_SETTINGS_MODES      4096          /* Bytes of the settings of all the modes. */
 #define AN_DEFAULT_FREQ_HZ     2400e6
 #define AN_DEFAULT_SAMPLE_RATE 7680000.0
 #define AN_DEFAULT_FFT_LEN     16384
@@ -228,6 +229,9 @@ struct an_settings {
     bool   dvbt2_on;
     bool   dvbt2_fast;
     struct m2sdr_dvbt2_config dvbt2_hint;
+    /* Settings of each mode that has some, a block of its settings_size at the place
+     * an_registry_init() gives it, read with an_mode_settings(): copied with the rest. */
+    _Alignas(16) unsigned char modes[AN_SETTINGS_MODES];
 };
 
 extern const char *const window_names[];  /* enum m2sdr_window. */
@@ -408,7 +412,10 @@ struct an_mode {
     const char *key;               /* --view name: "dvbt". */
     const char *title;             /* Its tab: "DVB-T". */
     enum an_category category;
-    size_t on;                     /* offsetof(struct an_settings, <flag>); AN_NONE: always measured. */
+    /* Its settings: settings_size bytes of a type of its own (in its file) in struct an_settings,
+     * read with an_mode_settings(); 0: its fields are in struct an_settings. */
+    size_t settings_size;
+    size_t on;                     /* offsetof(<its settings>, <flag>); AN_NONE: always measured. */
     /* Its result: result_size bytes of a type of its own (in its file), flat (copied with
      * memcpy), allocated zeroed when it is turned on and freed when it is off, read with
      * an_mode_result(). A mode that analyses has one. */
@@ -508,16 +515,18 @@ int    an_mode_index(const struct an_mode *m);
 void  *an_mode_result(const struct an_mode *m, const struct an_result *res);
 /* A flag of the result of a mode, at an offset of its result (valid, found). */
 bool   an_mode_result_flag(const struct an_mode *m, const struct an_result *res, size_t off);
+/* The settings of a mode in set: its block (set itself for a mode without settings_size). */
+void  *an_mode_settings(const struct an_mode *m, const struct an_settings *set);
 
 /* The flag of a mode in settings; NULL for a view of the spectrum. */
 static inline bool *an_mode_flag(const struct an_mode *m, struct an_settings *set)
 {
-    return m->on == AN_NONE ? NULL : (bool *)((char *)set + m->on);
+    return m->on == AN_NONE ? NULL : (bool *)((char *)an_mode_settings(m, set) + m->on);
 }
 
 static inline bool an_mode_on(const struct an_mode *m, const struct an_settings *set)
 {
-    return m->on != AN_NONE && *(const bool *)((const char *)set + m->on);
+    return m->on != AN_NONE && *(const bool *)((const char *)an_mode_settings(m, set) + m->on);
 }
 
 /* Reports */
