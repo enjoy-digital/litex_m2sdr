@@ -1096,6 +1096,64 @@ The view and `--watch` keep the RDS decoder between the captures of a frequency,
 RadioText build up live; the report has the one second of its capture. RDS needs about 16 dB of
 CNR for no block errors, and the audio SNR means nothing below the FM threshold (about 12 dB).
 
+#### Pulsed signals {#sw-analyzer-pulse}
+The Pulses view (Monitoring), and `--pulses` with `--report` (and `--watch`), find the pulses
+of a capture (radar, DFS test patterns, pulsed interferers) and measure each one and their
+train. The option and the view are `pulses`: `--pulse` is the transmit pulse of the demodulation.
+m2sdr_analyzer --freq 5.6e9 --sample-rate 20e6 --view pulses
+m2sdr_analyzer --freq 5.6e9 --sample-rate 20e6 --report --pulses
+m2sdr_analyzer --freq 5.6e9 --sample-rate 20e6 --report --pulses --watch
+A capture is 50 ms (`--pulse-seconds`): three pulses of PRIs up to 16 ms. The view shows the
+peak power of the capture with the pulses found, the threshold and the noise floor, a
+histogram of the intervals between pulses with the PRIs of the pattern, and the table of the
+pulses.
+| Noise floor, threshold | A low quantile of the power of blocks of the capture, the threshold 10 dB over it (`--pulse-threshold`), with 3 dB of hysteresis |
+| Start, width | 50 % points of the amplitude, its top the median amplitude of the pulse |
+| Rise, fall | 10 % to 90 % of the amplitude: meaningful above about 25 dB of SNR |
+| Peak, mean power | Highest sample, mean over the top (between the 90 % points) |
+| Frequency, chirp | On the top: chirp rate from the lag product of the lag-1 products, frequency at the middle of the dechirped pulse |
+| Modulation | CW or LFM when the pulse fits that model (coherence over 0.5), other otherwise (phase codes, nonlinear FM) |
+| PRI, stagger | Shortest pattern of intervals between leading edges that repeats (up to 8), within 0.5 % |
+| PRF, duty cycle | 1 / mean PRI of the pattern; mean width over mean PRI |
+One emitter at a time is assumed: interleaved trains, or a missed pulse, read as a PRI with no
+pattern (jitter), with its mean and spread.
+#### EMC pre-compliance {#sw-analyzer-emc}
+The EMC view (Monitoring), and `--emc` with `--report` (and `--watch`), are the measuring
+receiver of CISPR 16-1-1 over a span: per channel, the peak, quasi-peak and average (CISPR-AV)
+levels, against limit lines.
+This is pre-compliance. The levels are dBFS unless `--emc-offset` (dBFS to dBuV at the input)
+and `--emc-factors` (antenna factor and cable loss) are given, and the board has no absolute
+calibration. The CISPR 16-1-1 constants below come from memory, not from the text of the
+standard: check them against CISPR 16-1-1 and a calibrated generator (a CW, then an impulse
+generator at the reference repetition rate) before relying on the readings.
+m2sdr_analyzer --freq 100e6 --sample-rate 20e6 --view emc --emc-limit-qp qp.txt --emc-limit-av av.txt
+m2sdr_analyzer --freq 100e6 --sample-rate 20e6 --report --emc --emc-band cd --emc-offset 107 \
+    --emc-factors antenna.txt --emc-limit-qp qp.txt
+| Band | Range | RBW (6 dB) | Quasi-peak: charge / discharge / meter | Average meter |
+|------|----------------|------------|-------------------|--------|
+| A | 9 to 150 kHz | 200 Hz | 45 ms / 500 ms / 160 ms | 160 ms |
+| B | 0.15 to 30 MHz | 9 kHz | 1 ms / 160 ms / 160 ms | 160 ms |
+| C/D | 30 to 1000 MHz | 120 kHz | 1 ms / 550 ms / 100 ms | 100 ms |
+The band is the one of `--freq` unless `--emc-band` gives it. The RFIC tunes from 70 MHz: bands A
+and B are for captures from another receiver, or behind an up-converter. Each channel is the
+capture through a Gaussian filter of the RBW, from one FFT of the capture, and its envelope
+through the detectors. The quasi-peak diode is modelled on the crests of the IF carrier, which
+follows the pulse response curves of CISPR 16-1-1 in the three bands within about 1 dB on
+synthetic impulses. The capture (2^18 samples, `--emc-samples`) is taken as one period of a
+steady emission: the detectors are in their steady state, as after a long measurement. An
+emission that changes slower than the capture, or an isolated event, is not read as a receiver
+would over seconds.
+Limit lines and factors are text files, a frequency in Hz and a level in dB per line, `#` for
+comments, in ascending frequency; the line is linear in log frequency between its points, and
+two points at one frequency make a step:
+# CISPR 32 class B, 10 m, quasi-peak, dBuV/m
+30e6   30
+230e6  30
+230e6  37
+1e9    37
+For a live speed, the default span is 100 RBW around the centre (201 channels, 12 MHz in band
+C/D, about 0.12 s per capture at 20 MSPS); `--emc-span` widens it, `-1` takes the whole capture:
+328 channels at 20 MSPS in band C/D, about 0.2 s per capture (0.4 s with 2^20 samples).
 #### Phase noise {#sw-analyzer-pn}
 
 The Phase noise view, and `--phase-noise` with `--report`, measure the strongest carrier of the
