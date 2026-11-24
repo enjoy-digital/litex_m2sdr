@@ -367,7 +367,8 @@ struct an_mode {
      * memcpy), allocated zeroed when it is turned on and freed when it is off, read with
      * an_mode_result(). A mode that analyses has one. */
     size_t result_size;
-    size_t valid;                  /* offsetof(<its result>, <flag>): cleared before each analysis. */
+    size_t valid;                  /* offsetof(<its result>, <flag>): cleared before each analysis. The
+                                    * first field of the result, so that found is never 0. */
     size_t found;                  /* offsetof(<its result>, <flag>): something was found (a cell, a
                                     * carrier), see AN_PANEL_HOLD_S; 0: its results are shown as they come. */
     int    report_rank;            /* Place of its section in the reports: lower first. */

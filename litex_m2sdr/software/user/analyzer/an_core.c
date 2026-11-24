@@ -49,6 +49,11 @@ int an_registry_init(void)
             fprintf(stderr, "The mode %s analyses without a result_size.\n", an_modes[m]->key);
             return -1;
         }
+        if (an_modes[m]->result_size && an_modes[m]->valid != 0) {
+            /* A found flag at 0 would read as none. */
+            fprintf(stderr, "The result of the mode %s does not start with its valid flag.\n", an_modes[m]->key);
+            return -1;
+        }
         if (an_modes[m]->on != AN_NONE && !an_modes[m]->settings_size) {
             fprintf(stderr, "The mode %s has a flag without a settings_size.\n", an_modes[m]->key);
             return -1;
