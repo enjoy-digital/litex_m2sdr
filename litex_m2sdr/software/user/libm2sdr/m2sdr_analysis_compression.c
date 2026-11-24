@@ -84,7 +84,7 @@ static bool crossing(const struct m2sdr_compression_result *res, double target, 
 int m2sdr_compression_fit(const double *input_dbfs, const double *output_dbfs, int n,
                           struct m2sdr_compression_result *res)
 {
-    struct step_level st[M2SDR_COMPRESSION_MAX_STEPS];
+    struct step_level st[M2SDR_COMPRESSION_MAX_STEPS] = { 0 };
     double g0 = 0;
     int i, lin;
 
