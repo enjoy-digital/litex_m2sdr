@@ -559,35 +559,11 @@ struct an_ui {
     bool   wf_on;
     bool   wf_auto;                /* Levels to be set from the next result. */
     int    tab;                    /* View shown: its index in an_modes[]. */
-    /* Phase noise. */
-    bool   pn_am;
+    /* Phase noise: the floor of the board. */
     struct an_floor *fl;
     const char *floor_path;        /* Where "Store as floor" writes; NULL: nowhere. */
-    /* LTE: resource grid and blocks as textures, redrawn with each result that has a cell. */
-    GLuint lte_grid_tex, lte_block_tex;
-    uint32_t *lte_rgba;
-    /* Last frame with a cell, and symbols of the last one with data read: held, see lte_keep(). */
-    struct m2sdr_lte_result *lte_last;
-    unsigned lte_last_seq;
-    bool   lte_last_ok;
-    double lte_freq_hz, lte_rate;  /* What they were read on: nothing is held for another signal. */
-    int    lte_channel;
-    float complex lte_points[M2SDR_LTE_MAX_POINTS];
-    uint8_t lte_points_mod[M2SDR_LTE_MAX_POINTS];
-    int    lte_npoints, lte_points_sfn;
-    unsigned lte_points_seq;
-    /* DVB-T and DAB: MER and traces over the results of one tuning. */
-    struct an_trend dvbt, dab;
-    /* Last capture whose TPS was read: the short ones between carry none. */
-    struct m2sdr_dvbt_result *dvbt_tps;
-    struct an_fm_ui *fm;           /* FM: its view, see mode_fm.c. */
-    /* NR: grid of the strongest SSB as a texture. */
-    GLuint nr_grid_tex;
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
-    /* DVB-T2: MER over the results of one tuning, and the last capture with a P1. */
-    struct an_trend dvbt2;
-    struct m2sdr_dvbt2_result *dvbt2_p1;
 };
 
 int  run_gui(struct an_source *src, const struct an_settings *set, int first_view, struct an_floor *fl,

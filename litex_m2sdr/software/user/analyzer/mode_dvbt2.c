@@ -352,6 +352,13 @@ static void dvbt2_worker_result(const struct an_settings *set, const struct an_r
 /* View */
 /*------*/
 
+/* State of the view, from a frame to the next (one window). */
+static struct {
+    /* MER over the results of one tuning, and the last capture with a P1. */
+    struct an_trend dvbt2;
+    struct m2sdr_dvbt2_result *dvbt2_p1;
+} dvbt2_ui;
+
 /* The MER to follow: the one of the data cells, or of the pilots when the data have none
  * (rotated or not found constellation). */
 static double dvbt2_mer(const struct m2sdr_dvbt2_result *t)
@@ -374,21 +381,21 @@ static void dvbt2_keep(struct an_ui *ui)
     /* No data MER: its trace below the plot. */
     for (i = 0; i < M2SDR_DVBT2_BINS; i++)
         no_mer[i] = -99.0f;
-    if (trend_add(&ui->dvbt2, &res->set, ok, ok ? dvbt2_mer(t) : 0.0, t->mer_valid ? t->mer_bin_db : no_mer,
-                  t->channel_bin_db, t->bins, t->echo_db, M2SDR_DVBT2_ECHO_BINS) && ui->dvbt2_p1)
-        ui->dvbt2_p1->p1_count = 0;
+    if (trend_add(&dvbt2_ui.dvbt2, &res->set, ok, ok ? dvbt2_mer(t) : 0.0, t->mer_valid ? t->mer_bin_db : no_mer,
+                  t->channel_bin_db, t->bins, t->echo_db, M2SDR_DVBT2_ECHO_BINS) && dvbt2_ui.dvbt2_p1)
+        dvbt2_ui.dvbt2_p1->p1_count = 0;
     if (t->p1_count) {
-        if (!ui->dvbt2_p1)
-            ui->dvbt2_p1 = malloc(sizeof(*ui->dvbt2_p1));
-        if (ui->dvbt2_p1)
-            *ui->dvbt2_p1 = *t;
+        if (!dvbt2_ui.dvbt2_p1)
+            dvbt2_ui.dvbt2_p1 = malloc(sizeof(*dvbt2_ui.dvbt2_p1));
+        if (dvbt2_ui.dvbt2_p1)
+            *dvbt2_ui.dvbt2_p1 = *t;
     }
 }
 
 static void dvbt2_close(struct an_ui *ui)
 {
-    free(ui->dvbt2_p1);
-    ui->dvbt2_p1 = NULL;
+    free(dvbt2_ui.dvbt2_p1);
+    dvbt2_ui.dvbt2_p1 = NULL;
 }
 
 /* Result whose P1 is shown: this one, or the last one with a P1 (the short captures often have none). */
@@ -396,7 +403,7 @@ static const struct m2sdr_dvbt2_result *dvbt2_p1_of(const struct an_ui *ui)
 {
     const struct m2sdr_dvbt2_result *t = &RES(ui->shown)->dvbt2;
 
-    return t->p1_count || !ui->dvbt2_p1 || !ui->dvbt2_p1->p1_count ? t : ui->dvbt2_p1;
+    return t->p1_count || !dvbt2_ui.dvbt2_p1 || !dvbt2_ui.dvbt2_p1->p1_count ? t : dvbt2_ui.dvbt2_p1;
 }
 
 static void draw_dvbt2(struct an_ui *ui, bool live, bool *changed)
@@ -474,7 +481,7 @@ static void draw_dvbt2(struct an_ui *ui, bool live, bool *changed)
     side = 0.55f * avail.y < 0.42f * avail.x ? 0.55f * avail.y : 0.42f * avail.x;
     sq   = m2sdr_plot_square(side);
     igBeginGroup();
-    draw_trend_mer("##dvbt2mer", &ui->dvbt2, ok && isfinite(dvbt2_mer(t)), ok ? dvbt2_mer(t) : 0.0, NAN, text,
+    draw_trend_mer("##dvbt2mer", &dvbt2_ui.dvbt2, ok && isfinite(dvbt2_mer(t)), ok ? dvbt2_mer(t) : 0.0, NAN, text,
                    avail.x - sq.x - 8.0f, sq.y);
     igEndGroup();
     igSameLine(0.0f, 8.0f);
@@ -485,7 +492,7 @@ static void draw_dvbt2(struct an_ui *ui, bool live, bool *changed)
                       ok ? t->npoints : 0, ok && !t->rotated ? t->modulation : M2SDR_MOD_AUTO);
     igEndGroup();
     if (ok)
-        draw_trend_traces("##dvbt2", &ui->dvbt2, t->bins, 0.5 * (t->carriers - 1) * res->set.sample_rate / t->fft_len,
+        draw_trend_traces("##dvbt2", &dvbt2_ui.dvbt2, t->bins, 0.5 * (t->carriers - 1) * res->set.sample_rate / t->fft_len,
                           t->echo_start_us, t->echo_step_us, M2SDR_DVBT2_ECHO_BINS, t->guard_us, NAN);
 }
 
@@ -523,7 +530,7 @@ static void draw_dvbt2_results(struct an_ui *ui)
                 label_value("Data MER", "%.1f dB", t->mer_db);
             else
                 label_value("Data MER", t->rotated ? "-- (rotated)" : "--");
-            label_value("MER shown", "%.1f dB", trend_mer_shown(&ui->dvbt2, dvbt2_mer(t)));
+            label_value("MER shown", "%.1f dB", trend_mer_shown(&dvbt2_ui.dvbt2, dvbt2_mer(t)));
             if (t->echo_level_db > -99.0)
                 label_value("Strongest echo", "%+.2f us, %.1f dB", t->echo_delay_us, t->echo_level_db);
             label_value("Symbols", "%d%s", t->symbols, SET(&res->set)->dvbt2_fast ? " (short capture)" : "");

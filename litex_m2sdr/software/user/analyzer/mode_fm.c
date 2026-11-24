@@ -380,6 +380,11 @@ static void fm_help(void)
 /* View */
 /*------*/
 
+/* State of the view, from a frame to the next (one window). */
+static struct {
+    struct an_fm_ui *fm;           /* Allocated with the first frame. */
+} fm_ui;
+
 #define FM_COL_MPX     0xff40c0ffu
 #define FM_COL_MEAN    0xffffb040u
 #define FM_COL_LIMIT   0xa04040ffu
@@ -404,13 +409,13 @@ static void fm_keep(struct an_ui *ui)
 
     if (!SET(&res->set)->fm_on || !RES(res)->fm_valid)
         return;
-    if (!ui->fm) {
-        ui->fm = calloc(1, sizeof(*ui->fm));
-        if (!ui->fm)
+    if (!fm_ui.fm) {
+        fm_ui.fm = calloc(1, sizeof(*fm_ui.fm));
+        if (!fm_ui.fm)
             return;
-        ui->fm->start_ms = now_ms();
+        fm_ui.fm->start_ms = now_ms();
     }
-    v = ui->fm;
+    v = fm_ui.fm;
     if (res->set.freq_hz != v->freq_hz || res->set.sample_rate != v->rate || res->set.channel != v->channel) {
         memset(&v->bs412, 0, sizeof(v->bs412));
         v->freq_hz = res->set.freq_hz;
@@ -437,8 +442,8 @@ static void fm_keep(struct an_ui *ui)
 
 static void fm_close(struct an_ui *ui)
 {
-    free(ui->fm);
-    ui->fm = NULL;
+    free(fm_ui.fm);
+    fm_ui.fm = NULL;
 }
 
 /* Station: frequency in MHz, steps of 100 and 50 kHz, and the centre on the carrier. */
@@ -548,7 +553,7 @@ static void draw_fm(struct an_ui *ui, bool live, bool *changed)
     const struct an_result *res = &ui->res;
     const struct m2sdr_fm_result *f = &RES(res)->fm;
     const struct m2sdr_fm_rds_info *r = &f->rds_info;
-    const struct an_fm_ui *v = ui->fm;
+    const struct an_fm_ui *v = fm_ui.fm;
     const bool ok = RES(res)->fm_valid && f->found;
     ImVec2 avail, sq;
     float side, w;
@@ -618,7 +623,7 @@ static void draw_fm_results(struct an_ui *ui)
     const struct an_result *res = ui->shown;
     const struct m2sdr_fm_result *f = &RES(res)->fm;
     const struct m2sdr_fm_rds_info *r = &f->rds_info;
-    const struct an_fm_ui *v = ui->fm;
+    const struct an_fm_ui *v = fm_ui.fm;
 
     igSeparatorText("FM");
     if (!RES(res)->fm_valid || !f->found) {

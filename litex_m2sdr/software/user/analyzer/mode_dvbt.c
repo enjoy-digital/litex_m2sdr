@@ -337,6 +337,13 @@ static void dvbt_worker_result(const struct an_settings *set, const struct an_re
 /* View */
 /*------*/
 
+/* State of the view, from a frame to the next (one window). */
+static struct {
+    struct an_trend dvbt;          /* MER and traces over the results of one tuning. */
+    /* Last capture whose TPS was read: the short ones between carry none. */
+    struct m2sdr_dvbt_result *dvbt_tps;
+} dvbt_ui;
+
 #define DVBT_UHF_BASE_HZ   306e6     /* European UHF channel n is centred at 306 + 8 n MHz (21 to 69). */
 
 static void dvbt_keep(struct an_ui *ui)
@@ -346,20 +353,20 @@ static void dvbt_keep(struct an_ui *ui)
 
     if (!SET(&res->set)->dvbt_on || !RES(res)->dvbt_valid)
         return;
-    if (trend_add(&ui->dvbt, &res->set, t->found && t->pilots, t->mer_db, t->mer_bin_db, t->channel_bin_db, t->bins,
-                  t->echo_db, M2SDR_DVBT_ECHO_BINS) && ui->dvbt_tps)
-        ui->dvbt_tps->tps = false;
+    if (trend_add(&dvbt_ui.dvbt, &res->set, t->found && t->pilots, t->mer_db, t->mer_bin_db, t->channel_bin_db, t->bins,
+                  t->echo_db, M2SDR_DVBT_ECHO_BINS) && dvbt_ui.dvbt_tps)
+        dvbt_ui.dvbt_tps->tps = false;
     if (t->tps) {
-        if (!ui->dvbt_tps)
-            ui->dvbt_tps = malloc(sizeof(*ui->dvbt_tps));
-        if (ui->dvbt_tps)
-            *ui->dvbt_tps = *t;
+        if (!dvbt_ui.dvbt_tps)
+            dvbt_ui.dvbt_tps = malloc(sizeof(*dvbt_ui.dvbt_tps));
+        if (dvbt_ui.dvbt_tps)
+            *dvbt_ui.dvbt_tps = *t;
     }
 }
 
 static void dvbt_close(struct an_ui *ui)
 {
-    free(ui->dvbt_tps);
+    free(dvbt_ui.dvbt_tps);
 }
 
 /* Result whose TPS fields are shown: this one, or the last one that read it. */
@@ -367,7 +374,7 @@ static const struct m2sdr_dvbt_result *dvbt_tps_of(const struct an_ui *ui)
 {
     const struct m2sdr_dvbt_result *t = &RES(ui->shown)->dvbt;
 
-    return t->tps || !ui->dvbt_tps || !ui->dvbt_tps->tps ? t : ui->dvbt_tps;
+    return t->tps || !dvbt_ui.dvbt_tps || !dvbt_ui.dvbt_tps->tps ? t : dvbt_ui.dvbt_tps;
 }
 
 static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
@@ -426,7 +433,7 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
     if (isfinite(needed))
         snprintf(text, sizeof(text), "Needed for %s %s: %.1f dB (Gaussian channel), margin %+.1f dB",
                  m2sdr_modulation_name(tp->tps_modulation), tp->code_rate_hp, needed,
-                 ok ? trend_mer_shown(&ui->dvbt, t->mer_db) - needed : -needed);
+                 ok ? trend_mer_shown(&dvbt_ui.dvbt, t->mer_db) - needed : -needed);
     else
         snprintf(text, sizeof(text), "%s", ok ? "TPS not read: no reference for the MER needed." : " ");
 
@@ -434,12 +441,12 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
     side = 0.55f * avail.y < 0.42f * avail.x ? 0.55f * avail.y : 0.42f * avail.x;
     sq   = m2sdr_plot_square(side);
     igBeginGroup();
-    draw_trend_mer("##dvbtmer", &ui->dvbt, ok, t->mer_db, needed, text, avail.x - sq.x - 8.0f, sq.y);
+    draw_trend_mer("##dvbtmer", &dvbt_ui.dvbt, ok, t->mer_db, needed, text, avail.x - sq.x - 8.0f, sq.y);
     igEndGroup();
     igSameLine(0.0f, 8.0f);
     draw_trend_points("##dvbtconst", sq, t->points, ok ? t->npoints : 0, ok ? t->modulation : M2SDR_MOD_64QAM);
     if (ok)
-        draw_trend_traces("##dvbt", &ui->dvbt, t->bins, 0.5 * (t->carriers - 1) * res->set.sample_rate / t->fft_len,
+        draw_trend_traces("##dvbt", &dvbt_ui.dvbt, t->bins, 0.5 * (t->carriers - 1) * res->set.sample_rate / t->fft_len,
                           t->echo_start_us, t->echo_step_us, M2SDR_DVBT_ECHO_BINS, t->guard_us, needed);
 }
 
@@ -471,9 +478,9 @@ static void draw_dvbt_results(struct an_ui *ui)
             } else {
                 label_value("TPS", "not read");
             }
-            label_value("MER", "%.1f dB (last %.1f)", trend_mer_shown(&ui->dvbt, t->mer_db), t->mer_db);
+            label_value("MER", "%.1f dB (last %.1f)", trend_mer_shown(&dvbt_ui.dvbt, t->mer_db), t->mer_db);
             if (isfinite(needed))
-                label_value("Margin", "%+.1f dB", trend_mer_shown(&ui->dvbt, t->mer_db) - needed);
+                label_value("Margin", "%+.1f dB", trend_mer_shown(&dvbt_ui.dvbt, t->mer_db) - needed);
             if (t->echo_level_db > -99.0)
                 label_value("Strongest echo", "%+.2f us, %.1f dB", t->echo_delay_us, t->echo_level_db);
             label_value("Symbols", "%d%s", t->symbols, t->tps ? "" : " (TPS of an earlier capture)");

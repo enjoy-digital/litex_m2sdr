@@ -190,6 +190,23 @@ static void lte_help(void)
 /* View */
 /*------*/
 
+/* State of the view, from a frame to the next (one window). */
+static struct {
+    /* Resource grid and blocks as textures, redrawn with each result that has a cell. */
+    GLuint lte_grid_tex, lte_block_tex;
+    uint32_t *lte_rgba;
+    /* Last frame with a cell, and symbols of the last one with data read: held, see lte_keep(). */
+    struct m2sdr_lte_result *lte_last;
+    unsigned lte_last_seq;
+    bool   lte_last_ok;
+    double lte_freq_hz, lte_rate;  /* What they were read on: nothing is held for another signal. */
+    int    lte_channel;
+    float complex lte_points[M2SDR_LTE_MAX_POINTS];
+    uint8_t lte_points_mod[M2SDR_LTE_MAX_POINTS];
+    int    lte_npoints, lte_points_sfn;
+    unsigned lte_points_seq;
+} lte_ui;
+
 /* LTE: colours of the blocks of data and of their symbols by modulation (the first: empty), and
  * the scale of the resource grid, in dB over a reference element. */
 static const ImU32 lte_mod_colors[M2SDR_MOD_COUNT] = {
@@ -225,25 +242,25 @@ static void lte_textures(struct an_ui *ui)
     const int k = l->subcarriers, rb = l->data_rb;
     int q, a, ns, b;
 
-    if (!ui->lte_rgba)
-        ui->lte_rgba = malloc((size_t)M2SDR_LTE_FRAME_SYMBOLS * M2SDR_LTE_MAX_SUBCARRIERS * sizeof(uint32_t));
-    if (!ui->lte_rgba || k <= 0)
+    if (!lte_ui.lte_rgba)
+        lte_ui.lte_rgba = malloc((size_t)M2SDR_LTE_FRAME_SYMBOLS * M2SDR_LTE_MAX_SUBCARRIERS * sizeof(uint32_t));
+    if (!lte_ui.lte_rgba || k <= 0)
         return;
     for (a = 0; a < k; a++) {
         for (q = 0; q < M2SDR_LTE_FRAME_SYMBOLS; q++)
-            ui->lte_rgba[(size_t)(k - 1 - a) * M2SDR_LTE_FRAME_SYMBOLS + (size_t)q] =
+            lte_ui.lte_rgba[(size_t)(k - 1 - a) * M2SDR_LTE_FRAME_SYMBOLS + (size_t)q] =
                 palette_color(ui->wf_palette, (float)((l->grid_db[q][a] - (l->rsrp_db + LTE_GRID_BOTTOM_DB)) /
                                                       (LTE_GRID_TOP_DB - LTE_GRID_BOTTOM_DB)));
     }
-    lte_texture(&ui->lte_grid_tex, ui->lte_rgba, M2SDR_LTE_FRAME_SYMBOLS, k);
+    lte_texture(&lte_ui.lte_grid_tex, lte_ui.lte_rgba, M2SDR_LTE_FRAME_SYMBOLS, k);
     if (rb <= 0)
         return;
     for (b = 0; b < rb; b++) {
         for (ns = 0; ns < M2SDR_LTE_FRAME_SLOTS; ns++)
-            ui->lte_rgba[(size_t)(rb - 1 - b) * M2SDR_LTE_FRAME_SLOTS + (size_t)ns] =
+            lte_ui.lte_rgba[(size_t)(rb - 1 - b) * M2SDR_LTE_FRAME_SLOTS + (size_t)ns] =
                 l->rb_unknown[ns][b] ? LTE_COL_UNREAD : lte_mod_colors[l->rb_modulation[ns][b] % M2SDR_MOD_COUNT];
     }
-    lte_texture(&ui->lte_block_tex, ui->lte_rgba, M2SDR_LTE_FRAME_SLOTS, rb);
+    lte_texture(&lte_ui.lte_block_tex, lte_ui.lte_rgba, M2SDR_LTE_FRAME_SLOTS, rb);
 }
 
 /* A new result: its frame and its symbols are kept, to be shown while the next captures have no
@@ -254,36 +271,36 @@ static void lte_keep(struct an_ui *ui)
 
     if (!SET(&ui->res.set)->lte_on || !RES(&ui->res)->lte_valid)
         return;
-    if (ui->res.set.freq_hz != ui->lte_freq_hz || ui->res.set.sample_rate != ui->lte_rate || ui->res.set.channel != ui->lte_channel) {
-        ui->lte_freq_hz = ui->res.set.freq_hz;
-        ui->lte_rate    = ui->res.set.sample_rate;
-        ui->lte_channel = ui->res.set.channel;
-        ui->lte_last_ok = false;
-        ui->lte_npoints = 0;
+    if (ui->res.set.freq_hz != lte_ui.lte_freq_hz || ui->res.set.sample_rate != lte_ui.lte_rate || ui->res.set.channel != lte_ui.lte_channel) {
+        lte_ui.lte_freq_hz = ui->res.set.freq_hz;
+        lte_ui.lte_rate    = ui->res.set.sample_rate;
+        lte_ui.lte_channel = ui->res.set.channel;
+        lte_ui.lte_last_ok = false;
+        lte_ui.lte_npoints = 0;
     }
     if (!l->found)
         return;
     lte_textures(ui);
-    if (!ui->lte_last)
-        ui->lte_last = malloc(sizeof(*ui->lte_last));
-    if (ui->lte_last) {
-        *ui->lte_last    = *l;
-        ui->lte_last_seq = ui->seq;
-        ui->lte_last_ok  = true;
+    if (!lte_ui.lte_last)
+        lte_ui.lte_last = malloc(sizeof(*lte_ui.lte_last));
+    if (lte_ui.lte_last) {
+        *lte_ui.lte_last    = *l;
+        lte_ui.lte_last_seq = ui->seq;
+        lte_ui.lte_last_ok  = true;
     }
     if (l->ndata > 0) {
-        memcpy(ui->lte_points, l->data_points, (size_t)l->ndata * sizeof(l->data_points[0]));
-        memcpy(ui->lte_points_mod, l->data_points_modulation, (size_t)l->ndata);
-        ui->lte_npoints    = l->ndata;
-        ui->lte_points_sfn = l->sfn;
-        ui->lte_points_seq = ui->seq;
+        memcpy(lte_ui.lte_points, l->data_points, (size_t)l->ndata * sizeof(l->data_points[0]));
+        memcpy(lte_ui.lte_points_mod, l->data_points_modulation, (size_t)l->ndata);
+        lte_ui.lte_npoints    = l->ndata;
+        lte_ui.lte_points_sfn = l->sfn;
+        lte_ui.lte_points_seq = ui->seq;
     }
 }
 
 static void lte_close(struct an_ui *ui)
 {
-    free(ui->lte_rgba);
-    free(ui->lte_last);
+    free(lte_ui.lte_rgba);
+    free(lte_ui.lte_last);
 }
 
 /* The frame shown: the one of the last capture, or the last one with a cell for a few captures. */
@@ -294,9 +311,9 @@ static const struct m2sdr_lte_result *lte_shown(const struct an_ui *ui, bool *he
         return NULL;
     if (RES(ui->shown)->lte.found)
         return &RES(ui->shown)->lte;
-    if (ui->lte_last_ok && ui->seq - ui->lte_last_seq <= AN_LTE_HOLD) {
+    if (lte_ui.lte_last_ok && ui->seq - lte_ui.lte_last_seq <= AN_LTE_HOLD) {
         *held = true;
-        return ui->lte_last;
+        return lte_ui.lte_last;
     }
     return NULL;
 }
@@ -406,7 +423,7 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
         const float x = plot.p1.x + 14.0f, h = plot.p1.y - plot.p0.y;
         unsigned n;
 
-        tex._TexID = (ImTextureID)(uintptr_t)ui->lte_grid_tex;
+        tex._TexID = (ImTextureID)(uintptr_t)lte_ui.lte_grid_tex;
         ImDrawList_AddImage(plot.dl, tex, plot.p0, plot.p1, (ImVec2){ 0.0f, 0.0f }, (ImVec2){ 1.0f, 1.0f }, 0xffffffffu);
         if (plot.hovered) {
             int q = (int)(plot.mouse_x / 0.010 * M2SDR_LTE_FRAME_SYMBOLS);
@@ -454,7 +471,7 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
         igNewLine();
         if (m2sdr_plot_begin(&plot, "##lteblocks", (ImVec2){ left_w - LTE_SCALE_W, narrow ? 0.18f * avail.y : 0.0f }, 0.0, 0.010,
                              M2SDR_PLOT_TIME, y0, y0 + (double)l->subcarriers / 12.0, "")) {
-            tex._TexID = (ImTextureID)(uintptr_t)ui->lte_block_tex;
+            tex._TexID = (ImTextureID)(uintptr_t)lte_ui.lte_block_tex;
             ImDrawList_AddImage(plot.dl, tex, (ImVec2){ plot.p0.x, m2sdr_plot_y(&plot, l->data_first_rb + l->data_rb) },
                                 (ImVec2){ plot.p1.x, m2sdr_plot_y(&plot, l->data_first_rb) },
                                 (ImVec2){ 0.0f, 0.0f }, (ImVec2){ 1.0f, 1.0f }, 0xffffffffu);
@@ -496,7 +513,7 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
     {
         /* The frames without a block that is read keep the symbols of the last one that had some. */
         const bool own = l->ndata > 0;
-        const bool kept = !own && l->data && ui->lte_npoints > 0 && ui->seq - ui->lte_points_seq <= AN_LTE_HOLD;
+        const bool kept = !own && l->data && lte_ui.lte_npoints > 0 && ui->seq - lte_ui.lte_points_seq <= AN_LTE_HOLD;
         const enum m2sdr_modulation most = own && l->data_blocks ? l->data_modulation : M2SDR_MOD_QPSK;
         const int nref = m2sdr_constellation(most, ref);
         char label[96];
@@ -506,7 +523,7 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
             if (own)
                 lte_data_points(&plot, l->data_points, l->data_points_modulation, l->ndata, 0xc0000000u);
             else if (kept)
-                lte_data_points(&plot, ui->lte_points, ui->lte_points_mod, ui->lte_npoints, 0x50000000u);
+                lte_data_points(&plot, lte_ui.lte_points, lte_ui.lte_points_mod, lte_ui.lte_npoints, 0x50000000u);
             for (i = 0; i < l->npbch; i++) {
                 px[i] = crealf(l->pbch_points[i]);
                 py[i] = cimagf(l->pbch_points[i]);
@@ -523,7 +540,7 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
                 ImDrawList_AddLine(plot.dl, (ImVec2){ x, y - 4.0f }, (ImVec2){ x, y + 5.0f }, 0xa0ffffffu, 1.0f);
             }
             if (kept) {
-                snprintf(text, sizeof(text), "No data read in this frame: dimmed symbols of frame %d", ui->lte_points_sfn);
+                snprintf(text, sizeof(text), "No data read in this frame: dimmed symbols of frame %d", lte_ui.lte_points_sfn);
                 m2sdr_plot_text(&plot, 5.0f, -20.0f, text, 0xff60a0ffu);
             } else if (!own && l->data) {
                 m2sdr_plot_text(&plot, 5.0f, -20.0f, "No data read in this frame", 0xff60a0ffu);

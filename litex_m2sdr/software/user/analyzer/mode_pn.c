@@ -282,6 +282,11 @@ int floor_save(struct an_floor *fl, const char *path, const struct an_result *re
 /* View */
 /*------*/
 
+/* State of the view, from a frame to the next (one window). */
+static struct {
+    bool   pn_am;                  /* The amplitude noise is drawn too. */
+} pn_ui;
+
 static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
 {
     static const char *const sizes[] = { "65536", "131072", "262144", "524288", "1048576", "2097152", "4194304", "8388608" };
@@ -307,7 +312,7 @@ static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
     if (input_scaled("To (Hz)", &SET(&ui->set)->pn_hi_hz, 1.0, "%.0f"))
         *changed = true;
     same_line_or_wrap(16.0f, 100.0f);
-    igCheckbox("AM noise", &ui->pn_am);
+    igCheckbox("AM noise", &pn_ui.pn_am);
     if (ui->floor_path) {
         same_line_or_wrap(16.0f, 115.0f);
         if (igButton("Store as floor", (ImVec2){ 0.0f, 0.0f }) && RES(&ui->res)->pn_valid) {
@@ -337,7 +342,7 @@ static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
             top = l[i];
         if (l[i] < bottom)
             bottom = l[i];
-        if (ui->pn_am && am[i] < bottom)
+        if (pn_ui.pn_am && am[i] < bottom)
             bottom = am[i];
     }
     for (i = 0; fl && i < fl->points; i++) {
@@ -358,7 +363,7 @@ static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
     m2sdr_plot_band(&plot, log10(pn->lo_hz), log10(pn->hi_hz), 0x18ffffffu);
     if (nf >= 2)
         m2sdr_plot_xy(&plot, fx, fy, (size_t)nf, 0xffa0a0a0u);
-    if (ui->pn_am)
+    if (pn_ui.pn_am)
         m2sdr_plot_xy(&plot, lx, am, (size_t)pn->points, 0xffffa040u);
     m2sdr_plot_xy(&plot, lx, l, (size_t)pn->points, 0xff40d0ffu);
     /* Points that are the floor of the board, not the source. */
@@ -372,7 +377,7 @@ static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
         m2sdr_plot_marker(&plot, log10(pn->spur_hz[i]), pn_interp(pn->offset_hz, pn->l_dbc_hz, pn->points, pn->spur_hz[i]),
                           text, 0xffc0c0ffu);
     }
-    snprintf(text, sizeof(text), "yellow: phase%s%s", ui->pn_am ? ", blue: amplitude" : "",
+    snprintf(text, sizeof(text), "yellow: phase%s%s", pn_ui.pn_am ? ", blue: amplitude" : "",
              nf >= 2 ? ", grey: floor of the board, red: reading at the floor" : ", no floor stored");
     m2sdr_plot_text(&plot, 8.0f, -20.0f, text, 0xffc8c8c8u);
     if (plot.hovered) {

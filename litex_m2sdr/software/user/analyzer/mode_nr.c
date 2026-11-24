@@ -245,6 +245,11 @@ static void nr_help(void)
 /* View */
 /*------*/
 
+/* State of the view, from a frame to the next (one window). */
+static struct {
+    GLuint nr_grid_tex;            /* Grid of the strongest SSB as a texture. */
+} nr_ui;
+
 #define NR_GRID_TOP_DB    10.0
 #define NR_GRID_BOTTOM_DB (-40.0)
 #define NR_COL_PBCH       0xc0ffd080u
@@ -272,15 +277,15 @@ static void nr_keep(struct an_ui *ui)
             rgba[(M2SDR_NR_SSB_CARRIERS - 1 - k) * M2SDR_NR_SSB_SYMBOLS + l] =
                 palette_color(ui->wf_palette, (float)((r->grid_db[l][k] - (ref + NR_GRID_BOTTOM_DB)) /
                                                       (NR_GRID_TOP_DB - NR_GRID_BOTTOM_DB)));
-    if (!ui->nr_grid_tex) {
-        glGenTextures(1, &ui->nr_grid_tex);
-        glBindTexture(GL_TEXTURE_2D, ui->nr_grid_tex);
+    if (!nr_ui.nr_grid_tex) {
+        glGenTextures(1, &nr_ui.nr_grid_tex);
+        glBindTexture(GL_TEXTURE_2D, nr_ui.nr_grid_tex);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
-    glBindTexture(GL_TEXTURE_2D, ui->nr_grid_tex);
+    glBindTexture(GL_TEXTURE_2D, nr_ui.nr_grid_tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, M2SDR_NR_SSB_SYMBOLS, M2SDR_NR_SSB_CARRIERS, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
 }
 
@@ -370,8 +375,8 @@ static void draw_nr(struct an_ui *ui, bool live, bool *changed)
     snprintf(text, sizeof(text), "SSB of PCI %d, index %d: MHz from SSREF by symbol, dB over SS-RSRP", r->ssb[r->best].pci, r->ssb[r->best].ssb_index);
     if (m2sdr_plot_begin(&plot, "##nrgrid", (ImVec2){ gw, sq.y }, -0.5, 3.5, M2SDR_PLOT_PLAIN,
                          -120.0 * r->scs_hz / 1e6, 120.0 * r->scs_hz / 1e6, text)) {
-        tex._TexID = (ImTextureID)(uintptr_t)ui->nr_grid_tex;
-        if (ui->nr_grid_tex)
+        tex._TexID = (ImTextureID)(uintptr_t)nr_ui.nr_grid_tex;
+        if (nr_ui.nr_grid_tex)
             ImDrawList_AddImage(plot.dl, tex, plot.p0, plot.p1, (ImVec2){ 0.0f, 0.0f }, (ImVec2){ 1.0f, 1.0f }, 0xffffffffu);
         if (plot.hovered) {
             const int l = (int)lround(plot.mouse_x), k = (int)floor(plot.mouse_y * 1e6 / r->scs_hz) + 120;

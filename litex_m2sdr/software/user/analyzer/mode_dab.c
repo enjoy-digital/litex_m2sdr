@@ -189,6 +189,11 @@ static void dab_help(void)
 /* View */
 /*------*/
 
+/* State of the view, from a frame to the next (one window). */
+static struct {
+    struct an_trend dab;           /* MER and traces over the results of one tuning. */
+} dab_ui;
+
 /* Band III blocks (EN 50248): name and centre, kHz. */
 static const struct {
     const char *name;
@@ -210,7 +215,7 @@ static void dab_keep(struct an_ui *ui)
 
     if (!SET(&res->set)->dab_on || !RES(res)->dab_valid)
         return;
-    trend_add(&ui->dab, &res->set, t->found && t->prs, t->mer_db, t->mer_bin_db, t->channel_bin_db, t->bins, t->echo_db,
+    trend_add(&dab_ui.dab, &res->set, t->found && t->prs, t->mer_db, t->mer_bin_db, t->channel_bin_db, t->bins, t->echo_db,
               M2SDR_DAB_ECHO_BINS);
 }
 
@@ -284,12 +289,12 @@ static void draw_dab(struct an_ui *ui, bool live, bool *changed)
     side = 0.55f * avail.y < 0.42f * avail.x ? 0.55f * avail.y : 0.42f * avail.x;
     sq   = m2sdr_plot_square(side);
     igBeginGroup();
-    draw_trend_mer("##dabmer", &ui->dab, ok, t->mer_db, NAN, text, avail.x - sq.x - 8.0f, sq.y);
+    draw_trend_mer("##dabmer", &dab_ui.dab, ok, t->mer_db, NAN, text, avail.x - sq.x - 8.0f, sq.y);
     igEndGroup();
     igSameLine(0.0f, 8.0f);
     draw_trend_points("##dabconst", sq, t->points, ok ? t->npoints : 0, M2SDR_MOD_QPSK);
     if (ok)
-        draw_trend_traces("##dab", &ui->dab, t->bins, 767.5e3, t->echo_start_us, t->echo_step_us, M2SDR_DAB_ECHO_BINS,
+        draw_trend_traces("##dab", &dab_ui.dab, t->bins, 767.5e3, t->echo_start_us, t->echo_step_us, M2SDR_DAB_ECHO_BINS,
                           t->guard_us, NAN);
 }
 
@@ -311,7 +316,7 @@ static void draw_dab_results(struct an_ui *ui)
         if (t->prs) {
             label_value("Ensemble", "%.6f MHz", (res->set.freq_hz + t->freq_error_hz) / 1e6);
             label_value("Offset", "%+.1f Hz", t->freq_error_hz);
-            label_value("MER", "%.1f dB (last %.1f)", trend_mer_shown(&ui->dab, t->mer_db), t->mer_db);
+            label_value("MER", "%.1f dB (last %.1f)", trend_mer_shown(&dab_ui.dab, t->mer_db), t->mer_db);
             label_value("SNR on the carriers", "%.1f dB", t->null_snr_db);
             if (t->echo_level_db > -99.0)
                 label_value("Strongest echo", "%+.2f us, %.1f dB", t->echo_delay_us, t->echo_level_db);
