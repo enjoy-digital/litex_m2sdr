@@ -20,8 +20,17 @@
 
 static const char *const tetra_burst_names[4] = { "none", "other", "normal", "sync" };
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_tetra;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct tetra_set {
+    bool   tetra_on;
+};
+
+#define SET(set) ((struct tetra_set *)an_mode_settings(&an_mode_tetra, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct tetra_res {
@@ -29,7 +38,6 @@ struct tetra_res {
     struct m2sdr_tetra_result tetra;
 };
 
-extern const struct an_mode an_mode_tetra;
 #define RES(res) ((struct tetra_res *)an_mode_result(&an_mode_tetra, (res)))
 
 /* Analysis */
@@ -177,7 +185,7 @@ static int tetra_option(int id, const char *arg, struct an_cli *cli)
 {
     (void)id;
     (void)arg;
-    cli->set->tetra_on = true;
+    SET(cli->set)->tetra_on = true;
     return 0;
 }
 
@@ -228,7 +236,7 @@ static void tetra_keep(struct an_ui *ui)
 {
     const struct an_result *res = &ui->res;
 
-    if (!res->set.tetra_on || !RES(res)->tetra_valid)
+    if (!SET(&res->set)->tetra_on || !RES(res)->tetra_valid)
         return;
     if (res->set.freq_hz != tetra_sync_freq_hz)
         tetra_have_sync = false;
@@ -258,7 +266,7 @@ static void draw_tetra(struct an_ui *ui, bool live, bool *changed)
     igPushTextWrapPos(0.0f);
     igText("Captures of %.1f s: the synchronisation burst (BSCH) comes once a multiframe, 1.02 s.", AN_TETRA_SECONDS);
     igPopTextWrapPos();
-    if (!res->set.tetra_on) {
+    if (!SET(&res->set)->tetra_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -398,27 +406,28 @@ static void draw_tetra_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_tetra = {
-    .key          = "tetra",
-    .title        = "TETRA",
-    .category     = AN_CAT_CELLULAR,
-    .on           = offsetof(struct an_settings, tetra_on),
-    .result_size  = sizeof(struct tetra_res),
-    .valid        = offsetof(struct tetra_res, tetra_valid),
-    .found        = offsetof(struct tetra_res, tetra.found),
-    .report_rank  = 13,
-    .default_rate = AN_TETRA_RATE,
-    .psd_short    = true,
-    .samples      = tetra_samples,
-    .analyse      = tetra_analyse,
-    .report_text  = tetra_report_text,
-    .report_json  = tetra_report_json,
-    .watch_line   = tetra_watch_line,
-    .options      = tetra_options,
-    .option       = tetra_option,
-    .help         = tetra_help,
+    .key           = "tetra",
+    .title         = "TETRA",
+    .category      = AN_CAT_CELLULAR,
+    .settings_size = sizeof(struct tetra_set),
+    .on            = offsetof(struct tetra_set, tetra_on),
+    .result_size   = sizeof(struct tetra_res),
+    .valid         = offsetof(struct tetra_res, tetra_valid),
+    .found         = offsetof(struct tetra_res, tetra.found),
+    .report_rank   = 13,
+    .default_rate  = AN_TETRA_RATE,
+    .psd_short     = true,
+    .samples       = tetra_samples,
+    .analyse       = tetra_analyse,
+    .report_text   = tetra_report_text,
+    .report_json   = tetra_report_json,
+    .watch_line    = tetra_watch_line,
+    .options       = tetra_options,
+    .option        = tetra_option,
+    .help          = tetra_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_tetra,
-    .results      = draw_tetra_results,
-    .keep         = tetra_keep,
+    .draw          = draw_tetra,
+    .results       = draw_tetra_results,
+    .keep          = tetra_keep,
 #endif
 };

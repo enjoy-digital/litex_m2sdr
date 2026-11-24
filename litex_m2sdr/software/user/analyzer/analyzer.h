@@ -172,18 +172,6 @@ struct an_settings {
     double chan_bw_hz;             /* 0: no channel measurement. */
     double chan_spacing_hz;        /* 0: the bandwidth. */
     double ref_offset_db;          /* Added to the levels: dBFS to dBm at the connector. */
-    bool   pn_on;                  /* Phase noise of the strongest carrier. */
-    int    pn_log2;                /* Its capture: 2^pn_log2 samples. */
-    double pn_lo_hz, pn_hi_hz;     /* Integration limits; 0: the offsets measured. */
-    bool   demod_on;               /* Demodulation of the strongest signal. */
-    int    demod_log2;             /* Its capture: 2^demod_log2 samples. */
-    struct m2sdr_demod_config demod;
-    bool   lte_on;                 /* LTE downlink carrier. */
-    bool   dvbt_on;                /* DVB-T multiplex. */
-    bool   dab_on;                 /* DAB ensemble. */
-    bool   fm_on;                  /* FM broadcast station. */
-    double fm_tone_hz;             /* Its known test tone (stereo separation); 0: none. */
-    int    fm_deemph_us;           /* De-emphasis of its audio SNR: 0: 50 us, -1: none. */
     /* Monitoring: pulses and EMC pre-compliance. */
     bool   pulse_on;               /* Pulsed signals. */
     double pulse_threshold_db;     /* Over the noise floor; 0: the default of libm2sdr. */
@@ -192,10 +180,6 @@ struct an_settings {
     int    emc_log2;               /* Its capture: 2^emc_log2 samples; 0: the default. */
     double emc_span_hz;            /* Channels over this span around the centre; 0: the default, < 0: all. */
     struct m2sdr_emc_config emc;   /* Band, unit offset, factors and limit lines (centre and channels set per capture). */
-    /* Cellular. nr_scs_hz: spacing of the SSBs, 0 to find it; nr_scs_known: the one found
-     * on this tuning, set by the worker (0: none). */
-    bool   nr_on, gsm_on, tetra_on;
-    double nr_scs_hz, nr_scs_known;
     bool   wifi_on;                /* Wi-Fi channel. */
     bool   adsb_on;                /* ADS-B at 1090 MHz. */
     struct m2sdr_adsb_config adsb; /* Its receiver position. */
@@ -215,20 +199,11 @@ struct an_settings {
     bool   df_cal_given;           /* df_cal_deg given: the stored calibration is not used. */
     double df_cal_deg;
     bool   df_cal_store;           /* --report: store the phase read as the calibration (source at broadside). */
-    bool   mimo_on;                /* 2x2 channel of an LTE cell. */
     bool   sweep_on;               /* Lab: scalar network analysis, TX to RX. */
     bool   compression_on;         /* Lab: gain against the input level. */
     bool   imd_on;                 /* Lab: two-tone intermodulation. */
     bool   amam_on;                /* Lab: AM/AM, AM/PM of a wideband signal. */
     struct an_lab_settings lab;
-    /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
-     * nothing), and whether the capture is a short one. */
-    bool   dvbt_fast;
-    struct m2sdr_dvbt_config dvbt_hint;
-    /* DVB-T2 multiplex; set by the worker once its mode and pattern are known: short captures. */
-    bool   dvbt2_on;
-    bool   dvbt2_fast;
-    struct m2sdr_dvbt2_config dvbt2_hint;
     /* Settings of each mode that has some, a block of its settings_size at the place
      * an_registry_init() gives it, read with an_mode_settings(): copied with the rest. */
     _Alignas(16) unsigned char modes[AN_SETTINGS_MODES];

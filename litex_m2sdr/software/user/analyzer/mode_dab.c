@@ -20,8 +20,17 @@
 
 #include "analyzer.h"
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_dab;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct dab_set {
+    bool   dab_on;                 /* DAB ensemble. */
+};
+
+#define SET(set) ((struct dab_set *)an_mode_settings(&an_mode_dab, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct dab_res {
@@ -29,7 +38,6 @@ struct dab_res {
     struct m2sdr_dab_result dab;
 };
 
-extern const struct an_mode an_mode_dab;
 #define RES(res) ((struct dab_res *)an_mode_result(&an_mode_dab, (res)))
 
 /* Analysis */
@@ -163,7 +171,7 @@ static int dab_option(int id, const char *arg, struct an_cli *cli)
 {
     (void)id;
     (void)arg;
-    cli->set->dab_on = true;
+    SET(cli->set)->dab_on = true;
     return 0;
 }
 
@@ -200,7 +208,7 @@ static void dab_keep(struct an_ui *ui)
     const struct an_result *res = &ui->res;
     const struct m2sdr_dab_result *t = &RES(res)->dab;
 
-    if (!res->set.dab_on || !RES(res)->dab_valid)
+    if (!SET(&res->set)->dab_on || !RES(res)->dab_valid)
         return;
     trend_add(&ui->dab, &res->set, t->found && t->prs, t->mer_db, t->mer_bin_db, t->channel_bin_db, t->bins, t->echo_db,
               M2SDR_DAB_ECHO_BINS);
@@ -252,7 +260,7 @@ static void draw_dab(struct an_ui *ui, bool live, bool *changed)
                 view_retune(ui, ui->set.freq_hz + 1e3 * round(t->freq_error_hz / 1e3), changed);
         }
     }
-    if (!res->set.dab_on) {
+    if (!SET(&res->set)->dab_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -321,27 +329,28 @@ static void draw_dab_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_dab = {
-    .key          = "dab",
-    .title        = "DAB",
-    .category     = AN_CAT_BROADCAST,
-    .on           = offsetof(struct an_settings, dab_on),
-    .result_size  = sizeof(struct dab_res),
-    .valid        = offsetof(struct dab_res, dab_valid),
-    .found        = offsetof(struct dab_res, dab.found),
-    .report_rank  = 30,
-    .default_rate = M2SDR_DAB_SAMPLE_RATE,
-    .psd_short    = true,
-    .samples      = dab_samples,
-    .analyse      = dab_analyse,
-    .report_text  = dab_report_text,
-    .report_json  = dab_report_json,
-    .watch_line   = dab_watch_line,
-    .options      = dab_options,
-    .option       = dab_option,
-    .help         = dab_help,
+    .key           = "dab",
+    .title         = "DAB",
+    .category      = AN_CAT_BROADCAST,
+    .settings_size = sizeof(struct dab_set),
+    .on            = offsetof(struct dab_set, dab_on),
+    .result_size   = sizeof(struct dab_res),
+    .valid         = offsetof(struct dab_res, dab_valid),
+    .found         = offsetof(struct dab_res, dab.found),
+    .report_rank   = 30,
+    .default_rate  = M2SDR_DAB_SAMPLE_RATE,
+    .psd_short     = true,
+    .samples       = dab_samples,
+    .analyse       = dab_analyse,
+    .report_text   = dab_report_text,
+    .report_json   = dab_report_json,
+    .watch_line    = dab_watch_line,
+    .options       = dab_options,
+    .option        = dab_option,
+    .help          = dab_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_dab,
-    .results      = draw_dab_results,
-    .keep         = dab_keep,
+    .draw          = draw_dab,
+    .results       = draw_dab_results,
+    .keep          = dab_keep,
 #endif
 };

@@ -22,8 +22,17 @@
 
 #include "analyzer.h"
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_lte;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct lte_set {
+    bool   lte_on;                 /* LTE downlink carrier. */
+};
+
+#define SET(set) ((struct lte_set *)an_mode_settings(&an_mode_lte, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct lte_res {
@@ -31,7 +40,6 @@ struct lte_res {
     struct m2sdr_lte_result lte;
 };
 
-extern const struct an_mode an_mode_lte;
 #define RES(res) ((struct lte_res *)an_mode_result(&an_mode_lte, (res)))
 
 /* Analysis */
@@ -163,7 +171,7 @@ static int lte_option(int id, const char *arg, struct an_cli *cli)
 {
     (void)id;
     (void)arg;
-    cli->set->lte_on = true;
+    SET(cli->set)->lte_on = true;
     return 0;
 }
 
@@ -244,7 +252,7 @@ static void lte_keep(struct an_ui *ui)
 {
     const struct m2sdr_lte_result *l = &RES(&ui->res)->lte;
 
-    if (!ui->res.set.lte_on || !RES(&ui->res)->lte_valid)
+    if (!SET(&ui->res.set)->lte_on || !RES(&ui->res)->lte_valid)
         return;
     if (ui->res.set.freq_hz != ui->lte_freq_hz || ui->res.set.sample_rate != ui->lte_rate || ui->res.set.channel != ui->lte_channel) {
         ui->lte_freq_hz = ui->res.set.freq_hz;
@@ -282,7 +290,7 @@ static void lte_close(struct an_ui *ui)
 static const struct m2sdr_lte_result *lte_shown(const struct an_ui *ui, bool *held)
 {
     *held = false;
-    if (!ui->shown->set.lte_on || !RES(ui->shown)->lte_valid)
+    if (!SET(&ui->shown->set)->lte_on || !RES(ui->shown)->lte_valid)
         return NULL;
     if (RES(ui->shown)->lte.found)
         return &RES(ui->shown)->lte;
@@ -343,7 +351,7 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
             }
         }
     }
-    if (!ui->res.set.lte_on) {
+    if (!SET(&ui->res.set)->lte_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -617,25 +625,26 @@ static void draw_lte_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_lte = {
-    .key         = "lte",
-    .title       = "LTE",
-    .category    = AN_CAT_CELLULAR,
-    .on          = offsetof(struct an_settings, lte_on),
-    .result_size = sizeof(struct lte_res),
-    .valid       = offsetof(struct lte_res, lte_valid),
-    .found       = offsetof(struct lte_res, lte.found),
-    .report_rank = 10,
-    .samples     = lte_samples,
-    .analyse     = lte_analyse,
-    .report_text = lte_report_text,
-    .report_json = lte_report_json,
-    .options     = lte_options,
-    .option      = lte_option,
-    .help        = lte_help,
+    .key           = "lte",
+    .title         = "LTE",
+    .category      = AN_CAT_CELLULAR,
+    .settings_size = sizeof(struct lte_set),
+    .on            = offsetof(struct lte_set, lte_on),
+    .result_size   = sizeof(struct lte_res),
+    .valid         = offsetof(struct lte_res, lte_valid),
+    .found         = offsetof(struct lte_res, lte.found),
+    .report_rank   = 10,
+    .samples       = lte_samples,
+    .analyse       = lte_analyse,
+    .report_text   = lte_report_text,
+    .report_json   = lte_report_json,
+    .options       = lte_options,
+    .option        = lte_option,
+    .help          = lte_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw        = draw_lte,
-    .results     = draw_lte_results,
-    .keep        = lte_keep,
-    .close       = lte_close,
+    .draw          = draw_lte,
+    .results       = draw_lte_results,
+    .keep          = lte_keep,
+    .close         = lte_close,
 #endif
 };

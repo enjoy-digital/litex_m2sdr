@@ -18,8 +18,17 @@
 
 #include "analyzer.h"
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_gsm;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct gsm_set {
+    bool   gsm_on;
+};
+
+#define SET(set) ((struct gsm_set *)an_mode_settings(&an_mode_gsm, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct gsm_res {
@@ -27,7 +36,6 @@ struct gsm_res {
     struct m2sdr_gsm_result gsm;
 };
 
-extern const struct an_mode an_mode_gsm;
 #define RES(res) ((struct gsm_res *)an_mode_result(&an_mode_gsm, (res)))
 
 /* Bands */
@@ -248,7 +256,7 @@ static int gsm_option(int id, const char *arg, struct an_cli *cli)
 {
     (void)id;
     (void)arg;
-    cli->set->gsm_on = true;
+    SET(cli->set)->gsm_on = true;
     return 0;
 }
 
@@ -345,7 +353,7 @@ static void draw_gsm(struct an_ui *ui, bool live, bool *changed)
 
     if (live)
         gsm_controls(ui, changed);
-    if (!res->set.gsm_on) {
+    if (!SET(&res->set)->gsm_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -482,26 +490,27 @@ static void draw_gsm_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_gsm = {
-    .key          = "gsm",
-    .title        = "GSM",
-    .category     = AN_CAT_CELLULAR,
-    .on           = offsetof(struct an_settings, gsm_on),
-    .result_size  = sizeof(struct gsm_res),
-    .valid        = offsetof(struct gsm_res, gsm_valid),
-    .found        = offsetof(struct gsm_res, gsm.found),
-    .report_rank  = 12,
-    .default_rate = AN_GSM_RATE,
-    .psd_short    = true,
-    .samples      = gsm_samples,
-    .analyse      = gsm_analyse,
-    .report_text  = gsm_report_text,
-    .report_json  = gsm_report_json,
-    .watch_line   = gsm_watch_line,
-    .options      = gsm_options,
-    .option       = gsm_option,
-    .help         = gsm_help,
+    .key           = "gsm",
+    .title         = "GSM",
+    .category      = AN_CAT_CELLULAR,
+    .settings_size = sizeof(struct gsm_set),
+    .on            = offsetof(struct gsm_set, gsm_on),
+    .result_size   = sizeof(struct gsm_res),
+    .valid         = offsetof(struct gsm_res, gsm_valid),
+    .found         = offsetof(struct gsm_res, gsm.found),
+    .report_rank   = 12,
+    .default_rate  = AN_GSM_RATE,
+    .psd_short     = true,
+    .samples       = gsm_samples,
+    .analyse       = gsm_analyse,
+    .report_text   = gsm_report_text,
+    .report_json   = gsm_report_json,
+    .watch_line    = gsm_watch_line,
+    .options       = gsm_options,
+    .option        = gsm_option,
+    .help          = gsm_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_gsm,
-    .results      = draw_gsm_results,
+    .draw          = draw_gsm,
+    .results       = draw_gsm_results,
 #endif
 };

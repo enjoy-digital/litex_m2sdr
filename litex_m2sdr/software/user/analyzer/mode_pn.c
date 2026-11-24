@@ -20,8 +20,19 @@
 
 #include "analyzer.h"
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_pn;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct pn_set {
+    bool   pn_on;                  /* Phase noise of the strongest carrier. */
+    int    pn_log2;                /* Its capture: 2^pn_log2 samples. */
+    double pn_lo_hz, pn_hi_hz;     /* Integration limits; 0: the offsets measured. */
+};
+
+#define SET(set) ((struct pn_set *)an_mode_settings(&an_mode_pn, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct pn_res {
@@ -29,7 +40,6 @@ struct pn_res {
     struct m2sdr_phase_noise pn;
 };
 
-extern const struct an_mode an_mode_pn;
 #define RES(res) ((struct pn_res *)an_mode_result(&an_mode_pn, (res)))
 
 /* Analysis */
@@ -37,14 +47,14 @@ extern const struct an_mode an_mode_pn;
 
 static size_t pn_samples(const struct an_settings *set)
 {
-    return (size_t)1 << set->pn_log2;
+    return (size_t)1 << SET(set)->pn_log2;
 }
 
 static void pn_analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res)
 {
-    const size_t n = count < ((size_t)1 << set->pn_log2) ? count : (size_t)1 << set->pn_log2;
+    const size_t n = count < ((size_t)1 << SET(set)->pn_log2) ? count : (size_t)1 << SET(set)->pn_log2;
 
-    RES(res)->pn_valid = m2sdr_phase_noise(x, n, set->sample_rate, set->freq_hz, set->pn_lo_hz, set->pn_hi_hz,
+    RES(res)->pn_valid = m2sdr_phase_noise(x, n, set->sample_rate, set->freq_hz, SET(set)->pn_lo_hz, SET(set)->pn_hi_hz,
                                            &RES(res)->pn) == 0 && RES(res)->pn.found;
     /* The jitter needs the RF frequency of the carrier, known once it is found. */
     if (RES(res)->pn_valid && set->freq_hz + RES(res)->pn.carrier_hz > 0)
@@ -88,7 +98,7 @@ static void pn_report_text(const struct an_result *res, const struct an_report *
         return;
     }
     printf("  Carrier    : %.6f MHz, %.2f %s, %zu samples\n", (set->freq_hz + pn->carrier_hz) / 1e6,
-           pn->carrier_db + off, unit, (size_t)1 << set->pn_log2);
+           pn->carrier_db + off, unit, (size_t)1 << SET(set)->pn_log2);
     for (i = 0; i < PN_SPOTS; i++) {
         const double l = pn_interp(pn->offset_hz, pn->l_dbc_hz, pn->points, pn_spots[i]);
         const double am = pn_interp(pn->offset_hz, pn->am_dbc_hz, pn->points, pn_spots[i]);
@@ -179,7 +189,7 @@ static const struct option pn_options[] = {
 
 static void pn_defaults(struct an_settings *set)
 {
-    set->pn_log2 = AN_PN_DEFAULT_LOG2;
+    SET(set)->pn_log2 = AN_PN_DEFAULT_LOG2;
 }
 
 static int pn_option(int id, const char *arg, struct an_cli *cli)
@@ -188,7 +198,7 @@ static int pn_option(int id, const char *arg, struct an_cli *cli)
     double v;
 
     switch (id) {
-    case PN_OPT_ON: set->pn_on = true; break;
+    case PN_OPT_ON: SET(set)->pn_on = true; break;
     case PN_OPT_SAMPLES:
         if (m2sdr_cli_parse_double(arg, &v) != 0 || v < (double)(1 << AN_PN_MIN_LOG2) || v > (double)(1 << AN_PN_MAX_LOG2)) {
             m2sdr_cli_error("invalid phase noise samples '%s' (expected %d to %d)", arg,
@@ -196,17 +206,17 @@ static int pn_option(int id, const char *arg, struct an_cli *cli)
             return -1;
         }
         /* The power of two at or below. */
-        for (set->pn_log2 = AN_PN_MIN_LOG2; (double)((size_t)2 << set->pn_log2) <= v; set->pn_log2++)
+        for (SET(set)->pn_log2 = AN_PN_MIN_LOG2; (double)((size_t)2 << SET(set)->pn_log2) <= v; SET(set)->pn_log2++)
             ;
         break;
     case PN_OPT_FROM:
-        if (m2sdr_cli_parse_double(arg, &set->pn_lo_hz) != 0 || set->pn_lo_hz < 0) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->pn_lo_hz) != 0 || SET(set)->pn_lo_hz < 0) {
             m2sdr_cli_error("invalid offset '%s'", arg);
             return -1;
         }
         break;
     case PN_OPT_TO:
-        if (m2sdr_cli_parse_double(arg, &set->pn_hi_hz) != 0 || set->pn_hi_hz < 0) {
+        if (m2sdr_cli_parse_double(arg, &SET(set)->pn_hi_hz) != 0 || SET(set)->pn_hi_hz < 0) {
             m2sdr_cli_error("invalid offset '%s'", arg);
             return -1;
         }
@@ -215,7 +225,7 @@ static int pn_option(int id, const char *arg, struct an_cli *cli)
     case PN_OPT_FLOOR_SAVE:
         /* The phase noise read is stored as the floor. */
         cli->floor_store = true;
-        set->pn_on       = true;
+        SET(set)->pn_on       = true;
         break;
     }
     return 0;
@@ -281,20 +291,20 @@ static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
     const struct an_floor *fl = ui->fl;
     struct m2sdr_plot plot;
     double top = -200.0, bottom = 0.0;
-    int idx = ui->set.pn_log2 - AN_PN_MIN_LOG2, i, nf = 0;
+    int idx = SET(&ui->set)->pn_log2 - AN_PN_MIN_LOG2, i, nf = 0;
     char text[160];
 
     (void)live;
     igSetNextItemWidth(110.0f);
     if (igCombo_Str_arr("Samples", &idx, sizes, AN_PN_MAX_LOG2 - AN_PN_MIN_LOG2 + 1, -1)) {
-        ui->set.pn_log2 = idx + AN_PN_MIN_LOG2;
+        SET(&ui->set)->pn_log2 = idx + AN_PN_MIN_LOG2;
         *changed = true;
     }
     same_line_or_wrap(16.0f, 230.0f);
-    if (input_scaled("From (Hz)", &ui->set.pn_lo_hz, 1.0, "%.0f"))
+    if (input_scaled("From (Hz)", &SET(&ui->set)->pn_lo_hz, 1.0, "%.0f"))
         *changed = true;
     same_line_or_wrap(16.0f, 215.0f);
-    if (input_scaled("To (Hz)", &ui->set.pn_hi_hz, 1.0, "%.0f"))
+    if (input_scaled("To (Hz)", &SET(&ui->set)->pn_hi_hz, 1.0, "%.0f"))
         *changed = true;
     same_line_or_wrap(16.0f, 100.0f);
     igCheckbox("AM noise", &ui->pn_am);
@@ -308,7 +318,7 @@ static void draw_phase_noise(struct an_ui *ui, bool live, bool *changed)
         }
     }
 
-    if (!ui->res.set.pn_on) {
+    if (!SET(&ui->res.set)->pn_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -425,23 +435,24 @@ static void draw_pn_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_pn = {
-    .key         = "phase-noise",
-    .title       = "Phase noise",
-    .category    = AN_CAT_SIGNAL,
-    .on          = offsetof(struct an_settings, pn_on),
-    .result_size = sizeof(struct pn_res),
-    .valid       = offsetof(struct pn_res, pn_valid),
-    .report_rank = 50,
-    .samples     = pn_samples,
-    .analyse     = pn_analyse,
-    .report_text = pn_report_text,
-    .report_json = pn_report_json,
-    .defaults    = pn_defaults,
-    .options     = pn_options,
-    .option      = pn_option,
-    .help        = pn_help,
+    .key           = "phase-noise",
+    .title         = "Phase noise",
+    .category      = AN_CAT_SIGNAL,
+    .settings_size = sizeof(struct pn_set),
+    .on            = offsetof(struct pn_set, pn_on),
+    .result_size   = sizeof(struct pn_res),
+    .valid         = offsetof(struct pn_res, pn_valid),
+    .report_rank   = 50,
+    .samples       = pn_samples,
+    .analyse       = pn_analyse,
+    .report_text   = pn_report_text,
+    .report_json   = pn_report_json,
+    .defaults      = pn_defaults,
+    .options       = pn_options,
+    .option        = pn_option,
+    .help          = pn_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw        = draw_phase_noise,
-    .results     = draw_pn_results,
+    .draw          = draw_phase_noise,
+    .results       = draw_pn_results,
 #endif
 };

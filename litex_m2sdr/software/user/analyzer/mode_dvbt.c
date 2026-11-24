@@ -21,8 +21,21 @@
 
 #include "analyzer.h"
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_dvbt;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct dvbt_set {
+    bool   dvbt_on;                /* DVB-T multiplex. */
+    /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
+     * nothing), and whether the capture is a short one. */
+    bool   dvbt_fast;
+    struct m2sdr_dvbt_config dvbt_hint;
+};
+
+#define SET(set) ((struct dvbt_set *)an_mode_settings(&an_mode_dvbt, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct dvbt_res {
@@ -30,7 +43,6 @@ struct dvbt_res {
     struct m2sdr_dvbt_result dvbt;
 };
 
-extern const struct an_mode an_mode_dvbt;
 #define RES(res) ((struct dvbt_res *)an_mode_result(&an_mode_dvbt, (res)))
 
 /* Analysis */
@@ -38,7 +50,7 @@ extern const struct an_mode an_mode_dvbt;
 
 static size_t dvbt_samples(const struct an_settings *set)
 {
-    return (size_t)((set->dvbt_fast ? AN_DVBT_FAST_SECONDS : AN_DVBT_SECONDS) * set->sample_rate);
+    return (size_t)((SET(set)->dvbt_fast ? AN_DVBT_FAST_SECONDS : AN_DVBT_SECONDS) * set->sample_rate);
 }
 
 static void dvbt_analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res)
@@ -46,7 +58,7 @@ static void dvbt_analyse(const float complex *x, size_t count, const struct an_s
     const size_t n = (size_t)(AN_DVBT_SECONDS * set->sample_rate);
 
     RES(res)->dvbt_valid = m2sdr_dvbt_analyse(x, count < n ? count : n, set->sample_rate,
-                                              set->dvbt_hint.fft_len ? &set->dvbt_hint : NULL, &RES(res)->dvbt) == 0;
+                                              SET(set)->dvbt_hint.fft_len ? &SET(set)->dvbt_hint : NULL, &RES(res)->dvbt) == 0;
 }
 
 /* Reports */
@@ -167,10 +179,10 @@ static struct {
 
 static void dvbt_watch_prepare(struct an_settings *set)
 {
-    set->dvbt_fast = dvbt_watch.ok && ++dvbt_watch.since % AN_DVBT_FULL_EVERY != 0;
-    memset(&set->dvbt_hint, 0, sizeof(set->dvbt_hint));
+    SET(set)->dvbt_fast = dvbt_watch.ok && ++dvbt_watch.since % AN_DVBT_FULL_EVERY != 0;
+    memset(&SET(set)->dvbt_hint, 0, sizeof(SET(set)->dvbt_hint));
     if (dvbt_watch.ok)
-        set->dvbt_hint = dvbt_watch.known;
+        SET(set)->dvbt_hint = dvbt_watch.known;
 }
 
 static int dvbt_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
@@ -257,7 +269,7 @@ static int dvbt_option(int id, const char *arg, struct an_cli *cli)
 {
     (void)id;
     (void)arg;
-    cli->set->dvbt_on = true;
+    SET(cli->set)->dvbt_on = true;
     return 0;
 }
 
@@ -289,12 +301,12 @@ static void dvbt_worker_prepare(struct an_settings *set, bool live)
 {
     struct an_dvbt_track *dv = &dvbt_track;
 
-    set->dvbt_fast = false;
-    memset(&set->dvbt_hint, 0, sizeof(set->dvbt_hint));
-    if (set->dvbt_on && dv->ok && live && set->freq_hz == dv->known.freq_hz &&
+    SET(set)->dvbt_fast = false;
+    memset(&SET(set)->dvbt_hint, 0, sizeof(SET(set)->dvbt_hint));
+    if (SET(set)->dvbt_on && dv->ok && live && set->freq_hz == dv->known.freq_hz &&
         set->sample_rate == dv->known.sample_rate && set->channel == dv->known.channel) {
-        set->dvbt_fast = ++dv->since % AN_DVBT_FULL_EVERY != 0;
-        set->dvbt_hint = dv->known.dvbt_hint;
+        SET(set)->dvbt_fast = ++dv->since % AN_DVBT_FULL_EVERY != 0;
+        SET(set)->dvbt_hint = SET(&dv->known)->dvbt_hint;
     }
 }
 
@@ -303,13 +315,13 @@ static void dvbt_worker_result(const struct an_settings *set, const struct an_re
     struct an_dvbt_track *dv = &dvbt_track;
     const struct m2sdr_dvbt_result *t = &RES(res)->dvbt;
 
-    if (!set->dvbt_on || !RES(res)->dvbt_valid)
+    if (!SET(set)->dvbt_on || !RES(res)->dvbt_valid)
         return;
     if (t->tps) {
         dv->known = *set;
-        dv->known.dvbt_hint.fft_len    = t->fft_len;
-        dv->known.dvbt_hint.guard      = t->guard;
-        dv->known.dvbt_hint.modulation = t->tps_modulation;
+        SET(&dv->known)->dvbt_hint.fft_len    = t->fft_len;
+        SET(&dv->known)->dvbt_hint.guard      = t->guard;
+        SET(&dv->known)->dvbt_hint.modulation = t->tps_modulation;
         dv->ok    = true;
         dv->since = 0;
     } else if (!t->found || !t->pilots) {
@@ -317,8 +329,8 @@ static void dvbt_worker_result(const struct an_settings *set, const struct an_re
     }
     /* The offset follows every result of the same tuning. */
     if (dv->ok && t->found && t->pilots && set->freq_hz == dv->known.freq_hz) {
-        dv->known.dvbt_hint.offset_known   = true;
-        dv->known.dvbt_hint.carrier_offset = t->carrier_offset;
+        SET(&dv->known)->dvbt_hint.offset_known   = true;
+        SET(&dv->known)->dvbt_hint.carrier_offset = t->carrier_offset;
     }
 }
 
@@ -332,7 +344,7 @@ static void dvbt_keep(struct an_ui *ui)
     const struct an_result *res = &ui->res;
     const struct m2sdr_dvbt_result *t = &RES(res)->dvbt;
 
-    if (!res->set.dvbt_on || !RES(res)->dvbt_valid)
+    if (!SET(&res->set)->dvbt_on || !RES(res)->dvbt_valid)
         return;
     if (trend_add(&ui->dvbt, &res->set, t->found && t->pilots, t->mer_db, t->mer_bin_db, t->channel_bin_db, t->bins,
                   t->echo_db, M2SDR_DVBT_ECHO_BINS) && ui->dvbt_tps)
@@ -393,7 +405,7 @@ static void draw_dvbt(struct an_ui *ui, bool live, bool *changed)
                 view_retune(ui, ui->set.freq_hz + 1e3 * round(t->freq_error_hz / 1e3), changed);
         }
     }
-    if (!res->set.dvbt_on) {
+    if (!SET(&res->set)->dvbt_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -481,7 +493,8 @@ const struct an_mode an_mode_dvbt = {
     .key            = "dvbt",
     .title          = "DVB-T",
     .category       = AN_CAT_BROADCAST,
-    .on             = offsetof(struct an_settings, dvbt_on),
+    .settings_size  = sizeof(struct dvbt_set),
+    .on             = offsetof(struct dvbt_set, dvbt_on),
     .result_size    = sizeof(struct dvbt_res),
     .valid          = offsetof(struct dvbt_res, dvbt_valid),
     .found          = offsetof(struct dvbt_res, dvbt.found),

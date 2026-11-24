@@ -21,8 +21,17 @@
 
 #include "analyzer.h"
 
-/* Result */
-/*--------*/
+/* Settings and result */
+/*-----------------------*/
+
+extern const struct an_mode an_mode_mimo;
+
+/* Its settings: its block of struct an_settings, read with SET(). */
+struct mimo_set {
+    bool   mimo_on;                /* 2x2 channel of an LTE cell. */
+};
+
+#define SET(set) ((struct mimo_set *)an_mode_settings(&an_mode_mimo, (set)))
 
 /* The result of the mode: its block of struct an_result, read with RES(). */
 struct mimo_res {
@@ -30,7 +39,6 @@ struct mimo_res {
     struct m2sdr_mimo_result mimo;
 };
 
-extern const struct an_mode an_mode_mimo;
 #define RES(res) ((struct mimo_res *)an_mode_result(&an_mode_mimo, (res)))
 
 /* Command line */
@@ -45,7 +53,7 @@ static int mimo_option(int id, const char *arg, struct an_cli *cli)
 {
     (void)id;
     (void)arg;
-    cli->set->mimo_on = true;
+    SET(cli->set)->mimo_on = true;
     return 0;
 }
 
@@ -305,7 +313,7 @@ static void draw_mimo(struct an_ui *ui, bool live, bool *changed)
         }
     }
     igTextDisabled("The cell search of LTE takes about 0.2 s a capture: a few results a second.");
-    if (!res->set.mimo_on) {
+    if (!SET(&res->set)->mimo_on) {
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
@@ -390,27 +398,28 @@ static void draw_mimo_results(struct an_ui *ui)
 /*------*/
 
 const struct an_mode an_mode_mimo = {
-    .key          = "mimo",
-    .title        = "LTE 2x2",
-    .category     = AN_CAT_TWO_CHANNEL,
-    .on           = offsetof(struct an_settings, mimo_on),
-    .result_size  = sizeof(struct mimo_res),
-    .valid        = offsetof(struct mimo_res, mimo_valid),
-    .found        = offsetof(struct mimo_res, mimo.found),
-    .report_rank  = 72,
-    .default_rate = 7680000.0,
-    .psd_short    = true,
-    .samples      = mimo_samples,
-    .two_channels = true,
-    .analyse_two  = mimo_analyse,
-    .report_text  = mimo_report_text,
-    .report_json  = mimo_report_json,
-    .watch_line   = mimo_watch_line,
-    .options      = mimo_options,
-    .option       = mimo_option,
-    .help         = mimo_help,
+    .key           = "mimo",
+    .title         = "LTE 2x2",
+    .category      = AN_CAT_TWO_CHANNEL,
+    .settings_size = sizeof(struct mimo_set),
+    .on            = offsetof(struct mimo_set, mimo_on),
+    .result_size   = sizeof(struct mimo_res),
+    .valid         = offsetof(struct mimo_res, mimo_valid),
+    .found         = offsetof(struct mimo_res, mimo.found),
+    .report_rank   = 72,
+    .default_rate  = 7680000.0,
+    .psd_short     = true,
+    .samples       = mimo_samples,
+    .two_channels  = true,
+    .analyse_two   = mimo_analyse,
+    .report_text   = mimo_report_text,
+    .report_json   = mimo_report_json,
+    .watch_line    = mimo_watch_line,
+    .options       = mimo_options,
+    .option        = mimo_option,
+    .help          = mimo_help,
 #ifdef M2SDR_ANALYZER_GUI
-    .draw         = draw_mimo,
-    .results      = draw_mimo_results,
+    .draw          = draw_mimo,
+    .results       = draw_mimo_results,
 #endif
 };
