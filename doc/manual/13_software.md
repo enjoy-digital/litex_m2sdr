@@ -924,7 +924,7 @@ and the PBCH are in its six central blocks; a narrower one is analysed whole.
 | Carrier offset | Cyclic prefixes, then the reference signals from one slot to the next |
 | Resource blocks, antenna ports, frame number, PHICH | MIB, decoded from the PBCH with its CRC, for one or two antenna ports |
 | RSRP, RSSI, PSS and SSS power | Resource grid, in dBFS |
-| EVM of the reference signals | Each one against the channel given by its neighbours |
+| EVM of the reference signals | Each one against the channel given by its neighbours: power of the errors over power of the channel |
 | EVM of the PBCH | Its symbols against QPSK |
 | Blocks of data, their modulation and EVM | See below; one or two antenna ports |
 
