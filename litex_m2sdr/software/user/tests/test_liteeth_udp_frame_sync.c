@@ -79,7 +79,8 @@ int main(void)
     tx_sock = socket(AF_INET, SOCK_DGRAM, 0);
     memset(&tx_addr, 0, sizeof(tx_addr));
     tx_addr.sin_family = AF_INET;
-    tx_addr.sin_port   = htons(PORT);
+    /* The port bound: another run of the tests may hold PORT, and then gets a free one. */
+    tx_addr.sin_port   = htons(liteeth_udp_listen_port(&u));
     inet_pton(AF_INET, "127.0.0.1", &tx_addr.sin_addr);
 
     /* The reception starts inside frame 0: its end is dropped, frame 1 is whole. */
