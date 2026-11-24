@@ -24,6 +24,7 @@
 #include "ad9361/ad9361_api.h"
 
 #include "LiteXM2SDRDevice.hpp"
+#include "LiteXM2SDRSampleConv.hpp"
 
 #if USE_LITEETH
 #include "liteeth_udp.h"
@@ -81,20 +82,6 @@ static inline int8_t clamp_to_sc8(int32_t value)
     if (value < -128)
         return -128;
     return static_cast<int8_t>(value);
-}
-
-/* CF32 to the 12-bit samples of the RFIC (in 16 bits): saturated. A sample beyond full scale
- * would otherwise overflow the 12 bits and come out with the opposite sign. */
-static inline int16_t cf32_to_sc12(float sample, double scale)
-{
-    if (!std::isfinite(sample))
-        return 0;
-    double v = std::nearbyint(static_cast<double>(sample) * scale);
-    if (v > scale)
-        v = scale;
-    if (v < -scale)
-        v = -scale;
-    return static_cast<int16_t>(v);
 }
 
 static inline int8_t cf32_to_sc8(float sample, double scale)
@@ -1807,13 +1794,8 @@ void SoapyLiteXM2SDR::interleaveCF32(
     const float tx_scale = static_cast<float>(_tx_cf32_scale);
 
     if (_bytesPerSample == 2) {
-        int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst);
-        for (uint32_t i = 0; i < len; i++) {
-            dst_int16[0] = cf32_to_sc12(samples_cf32[0] * tx_scale, _samplesScaling); /* I. */
-            dst_int16[1] = cf32_to_sc12(samples_cf32[1] * tx_scale, _samplesScaling); /* Q. */
-            samples_cf32 += 2;
-            dst_int16 += _nChannels * _samplesPerComplex;
-        }
+        litex_m2sdr::cf32_to_sc12_block(samples_cf32, reinterpret_cast<int16_t*>(dst), len,
+            _nChannels * _samplesPerComplex, tx_scale, _samplesScaling);
     } else if (_bytesPerSample == 1) {
         int8_t *dst_int8 = reinterpret_cast<int8_t*>(dst);
         for (uint32_t i = 0; i < len; i++) {
@@ -1836,18 +1818,9 @@ void SoapyLiteXM2SDR::deinterleaveCF32(
     float *samples_cf32 = reinterpret_cast<float*>(dst) + (offset * _samplesPerComplex);
 
     if (_bytesPerSample == 2) {
-        const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
-
-        for (uint32_t i = 0; i < len; i++) {
-            /* Mask 12 LSB and sign-extend */
-            int16_t i_sample = static_cast<int16_t>(src_int16[0] << 4) >> 4;  /* I. */
-            int16_t q_sample = static_cast<int16_t>(src_int16[1] << 4) >> 4;  /* Q. */
-            /* Scale to float (-1.0 to 1.0 range) */
-            samples_cf32[0] = static_cast<float>(i_sample) / _samplesScaling; /* I. */
-            samples_cf32[1] = static_cast<float>(q_sample) / _samplesScaling; /* Q. */
-            samples_cf32 += 2;
-            src_int16 += _nChannels * _samplesPerComplex;
-        }
+        /* Scale to float (-1.0 to 1.0 range) */
+        litex_m2sdr::sc12_to_cf32_block(reinterpret_cast<const int16_t*>(src), samples_cf32, len,
+            _nChannels * _samplesPerComplex, _samplesScaling);
     } else if (_bytesPerSample == 1) {
         const int8_t *src_int8 = reinterpret_cast<const int8_t*>(src);
 
