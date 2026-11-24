@@ -66,6 +66,11 @@ static void dvbt2_report_text(const struct an_result *res, const struct an_repor
                "  or 6.857143 MSPS (6 MHz).\n");
         return;
     }
+    if (t->dvbt) {
+        printf("  Not DVB-T2: a DVB-T multiplex (%dk, guard 1/%d, its continual pilots), see --dvbt.\n",
+               t->fft_len / 1024, t->guard_den);
+        return;
+    }
     if (!t->found) {
         printf("  No multiplex found (guard interval correlation %.3f).\n", t->sync_quality);
         return;
@@ -111,6 +116,7 @@ static void dvbt2_report_json(const struct an_result *res, const struct an_repor
 
     printf("  \"dvbt2\": {\n");
     print_json_number("sync_quality", res->dvbt2_valid ? t->sync_quality : 0.0, false);
+    printf("    \"dvbt\": %s,\n", res->dvbt2_valid && t->dvbt ? "true" : "false");
     printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
     if (!ok) {
         printf("  }");
@@ -240,7 +246,10 @@ static int dvbt2_watch_line(const struct an_settings *set, const struct an_resul
                 printf(" %+8.2f %6.1f", t->echo_delay_us, t->echo_level_db);
             printf("\n");
         } else {
-            printf("%8.2f  no multiplex (guard correlation %.3f)\n", now, t->sync_quality);
+            if (t->dvbt)
+                printf("%8.2f  not DVB-T2: a DVB-T multiplex (see --dvbt)\n", now);
+            else
+                printf("%8.2f  no multiplex (guard correlation %.3f)\n", now, t->sync_quality);
         }
     }
     return 0;
@@ -414,7 +423,11 @@ static void draw_dvbt2(struct an_ui *ui, bool live, bool *changed)
     }
     if (!t->found) {
         igPushTextWrapPos(0.0f);
-        igText("No DVB-T2 multiplex (guard interval correlation %.3f): tune near the centre of one.", t->sync_quality);
+        if (t->dvbt)
+            igText("Not DVB-T2: a DVB-T multiplex (%dk, guard 1/%d, its continual pilots). See the DVB-T view.",
+                   t->fft_len / 1024, t->guard_den);
+        else
+            igText("No DVB-T2 multiplex (guard interval correlation %.3f): tune near the centre of one.", t->sync_quality);
         igPopTextWrapPos();
     }
     /* The line under the MER: what it is, the mode, and what is not read. */
@@ -461,7 +474,7 @@ static void draw_dvbt2_results(struct an_ui *ui)
 
     igSeparatorText("DVB-T2");
     if (!res->dvbt2_valid || !t->found) {
-        igTextUnformatted("No multiplex.", NULL);
+        igTextUnformatted(res->dvbt2_valid && t->dvbt ? "Not DVB-T2: a DVB-T multiplex." : "No multiplex.", NULL);
         return;
     }
     if (igBeginTable("##dvbt2", 2, ImGuiTableFlags_SizingStretchProp, (ImVec2){ 0.0f, 0.0f }, 0.0f)) {
