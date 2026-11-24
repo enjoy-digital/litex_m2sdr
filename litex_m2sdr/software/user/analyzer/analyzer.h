@@ -55,6 +55,7 @@
 #include "m2sdr_analysis_dvbt2.h"
 #include "m2sdr_analysis_fm.h"
 #include "m2sdr_analysis_monitoring.h"
+#include "m2sdr_analysis_cellular.h"
 
 #define AN_DEFAULT_FREQ_HZ     2400e6
 #define AN_DEFAULT_SAMPLE_RATE 7680000.0
@@ -85,6 +86,13 @@
 #define AN_DVBT_RATE            (64e6 / 7.0)  /* Elementary rate of an 8 MHz DVB-T channel. */
 #define AN_DAB_SECONDS          0.2           /* Capture of a DAB analysis: a whole 96 ms frame wherever it starts. */
 #define AN_FM_SECONDS           1.0           /* Capture of an FM analysis: about 11 RDS groups. */
+/* Cellular: 5G NR SSB, GSM, TETRA. */
+#define AN_NR_SECONDS           0.021         /* A burst of SSBs every 20 ms, wherever the capture starts. */
+#define AN_NR_RATE              15.36e6       /* 30 kHz SSBs on 512 points, 15 kHz on 1024. */
+#define AN_GSM_SECONDS          0.06          /* An FCCH and its SCH, 10 or 11 frames apart. */
+#define AN_GSM_RATE             1.92e6
+#define AN_TETRA_SECONDS        1.1           /* The synchronisation burst comes once a multiframe (1.02 s). */
+#define AN_TETRA_RATE           1e6
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 /* Monitoring. */
@@ -133,6 +141,10 @@ struct an_settings {
     int    emc_log2;               /* Its capture: 2^emc_log2 samples; 0: the default. */
     double emc_span_hz;            /* Channels over this span around the centre; 0: the default, < 0: all. */
     struct m2sdr_emc_config emc;   /* Band, unit offset, factors and limit lines (centre and channels set per capture). */
+    /* Cellular. nr_scs_hz: spacing of the SSBs, 0 to find it; nr_scs_known: the one found
+     * on this tuning, set by the worker (0: none). */
+    bool   nr_on, gsm_on, tetra_on;
+    double nr_scs_hz, nr_scs_known;
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -223,6 +235,13 @@ struct an_result {
     double pulse_env_s;            /* Time of the capture over them. */
     struct m2sdr_emc_result emc;
     bool   emc_valid;              /* Measured: the band fits the sample rate and the capture. */
+    /* Cellular: measured (rate and length right); found says the rest. */
+    struct m2sdr_nr_result nr;
+    bool   nr_valid;
+    struct m2sdr_gsm_result gsm;
+    bool   gsm_valid;
+    struct m2sdr_tetra_result tetra;
+    bool   tetra_valid;
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
@@ -450,6 +469,8 @@ struct an_ui {
     /* Last capture whose TPS was read: the short ones between carry none. */
     struct m2sdr_dvbt_result *dvbt_tps;
     struct an_fm_ui *fm;           /* FM: its view, see mode_fm.c. */
+    /* NR: grid of the strongest SSB as a texture. */
+    GLuint nr_grid_tex;
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
     /* DVB-T2: MER over the results of one tuning, and the last capture with a P1. */
