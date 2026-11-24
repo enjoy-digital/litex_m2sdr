@@ -565,8 +565,181 @@ static void test_gnss(void)
     free(res);
 }
 
-int main(void)
+/* Capture files for the report test of m2sdr_analyzer */
+/*------------------------------------------------------*/
+
+#define FILE_SAMPLES   160000      /* More than a capture of the analyzer with its defaults. */
+#define FILE_ADEV_FS   1e6
+#define FILE_ADEV_FREQ 100e6
+#define FILE_ADEV_NOM  100.0123e6  /* Nominal carrier given to the analyzer. */
+#define FILE_ADEV_ERR  0.5         /* Hz above it: 4.9994 ppb. */
+#define FILE_ADEV_AMP  0.3
+#define FILE_ADEV_N    1e-4        /* Noise power: SNR 29.5 dB. */
+#define FILE_GNSS_FS   2.048e6
+#define FILE_GNSS_N    0.01
+#define FILE_GNSS_JN   31.62       /* CW jammer, 15 dB over the noise of 80 % of the band. */
+#define FILE_GNSS_JHZ  -400e3
+
+static const struct gps_sat file_sats[] = {
+    {  5, 47.0,  2100.0, 321.4 },
+    { 12, 43.0, -1650.0, 700.2 },
+};
+
+/* Two channels of SC16 (12 bits), the same samples on both. */
+static int write_sc16(const char *path, const float complex *x, size_t count)
 {
+    FILE *f = fopen(path, "wb");
+    size_t i;
+
+    if (!f)
+        return 1;
+    for (i = 0; i < count; i++) {
+        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
+                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
+        if (fwrite(v, sizeof(v), 1, f) != 1) {
+            fclose(f);
+            return 1;
+        }
+    }
+    return fclose(f) == 0 ? 0 : 1;
+}
+
+static int write_adev(const char *path)
+{
+    float complex *x = malloc(FILE_SAMPLES * sizeof(*x));
+    const double f = FILE_ADEV_NOM + FILE_ADEV_ERR - FILE_ADEV_FREQ;
+    size_t i;
+    int rc;
+
+    if (!x)
+        return 1;
+    for (i = 0; i < FILE_SAMPLES; i++)
+        x[i] = (float complex)(FILE_ADEV_AMP * cexp(I * (0.7 + 2.0 * M_PI * f * (double)i / FILE_ADEV_FS)));
+    add_noise(x, FILE_SAMPLES, FILE_ADEV_N);
+    rc = write_sc16(path, x, FILE_SAMPLES);
+    free(x);
+    return rc;
+}
+
+static int write_gnss(const char *path)
+{
+    float complex *x = malloc(FILE_SAMPLES * sizeof(*x));
+    const double amp = sqrt(FILE_GNSS_JN * FILE_GNSS_N * 0.8);
+    size_t i;
+    int rc;
+
+    if (!x)
+        return 1;
+    make_gps(x, FILE_SAMPLES, FILE_GNSS_FS, file_sats, 2, FILE_GNSS_N);
+    for (i = 0; i < FILE_SAMPLES; i++)
+        x[i] += (float complex)(amp * cexp(I * 2.0 * M_PI * FILE_GNSS_JHZ * (double)i / FILE_GNSS_FS));
+    rc = write_sc16(path, x, FILE_SAMPLES);
+    free(x);
+    return rc;
+}
+
+static int read_json(const char *path, char *json, size_t len)
+{
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f) {
+        printf("test_m2sdr_analysis_timing: cannot open %s\n", path);
+        return -1;
+    }
+    n = fread(json, 1, len - 1, f);
+    fclose(f);
+    json[n] = '\0';
+    return 0;
+}
+
+/* The number of "name" after the first "after" (a key or any text). */
+static double json_number(const char *json, const char *after, const char *name)
+{
+    char key[64];
+    const char *p = strstr(json, after);
+
+    if (!p)
+        return NAN;
+    snprintf(key, sizeof(key), "\"%s\":", name);
+    p = strstr(p, key);
+    return p ? strtod(p + strlen(key), NULL) : NAN;
+}
+
+static int check_adev_report(const char *path)
+{
+    static char json[65536];
+    double block, sx;
+
+    if (read_json(path, json, sizeof(json)) != 0)
+        return 1;
+    printf("Carrier stability report of m2sdr_analyzer:\n");
+    CHECK("found", strstr(json, "\"adev\"") && json_number(json, "\"adev\"", "carrier_hz") > 0.0);
+    CHECK_NEAR("carrier offset (Hz)", json_number(json, "\"adev\"", "carrier_offset_hz"),
+               FILE_ADEV_NOM + FILE_ADEV_ERR - FILE_ADEV_FREQ, 0.01);
+    /* 12-bit samples add -77 dBFS of noise to the -40 dBFS given: SNR 29.5 dB. */
+    CHECK_NEAR("offset (ppb)", json_number(json, "\"adev\"", "offset_ppb"), FILE_ADEV_ERR / FILE_ADEV_NOM * 1e9, 0.1);
+    CHECK_NEAR("SNR (dB)", json_number(json, "\"adev\"", "snr_db"), 10.0 * log10(FILE_ADEV_AMP * FILE_ADEV_AMP / FILE_ADEV_N), 0.3);
+    /* Short tau: the white phase of the noise, sqrt(3) sigma_x / tau. */
+    block = json_number(json, "\"adev\"", "block_len");
+    sx    = sqrt(FILE_ADEV_N / (2.0 * block * FILE_ADEV_AMP * FILE_ADEV_AMP)) / (2.0 * M_PI * FILE_ADEV_NOM);
+    CHECK_NEAR("ADEV(tau0) / white PM", json_number(json, "\"short_tau\"", "adev") /
+               (sqrt(3.0) * sx / json_number(json, "\"short_tau\"", "tau_s")), 1.0, 0.15);
+    if (failures) {
+        printf("test_m2sdr_analysis_timing: %d FAILED\n", failures);
+        return 1;
+    }
+    printf("test_m2sdr_analysis_timing: carrier stability report checked\n");
+    return 0;
+}
+
+static int check_gnss_report(const char *path)
+{
+    static char json[65536];
+    const char *p;
+    int n = 0;
+    unsigned s;
+
+    if (read_json(path, json, sizeof(json)) != 0)
+        return 1;
+    printf("GPS L1 report of m2sdr_analyzer:\n");
+    for (p = strstr(json, "{\"prn\":"); p; p = strstr(p + 1, "{\"prn\":"))
+        n++;
+    CHECK("two PRNs detected", n == 2 && json_number(json, "\"gnss\"", "detected") == 2.0);
+    for (s = 0; s < 2; s++) {
+        char key[32];
+
+        snprintf(key, sizeof(key), "{\"prn\": %d,", file_sats[s].prn);
+        CHECK(key, strstr(json, key) != NULL);
+        CHECK_NEAR("  C/N0 (dB-Hz)", json_number(json, key, "cn0_dbhz"), file_sats[s].cn0_dbhz, 2.0);
+        CHECK_NEAR("  Doppler (Hz)", json_number(json, key, "doppler_hz"), file_sats[s].doppler_hz, 40.0);
+        CHECK_NEAR("  code phase (chips)", json_number(json, key, "code_phase_chips"), file_sats[s].code_chips, 0.15);
+    }
+    CHECK("jammed", strstr(json, "\"jammed\": true") != NULL);
+    CHECK_NEAR("line (Hz)", json_number(json, "\"lines\"", "freq_hz"), FILE_GNSS_JHZ, 2000.0);
+    CHECK_NEAR("line J/N (dB)", json_number(json, "\"lines\"", "jn_db"), 10.0 * log10(FILE_GNSS_JN), 1.0);
+    if (failures) {
+        printf("test_m2sdr_analysis_timing: %d FAILED\n", failures);
+        return 1;
+    }
+    printf("test_m2sdr_analysis_timing: GPS L1 report checked\n");
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc == 3 && strcmp(argv[1], "--write-adev") == 0)
+        return write_adev(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-adev") == 0)
+        return check_adev_report(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--write-gnss") == 0)
+        return write_gnss(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-gnss") == 0)
+        return check_gnss_report(argv[2]);
+    if (argc != 1) {
+        fprintf(stderr, "usage: %s [--write-adev|--check-adev|--write-gnss|--check-gnss PATH]\n", argv[0]);
+        return 1;
+    }
     test_carrier();
     test_series();
     test_ca_codes();
