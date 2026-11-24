@@ -17,6 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "m2sdr_cli.h"
+
 #include "analyzer.h"
 
 /* Analysis */
@@ -229,6 +231,31 @@ static int dvbt_watch_line(const struct an_settings *set, const struct an_result
         }
     }
     return 0;
+}
+
+/* Command line */
+/*--------------*/
+
+static const struct option dvbt_options[] = {
+    { "dvbt", no_argument, NULL, 0 },
+    { NULL, 0, NULL, 0 }
+};
+
+static int dvbt_option(int id, const char *arg, struct an_cli *cli)
+{
+    (void)id;
+    (void)arg;
+    cli->set->dvbt_on = true;
+    return 0;
+}
+
+static void dvbt_help(void)
+{
+    printf("DVB-T options:\n"
+           "      --dvbt             With --report: reception of a DVB-T multiplex tuned near its centre:\n"
+           "                         mode, TPS, MER, channel and echoes. The sample rate is the one of\n"
+           "                         the channel (default with --dvbt: 9.142857 MSPS, 8 MHz).\n"
+           "\n");
 }
 
 #ifdef M2SDR_ANALYZER_GUI
@@ -453,6 +480,9 @@ const struct an_mode an_mode_dvbt = {
     .report_json    = dvbt_report_json,
     .watch_prepare  = dvbt_watch_prepare,
     .watch_line     = dvbt_watch_line,
+    .options        = dvbt_options,
+    .option         = dvbt_option,
+    .help           = dvbt_help,
 #ifdef M2SDR_ANALYZER_GUI
     .worker_prepare = dvbt_worker_prepare,
     .worker_result  = dvbt_worker_result,

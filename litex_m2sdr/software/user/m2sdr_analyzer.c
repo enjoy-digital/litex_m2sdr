@@ -19,7 +19,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>
 
 #include "m2sdr.h"
 #include "m2sdr_analysis.h"
@@ -65,17 +64,15 @@ const struct an_mode an_mode_statistics = {
 #endif
 };
 
-/* Registry: the views and modes, in the order of the tabs (a mode: one line here, see
- * analyzer/analyzer.h). */
+/* Registry: the list of analyzer/modes.h. */
+#define AN_MODE(name) extern const struct an_mode an_mode_##name;
+#include "analyzer/modes.h"
+#undef AN_MODE
+
 const struct an_mode *const an_modes[] = {
-    &an_mode_spectrum,
-    &an_mode_time,
-    &an_mode_statistics,
-    &an_mode_pn,
-    &an_mode_demod,
-    &an_mode_lte,
-    &an_mode_dvbt,
-    &an_mode_dab,
+#define AN_MODE(name) &an_mode_##name,
+#include "analyzer/modes.h"
+#undef AN_MODE
     NULL
 };
 
@@ -84,38 +81,46 @@ const struct an_mode *const an_modes[] = {
 
 #define AN_HELP_COLUMNS 94         /* The longest line of the help. */
 
-/* The names of the views, as "a, b or c". */
-static char *view_names(char *text, size_t len)
+/* The keys of the views, or of the modes --watch follows, as "a, b or c" (last: " or "). A mode
+ * that --watch follows is turned on by the option of its key. */
+static char *mode_keys(char *text, size_t len, bool watch, const char *prefix, const char *last)
 {
+    const struct an_mode *keys[AN_MODES_MAX];
     size_t n = 0;
-    int m;
+    int m, k = 0;
 
+    for (m = 0; an_modes[m] && k < AN_MODES_MAX; m++) {
+        if (!watch || an_modes[m]->watch_line)
+            keys[k++] = an_modes[m];
+    }
     text[0] = '\0';
-    for (m = 0; an_modes[m] && n < len; m++)
-        n += (size_t)snprintf(text + n, len - n, "%s%s", m == 0 ? "" : an_modes[m + 1] ? ", " : " or ", an_modes[m]->key);
+    for (m = 0; m < k && n < len; m++)
+        n += (size_t)snprintf(text + n, len - n, "%s%s%s", m == 0 ? "" : m + 1 < k ? ", " : last, prefix, keys[m]->key);
     return text;
 }
 
-/* --view: the names of the views, on lines as long as the other ones of the help. */
-static void help_views(void)
+/* An option and its text, on lines as long as the other ones of the help. */
+static void help_option(const char *option, const char *text)
 {
-    char names[512], *word;
+    char words[1024], *word;
     int col;
 
-    view_names(names, sizeof(names) - 1);
-    strcat(names, ".");
-    col = printf("      --view NAME        View shown first:");
-    for (word = strtok(names, " "); word; word = strtok(NULL, " ")) {
+    snprintf(words, sizeof(words), "%s", text);
+    col = printf("      %-19s", option);
+    for (word = strtok(words, " "); word; word = strtok(NULL, " ")) {
         if (col + 1 + (int)strlen(word) > AN_HELP_COLUMNS)
             col = printf("\n%25s%s", "", word) - 1;
         else
-            col += printf(" %s", word);
+            col += printf(col == 25 ? "%s" : " %s", word);
     }
     printf("\n");
 }
 
 static void help(void)
 {
+    char keys[512], text[1024];
+    int m;
+
     printf("M2SDR Signal Analyzer Utility.\n"
            "usage: m2sdr_analyzer [options]                  Board RX\n"
            "       m2sdr_analyzer [options] --file PATH      SigMF or raw capture\n"
@@ -135,6 +140,11 @@ static void help(void)
            "                         calibration record of the board when it has one, see m2sdr_cal).\n"
            "      --sync MODE        Clock source: internal, external or fpga (default: internal).\n"
            "      --refclk-freq HZ   Reference frequency in Hz (default: 38400000).\n"
+           "      --no-rf-init       Board: leave the RFIC as it is, set by m2sdr_rf, and only receive;\n"
+           "                         --freq and --sample-rate then only label the results.\n"
+           "      --tx-tone          Board: send the test tone of the RFIC on TX, at the centre plus a\n"
+           "                         thirty-second of the sample rate. For a cable from TX to RX.\n"
+           "      --tx-att DB        Attenuation of the test tone (default: %d).\n"
            "\n"
            "File options:\n"
            "      --file PATH        SigMF metadata or data file, or raw interleaved samples.\n"
@@ -156,61 +166,99 @@ static void help(void)
            "      --channel-spacing HZ  Spacing of the adjacent channels (default: the bandwidth).\n"
            "      --ref-offset DB    Added to the levels, to read dBm at the connector: the board\n"
            "                         has no absolute level calibration.\n"
-           "\n"
-           "Modulation options:\n"
-           "      --demod            With --report: demodulate the strongest signal, a single carrier\n"
-           "                         with PSK or QAM: constellation, EVM, MER, I/Q errors.\n"
-           "      --modulation NAME  auto, bpsk, qpsk, 8psk, 16qam, 32qam, 64qam, 128qam or 256qam\n"
-           "                         (default: auto).\n"
-           "      --symbol-rate HZ   Symbols per second (default: found from the signal).\n"
-           "      --rolloff A        Roll-off of the pulse (default: found from the signal).\n"
-           "      --pulse NAME       Transmit pulse: rrc, rc or rect (default: rrc).\n"
-           "      --demod-samples N  Samples of its capture (default: %d).\n"
-           "      --no-rf-init       Board: leave the RFIC as it is, set by m2sdr_rf, and only receive;\n"
-           "                         --freq and --sample-rate then only label the results.\n"
-           "\n"
-           "LTE options:\n"
-           "      --lte              With --report: analyse an LTE downlink carrier, FDD with a normal\n"
-           "                         cyclic prefix, tuned on its centre: cell, MIB, EVM, data blocks.\n"
-           "                         The sample rate is 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS, for\n"
-           "                         6, 15, 25, 50 or 100 resource blocks around the centre.\n"
-           "\n"
-           "DVB-T options:\n"
-           "      --dvbt             With --report: reception of a DVB-T multiplex tuned near its centre:\n"
-           "                         mode, TPS, MER, channel and echoes. The sample rate is the one of\n"
-           "                         the channel (default with --dvbt: 9.142857 MSPS, 8 MHz).\n"
-           "      --watch            With --report --dvbt or --dab, on a board: one line per capture until\n"
-           "                         Ctrl-C (MER, margin, level, offset, echo); with --json, one JSON\n"
-           "                         object per line.\n"
-           "\n"
-           "DAB options:\n"
-           "      --dab              With --report: reception of a DAB/DAB+ ensemble (mode I) tuned near\n"
-           "                         its centre: MER, SNR, carrier offset, channel and echoes. The sample\n"
-           "                         rate is 2.048 MSPS (the default with --dab). --watch works too.\n"
-           "\n"
-           "Phase noise options:\n"
-           "      --phase-noise      With --report: phase noise of the strongest carrier.\n"
-           "      --pn-samples N     Samples of its capture (default: %d): more reach lower offsets.\n"
-           "      --pn-from HZ, --pn-to HZ   Integration limits (default: the offsets measured).\n"
-           "      --pn-floor PATH    File of the floor of the board (default: one per board,\n"
-           "                         ~/.config/litex_m2sdr/pn_floor_<dna>.csv).\n"
-           "      --pn-floor-save    With --report: store the phase noise read as this floor.\n"
-           "      --tx-tone          Board: send the test tone of the RFIC on TX, at the centre plus a\n"
-           "                         thirty-second of the sample rate. For a cable from TX to RX.\n"
-           "      --tx-att DB        Attenuation of the test tone (default: %d).\n"
-           "\n"
-           "Output options:\n",
-           AN_DEFAULT_FREQ_HZ, AN_DEFAULT_SAMPLE_RATE, M2SDR_BUFFER_BYTES, AN_DEFAULT_FFT_LEN, AN_DEFAULT_AVERAGES,
-           1 << AN_DEMOD_DEFAULT_LOG2, 1 << AN_PN_DEFAULT_LOG2, AN_TX_TONE_ATT_DB);
-    help_views();
+           "\n",
+           AN_DEFAULT_FREQ_HZ, AN_DEFAULT_SAMPLE_RATE, AN_TX_TONE_ATT_DB, M2SDR_BUFFER_BYTES, AN_DEFAULT_FFT_LEN,
+           AN_DEFAULT_AVERAGES);
+    /* The blocks of the modes, in the order of the registry. */
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->help)
+            an_modes[m]->help();
+    }
+    printf("Output options:\n");
+    snprintf(text, sizeof(text), "View shown first: %s.", mode_keys(keys, sizeof(keys), false, "", " or "));
+    help_option("--view NAME", text);
     printf("      --report           Measure one capture and print the result, without a display.\n"
            "      --json             With --report: JSON.\n"
-           "      --export-csv PATH  With --report: write the spectrum to a CSV file.\n"
-           "  -h, --help             Show this help message.\n"
+           "      --export-csv PATH  With --report: write the spectrum to a CSV file.\n");
+    snprintf(text, sizeof(text), "With --report %s, on a board: one line per capture until Ctrl-C (MER, margin, "
+             "level, offset, echo); with --json, one JSON object per line.", mode_keys(keys, sizeof(keys), true, "--", " or "));
+    help_option("--watch", text);
+    printf("  -h, --help             Show this help message.\n"
            "\n"
            "Window: left click places the selected marker, the wheel zooms, a right drag moves the\n"
            "span, a double click shows it all. Space: run or stop. P: marker to the peak. F: full\n"
            "span. R: restart the traces.\n");
+}
+
+/* Command line */
+/*--------------*/
+
+#define AN_OPTIONS_MAX 512
+
+/* Options of the core; the ones of the modes are in their files. */
+static const struct option core_options[] = {
+    { "help",            no_argument,       NULL, 'h' },
+    { "device",          required_argument, NULL, 'd' },
+    { "freq",            required_argument, NULL, 1 },
+    { "sample-rate",     required_argument, NULL, 2 },
+    { "bandwidth",       required_argument, NULL, 3 },
+    { "rx-gain",         required_argument, NULL, 4 },
+    { "channel",         required_argument, NULL, 5 },
+    { "refclk-ppm",      required_argument, NULL, 6 },
+    { "sync",            required_argument, NULL, 7 },
+    { "refclk-freq",     required_argument, NULL, 8 },
+    { "file",            required_argument, NULL, 9 },
+    { "format",          required_argument, NULL, 10 },
+    { "nbits",           required_argument, NULL, 11 },
+    { "nchannels",       required_argument, NULL, 12 },
+    { "frame-header",    no_argument,       NULL, 13 },
+    { "frame-size",      required_argument, NULL, 14 },
+    { "capture-index",   required_argument, NULL, 15 },
+    { "offset",          required_argument, NULL, 16 },
+    { "fft-len",         required_argument, NULL, 17 },
+    { "window",          required_argument, NULL, 18 },
+    { "averages",        required_argument, NULL, 19 },
+    { "channel-bw",      required_argument, NULL, 20 },
+    { "channel-offset",  required_argument, NULL, 21 },
+    { "channel-spacing", required_argument, NULL, 22 },
+    { "ref-offset",      required_argument, NULL, 23 },
+    { "report",          no_argument,       NULL, 24 },
+    { "json",            no_argument,       NULL, 25 },
+    { "export-csv",      required_argument, NULL, 26 },
+    { "view",            required_argument, NULL, 27 },
+    { "tx-tone",         no_argument,       NULL, 34 },
+    { "tx-att",          required_argument, NULL, 35 },
+    { "no-rf-init",      no_argument,       NULL, 42 },
+    { "watch",           no_argument,       NULL, 45 },
+    { NULL, 0, NULL, 0 }
+};
+
+/* The options of the core, then the ones of each mode, their ids moved to its range; NULL when a
+ * mode has an option without a parser, of a name already taken or of an id out of its range. */
+static const struct option *build_options(void)
+{
+    static struct option table[AN_OPTIONS_MAX];
+    const struct option *o;
+    int n = 0, m, k;
+
+    for (o = core_options; o->name; o++)
+        table[n++] = *o;
+    for (m = 0; an_modes[m]; m++) {
+        for (o = an_modes[m]->options; o && o->name; o++) {
+            for (k = 0; k < n && strcmp(table[k].name, o->name) != 0; k++)
+                ;
+            if (!an_modes[m]->option || k < n || o->val < 0 || o->val >= AN_OPT_IDS || n + 1 >= AN_OPTIONS_MAX) {
+                fprintf(stderr, "Option --%s of the mode %s: no parser, name taken, id out of 0 to %d, or too many options.\n",
+                        o->name, an_modes[m]->key, AN_OPT_IDS - 1);
+                return NULL;
+            }
+            table[n]     = *o;
+            table[n].val = AN_OPT_BASE + AN_OPT_IDS * m + o->val;
+            n++;
+        }
+    }
+    memset(&table[n], 0, sizeof(table[n]));
+    return table;
 }
 
 /* Main */
@@ -218,64 +266,14 @@ static void help(void)
 
 int main(int argc, char **argv)
 {
-    static struct option options[] = {
-        { "help",            no_argument,       NULL, 'h' },
-        { "device",          required_argument, NULL, 'd' },
-        { "freq",            required_argument, NULL, 1 },
-        { "sample-rate",     required_argument, NULL, 2 },
-        { "bandwidth",       required_argument, NULL, 3 },
-        { "rx-gain",         required_argument, NULL, 4 },
-        { "channel",         required_argument, NULL, 5 },
-        { "refclk-ppm",      required_argument, NULL, 6 },
-        { "sync",            required_argument, NULL, 7 },
-        { "refclk-freq",     required_argument, NULL, 8 },
-        { "file",            required_argument, NULL, 9 },
-        { "format",          required_argument, NULL, 10 },
-        { "nbits",           required_argument, NULL, 11 },
-        { "nchannels",       required_argument, NULL, 12 },
-        { "frame-header",    no_argument,       NULL, 13 },
-        { "frame-size",      required_argument, NULL, 14 },
-        { "capture-index",   required_argument, NULL, 15 },
-        { "offset",          required_argument, NULL, 16 },
-        { "fft-len",         required_argument, NULL, 17 },
-        { "window",          required_argument, NULL, 18 },
-        { "averages",        required_argument, NULL, 19 },
-        { "channel-bw",      required_argument, NULL, 20 },
-        { "channel-offset",  required_argument, NULL, 21 },
-        { "channel-spacing", required_argument, NULL, 22 },
-        { "ref-offset",      required_argument, NULL, 23 },
-        { "report",          no_argument,       NULL, 24 },
-        { "json",            no_argument,       NULL, 25 },
-        { "export-csv",      required_argument, NULL, 26 },
-        { "view",            required_argument, NULL, 27 },
-        { "phase-noise",     no_argument,       NULL, 28 },
-        { "pn-samples",      required_argument, NULL, 29 },
-        { "pn-from",         required_argument, NULL, 30 },
-        { "pn-to",           required_argument, NULL, 31 },
-        { "pn-floor",        required_argument, NULL, 32 },
-        { "pn-floor-save",   no_argument,       NULL, 33 },
-        { "tx-tone",         no_argument,       NULL, 34 },
-        { "tx-att",          required_argument, NULL, 35 },
-        { "demod",           no_argument,       NULL, 36 },
-        { "modulation",      required_argument, NULL, 37 },
-        { "symbol-rate",     required_argument, NULL, 38 },
-        { "rolloff",         required_argument, NULL, 39 },
-        { "pulse",           required_argument, NULL, 40 },
-        { "demod-samples",   required_argument, NULL, 41 },
-        { "no-rf-init",      no_argument,       NULL, 42 },
-        { "lte",             no_argument,       NULL, 43 },
-        { "dvbt",            no_argument,       NULL, 44 },
-        { "watch",           no_argument,       NULL, 45 },
-        { "dab",             no_argument,       NULL, 46 },
-        { NULL, 0, NULL, 0 }
-    };
     struct m2sdr_cli_device cli_dev;
     struct an_settings set;
     struct an_source src;
-    const char *file = NULL, *csv_path = NULL, *trim = NULL, *floor_arg = NULL, *floor_path = NULL;
+    const struct option *options = build_options();
+    struct an_cli cli;
+    const char *file = NULL, *csv_path = NULL, *trim = NULL, *floor_path = NULL;
     static struct an_floor fl;
     static char floor_default[1024];
-    bool floor_store = false;
     bool report = false, json = false, watch = false, freq_given = false, rate_given = false, nbits_given = false;
     double offset_s = 0.0;
     int capture_index = 0, view = 0;
@@ -299,8 +297,15 @@ int main(int argc, char **argv)
     src.frame_size   = M2SDR_BUFFER_BYTES;
     src.loop         = true;
     src.tx_att       = AN_TX_TONE_ATT_DB;
-    set.pn_log2      = AN_PN_DEFAULT_LOG2;
-    set.demod_log2   = AN_DEMOD_DEFAULT_LOG2;
+    memset(&cli, 0, sizeof(cli));
+    cli.set = &set;
+    cli.src = &src;
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->defaults)
+            an_modes[m]->defaults(&set);
+    }
+    if (!options)
+        return 1;
 
     while ((c = getopt_long(argc, argv, "hd:c:i:p:", options, NULL)) != -1) {
         double v;
@@ -464,86 +469,12 @@ int main(int argc, char **argv)
             if (!an_modes[view]) {
                 char names[512];
 
-                m2sdr_cli_invalid_choice("view", optarg, view_names(names, sizeof(names)));
+                m2sdr_cli_invalid_choice("view", optarg, mode_keys(names, sizeof(names), false, "", " or "));
                 return 1;
             }
-            break;
-        case 28: set.pn_on = true; break;
-        case 29:
-            if (m2sdr_cli_parse_double(optarg, &v) != 0 || v < (double)(1 << AN_PN_MIN_LOG2) || v > (double)(1 << AN_PN_MAX_LOG2)) {
-                m2sdr_cli_error("invalid phase noise samples '%s' (expected %d to %d)", optarg,
-                                1 << AN_PN_MIN_LOG2, 1 << AN_PN_MAX_LOG2);
-                return 1;
-            }
-            /* The power of two at or below. */
-            for (set.pn_log2 = AN_PN_MIN_LOG2; (double)((size_t)2 << set.pn_log2) <= v; set.pn_log2++)
-                ;
-            break;
-        case 30:
-            if (m2sdr_cli_parse_double(optarg, &set.pn_lo_hz) != 0 || set.pn_lo_hz < 0) {
-                m2sdr_cli_error("invalid offset '%s'", optarg);
-                return 1;
-            }
-            break;
-        case 31:
-            if (m2sdr_cli_parse_double(optarg, &set.pn_hi_hz) != 0 || set.pn_hi_hz < 0) {
-                m2sdr_cli_error("invalid offset '%s'", optarg);
-                return 1;
-            }
-            break;
-        case 32: floor_arg = optarg; break;
-        case 33: floor_store = true; break;
-        case 36: set.demod_on = true; break;
-        case 37:
-            for (n = M2SDR_MOD_AUTO; n < M2SDR_MOD_COUNT; n++) {
-                if (strcasecmp(optarg, m2sdr_modulation_name((enum m2sdr_modulation)n)) == 0)
-                    break;
-            }
-            if (n == M2SDR_MOD_COUNT) {
-                m2sdr_cli_invalid_choice("modulation", optarg, "auto, bpsk, qpsk, 8psk, 16qam, 32qam, 64qam, 128qam or 256qam");
-                return 1;
-            }
-            set.demod.modulation = (enum m2sdr_modulation)n;
-            break;
-        case 38:
-            if (m2sdr_cli_parse_double(optarg, &set.demod.symbol_rate) != 0 || set.demod.symbol_rate < 0) {
-                m2sdr_cli_error("invalid symbol rate '%s'", optarg);
-                return 1;
-            }
-            break;
-        case 39:
-            if (m2sdr_cli_parse_double(optarg, &set.demod.rolloff) != 0 ||
-                (set.demod.rolloff != 0 && (set.demod.rolloff < 0.05 || set.demod.rolloff > 1.0))) {
-                m2sdr_cli_error("invalid roll-off '%s' (expected 0.05 to 1, or 0 to find it)", optarg);
-                return 1;
-            }
-            break;
-        case 40:
-            if (strcmp(optarg, "rrc") == 0) {
-                set.demod.pulse = M2SDR_PULSE_RRC;
-            } else if (strcmp(optarg, "rc") == 0) {
-                set.demod.pulse = M2SDR_PULSE_RC;
-            } else if (strcmp(optarg, "rect") == 0) {
-                set.demod.pulse = M2SDR_PULSE_RECT;
-            } else {
-                m2sdr_cli_invalid_choice("pulse", optarg, "rrc, rc or rect");
-                return 1;
-            }
-            break;
-        case 41:
-            if (m2sdr_cli_parse_double(optarg, &v) != 0 || v < (double)(1 << AN_DEMOD_MIN_LOG2) || v > (double)(1 << AN_DEMOD_MAX_LOG2)) {
-                m2sdr_cli_error("invalid demodulation samples '%s' (expected %d to %d)", optarg,
-                                1 << AN_DEMOD_MIN_LOG2, 1 << AN_DEMOD_MAX_LOG2);
-                return 1;
-            }
-            for (set.demod_log2 = AN_DEMOD_MIN_LOG2; (double)((size_t)2 << set.demod_log2) <= v; set.demod_log2++)
-                ;
             break;
         case 42: src.no_rf_init = true; break;
-        case 43: set.lte_on = true; break;
-        case 44: set.dvbt_on = true; break;
         case 45: watch = true; break;
-        case 46: set.dab_on = true; break;
         case 34: src.tx_tone = true; break;
         case 35:
             if (m2sdr_cli_parse_int_range(optarg, 0, 89, &src.tx_att) != 0) {
@@ -552,23 +483,27 @@ int main(int argc, char **argv)
             }
             break;
         default:
-            return 1;
+            /* An option of a mode: its index in the registry and its own id. */
+            if (c < AN_OPT_BASE ||
+                an_modes[(c - AN_OPT_BASE) / AN_OPT_IDS]->option((c - AN_OPT_BASE) % AN_OPT_IDS, optarg, &cli) != 0)
+                return 1;
+            break;
         }
     }
     if (optind < argc) {
         m2sdr_cli_error("unexpected argument '%s'", argv[optind]);
         return 1;
     }
-    if (watch && (!report || watch_modes(&set, NULL) != 1 || file || csv_path || floor_store)) {
-        m2sdr_cli_error("--watch goes with --report and one of --dvbt and --dab, on a board");
+    if (watch && (!report || watch_modes(&set, NULL) != 1 || file || csv_path || cli.floor_store)) {
+        char keys[512];
+
+        m2sdr_cli_error("--watch goes with --report and one of %s, on a board", mode_keys(keys, sizeof(keys), true, "--", " and "));
         return 1;
     }
-    if ((json || csv_path || floor_store) && !report) {
+    if ((json || csv_path || cli.floor_store) && !report) {
         m2sdr_cli_error("--json, --export-csv and --pn-floor-save go with --report");
         return 1;
     }
-    if (floor_store)
-        set.pn_on = true;
     /* The mode of the view shown first is measured from the first capture. */
     if (an_mode_flag(an_modes[view], &set))
         *an_mode_flag(an_modes[view], &set) = true;
@@ -647,15 +582,15 @@ int main(int argc, char **argv)
     }
 
     /* Floor of the phase noise: the file given, or the one of the board. */
-    if (floor_arg) {
-        floor_path = floor_arg;
+    if (cli.floor_arg) {
+        floor_path = cli.floor_arg;
     } else if (src.live && m2sdr_get_fpga_dna(src.dev, &src.dna) == M2SDR_ERR_OK &&
                floor_default_path(src.dna, floor_default, sizeof(floor_default)) == 0) {
         floor_path = floor_default;
     }
-    if (floor_path && floor_load(&fl, floor_path) != 0 && floor_arg && !floor_store)
+    if (floor_path && floor_load(&fl, floor_path) != 0 && cli.floor_arg && !cli.floor_store)
         fprintf(stderr, "No phase noise floor in %s.\n", floor_path);
-    if (floor_store && !floor_path) {
+    if (cli.floor_store && !floor_path) {
         m2sdr_cli_error("--pn-floor-save needs a board or --pn-floor PATH");
         source_close(&src);
         return 1;
@@ -665,7 +600,7 @@ int main(int argc, char **argv)
     if (watch) {
         status = run_watch(&src, &set, json);
     } else if (report) {
-        status = run_report(&src, &set, json, csv_path, &fl, floor_store ? floor_path : NULL);
+        status = run_report(&src, &set, json, csv_path, &fl, cli.floor_store ? floor_path : NULL);
     } else {
 #ifdef M2SDR_ANALYZER_GUI
         status = run_gui(&src, &set, view, &fl, floor_path);

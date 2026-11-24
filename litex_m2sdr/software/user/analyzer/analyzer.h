@@ -2,26 +2,30 @@
  *
  * M2SDR Signal Analyzer Utility: types shared by its files.
  *
- * m2sdr_analyzer.c   main, command line, help and the registry of the views and modes.
+ * m2sdr_analyzer.c   main, command line of the core, help, the registry built from modes.h.
+ * modes.h            The registry: one AN_MODE(name) line per view or mode, in tab order.
  * an_source.c        Samples from the RX of a board or from a capture file.
  * an_core.c          Analysis of a capture, reports (text, JSON), --report and --watch.
  * an_gui.c           Window: worker, traces, waterfall, controls, views of the spectrum, tabs.
  * an_trend.c         What the OFDM views share: MER and traces over the results of a tuning.
- * mode_*.c           One measurement mode each: analysis, report sections, view, figures.
+ * mode_*.c           One mode each: options, help, analysis, report sections, view, figures.
+ * mode_*.mk          Its report test, a target of test-analyzer (optional).
  *
  * Adding a mode
  * -------------
- * 1. analyzer/mode_xxx.c: its hooks, static, and its entry `const struct an_mode an_mode_xxx`
- *    (--view key, tab title, category, flag, result flag, report rank): see mode_dab.c.
- * 2. Here: its flag (and its options) in struct an_settings, its result and result flag in
- *    struct an_result, the state of its view in struct an_ui if it keeps one, and
- *    `extern const struct an_mode an_mode_xxx`.
- * 3. m2sdr_analyzer.c: &an_mode_xxx in an_modes[], in the order of the tabs; its option, that
- *    sets its flag, and its help.
- * 4. Makefile: analyzer/mode_xxx.o in M2SDR_ANALYZER_CORE_OBJS.
- * The core then captures what it needs, analyses while it is on, prints its sections in the
- * reports after the ones of the spectrum, and shows its tab in its category, the mode on while
- * its view is shown.
+ * 1. analyzer/mode_xxx.c, everything of the mode: its hooks, static, and its entry
+ *    `const struct an_mode an_mode_xxx` (--view key, tab title, category, flag, result flag,
+ *    report rank, options and their parser, defaults, help block...): see mode_dab.c. A mode
+ *    that --watch follows has a watch_line hook and an option named as its key (--dab).
+ * 2. analyzer/modes.h: one line, AN_MODE(xxx), at its place in the tabs.
+ * 3. Here: its flag and settings in struct an_settings, its result and result flag in
+ *    struct an_result, and the state of its view in struct an_ui if it keeps one.
+ * 4. Optional: analyzer/mode_xxx.mk with its test-analyzer-xxx target (see mode_lte.mk), and its
+ *    line in the docs (the manual, the README of the utilities, the changelog).
+ * Nothing else: the Makefile builds analyzer/mode_*.c, main takes its options, the help prints
+ * its block, the core captures what it needs, analyses while it is on, prints its sections in
+ * the reports after the ones of the spectrum, and shows its tab in its category, the mode on
+ * while its view is shown.
  *
  * This file is part of LiteX-M2SDR.
  *
@@ -33,6 +37,7 @@
 #define M2SDR_ANALYZER_H
 
 #include <complex.h>
+#include <getopt.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -236,6 +241,18 @@ struct an_report {
     const struct an_floor *fl;     /* Phase noise floor of the board; NULL or empty: none. */
 };
 
+/* Command line: what the options of the modes set. A mode option is given to getopt_long with
+ * the id AN_OPT_BASE + AN_OPT_IDS * (index of the mode in an_modes[]) + (its id in the mode). */
+#define AN_OPT_BASE  1000
+#define AN_OPT_IDS   32            /* Ids of the options of a mode: 0 to AN_OPT_IDS - 1. */
+
+struct an_cli {
+    struct an_settings *set;
+    struct an_source   *src;
+    const char *floor_arg;         /* --pn-floor: file of the floor of the board. */
+    bool   floor_store;            /* --pn-floor-save. */
+};
+
 struct an_ui;
 
 /* A view of the window, and the measurement behind it. The views of the spectrum are measured
@@ -250,6 +267,13 @@ struct an_mode {
     int    report_rank;            /* Place of its section in the reports: lower first. */
     double default_rate;           /* Sample rate when it is on and none is given; 0: none. */
     bool   psd_short;              /* Its capture is long: the spectrum only takes its own averages of it. */
+    /* Command line: its defaults in the settings, set before the options are read; its long
+     * options, their .val its own ids, NULL-name terminated; their parser, that returns 0, or -1
+     * after its message; and its block of the help. */
+    void   (*defaults)(struct an_settings *set);
+    const struct option *options;
+    int    (*option)(int id, const char *arg, struct an_cli *cli);
+    void   (*help)(void);             /* Its block of the help, ending with an empty line. */
     /* Capture and analysis. */
     size_t (*samples)(const struct an_settings *set);             /* Samples it needs. */
     void   (*analyse)(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);
@@ -276,9 +300,6 @@ struct an_mode {
 
 /* The views and modes, in the order of their tabs, NULL terminated. */
 extern const struct an_mode *const an_modes[];
-
-extern const struct an_mode an_mode_spectrum, an_mode_time, an_mode_statistics;
-extern const struct an_mode an_mode_pn, an_mode_demod, an_mode_lte, an_mode_dvbt, an_mode_dab;
 
 /* The flag of a mode in settings; NULL for a view of the spectrum. */
 static inline bool *an_mode_flag(const struct an_mode *m, struct an_settings *set)

@@ -15,6 +15,8 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#include "m2sdr_cli.h"
+
 #include "analyzer.h"
 
 /* Analysis */
@@ -145,6 +147,77 @@ static void pn_report_json(const struct an_result *res, const struct an_report *
         printf("    \"carrier_hz\": null\n");
     }
     printf("  }");
+}
+
+/* Command line */
+/*--------------*/
+
+enum { PN_OPT_ON, PN_OPT_SAMPLES, PN_OPT_FROM, PN_OPT_TO, PN_OPT_FLOOR, PN_OPT_FLOOR_SAVE };
+
+static const struct option pn_options[] = {
+    { "phase-noise",     no_argument,       NULL, PN_OPT_ON },
+    { "pn-samples",      required_argument, NULL, PN_OPT_SAMPLES },
+    { "pn-from",         required_argument, NULL, PN_OPT_FROM },
+    { "pn-to",           required_argument, NULL, PN_OPT_TO },
+    { "pn-floor",        required_argument, NULL, PN_OPT_FLOOR },
+    { "pn-floor-save",   no_argument,       NULL, PN_OPT_FLOOR_SAVE },
+    { NULL, 0, NULL, 0 }
+};
+
+static void pn_defaults(struct an_settings *set)
+{
+    set->pn_log2 = AN_PN_DEFAULT_LOG2;
+}
+
+static int pn_option(int id, const char *arg, struct an_cli *cli)
+{
+    struct an_settings *set = cli->set;
+    double v;
+
+    switch (id) {
+    case PN_OPT_ON: set->pn_on = true; break;
+    case PN_OPT_SAMPLES:
+        if (m2sdr_cli_parse_double(arg, &v) != 0 || v < (double)(1 << AN_PN_MIN_LOG2) || v > (double)(1 << AN_PN_MAX_LOG2)) {
+            m2sdr_cli_error("invalid phase noise samples '%s' (expected %d to %d)", arg,
+                            1 << AN_PN_MIN_LOG2, 1 << AN_PN_MAX_LOG2);
+            return -1;
+        }
+        /* The power of two at or below. */
+        for (set->pn_log2 = AN_PN_MIN_LOG2; (double)((size_t)2 << set->pn_log2) <= v; set->pn_log2++)
+            ;
+        break;
+    case PN_OPT_FROM:
+        if (m2sdr_cli_parse_double(arg, &set->pn_lo_hz) != 0 || set->pn_lo_hz < 0) {
+            m2sdr_cli_error("invalid offset '%s'", arg);
+            return -1;
+        }
+        break;
+    case PN_OPT_TO:
+        if (m2sdr_cli_parse_double(arg, &set->pn_hi_hz) != 0 || set->pn_hi_hz < 0) {
+            m2sdr_cli_error("invalid offset '%s'", arg);
+            return -1;
+        }
+        break;
+    case PN_OPT_FLOOR: cli->floor_arg = arg; break;
+    case PN_OPT_FLOOR_SAVE:
+        /* The phase noise read is stored as the floor. */
+        cli->floor_store = true;
+        set->pn_on       = true;
+        break;
+    }
+    return 0;
+}
+
+static void pn_help(void)
+{
+    printf("Phase noise options:\n"
+           "      --phase-noise      With --report: phase noise of the strongest carrier.\n"
+           "      --pn-samples N     Samples of its capture (default: %d): more reach lower offsets.\n"
+           "      --pn-from HZ, --pn-to HZ   Integration limits (default: the offsets measured).\n"
+           "      --pn-floor PATH    File of the floor of the board (default: one per board,\n"
+           "                         ~/.config/litex_m2sdr/pn_floor_<dna>.csv).\n"
+           "      --pn-floor-save    With --report: store the phase noise read as this floor.\n"
+           "\n", 1 << AN_PN_DEFAULT_LOG2);
 }
 
 #ifdef M2SDR_ANALYZER_GUI
@@ -315,6 +388,10 @@ const struct an_mode an_mode_pn = {
     .analyse     = pn_analyse,
     .report_text = pn_report_text,
     .report_json = pn_report_json,
+    .defaults    = pn_defaults,
+    .options     = pn_options,
+    .option      = pn_option,
+    .help        = pn_help,
 #ifdef M2SDR_ANALYZER_GUI
     .draw        = draw_phase_noise,
     .results     = draw_pn_results,

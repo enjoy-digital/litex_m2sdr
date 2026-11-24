@@ -14,6 +14,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
+#include <strings.h>
+
+#include "m2sdr_cli.h"
 
 #include "analyzer.h"
 
@@ -88,6 +92,97 @@ static void demod_report_json(const struct an_result *res, const struct an_repor
         print_json_number("quadrature_deg", d->quadrature_deg, true);
     }
     printf("  }");
+}
+
+/* Command line */
+/*--------------*/
+
+enum { DEMOD_OPT_ON, DEMOD_OPT_MODULATION, DEMOD_OPT_SYMBOL_RATE, DEMOD_OPT_ROLLOFF, DEMOD_OPT_PULSE, DEMOD_OPT_SAMPLES };
+
+static const struct option demod_options[] = {
+    { "demod",           no_argument,       NULL, DEMOD_OPT_ON },
+    { "modulation",      required_argument, NULL, DEMOD_OPT_MODULATION },
+    { "symbol-rate",     required_argument, NULL, DEMOD_OPT_SYMBOL_RATE },
+    { "rolloff",         required_argument, NULL, DEMOD_OPT_ROLLOFF },
+    { "pulse",           required_argument, NULL, DEMOD_OPT_PULSE },
+    { "demod-samples",   required_argument, NULL, DEMOD_OPT_SAMPLES },
+    { NULL, 0, NULL, 0 }
+};
+
+static void demod_defaults(struct an_settings *set)
+{
+    set->demod_log2 = AN_DEMOD_DEFAULT_LOG2;
+}
+
+static int demod_option(int id, const char *arg, struct an_cli *cli)
+{
+    struct an_settings *set = cli->set;
+    double v;
+    int n;
+
+    switch (id) {
+    case DEMOD_OPT_ON: set->demod_on = true; break;
+    case DEMOD_OPT_MODULATION:
+        for (n = M2SDR_MOD_AUTO; n < M2SDR_MOD_COUNT; n++) {
+            if (strcasecmp(arg, m2sdr_modulation_name((enum m2sdr_modulation)n)) == 0)
+                break;
+        }
+        if (n == M2SDR_MOD_COUNT) {
+            m2sdr_cli_invalid_choice("modulation", arg, "auto, bpsk, qpsk, 8psk, 16qam, 32qam, 64qam, 128qam or 256qam");
+            return -1;
+        }
+        set->demod.modulation = (enum m2sdr_modulation)n;
+        break;
+    case DEMOD_OPT_SYMBOL_RATE:
+        if (m2sdr_cli_parse_double(arg, &set->demod.symbol_rate) != 0 || set->demod.symbol_rate < 0) {
+            m2sdr_cli_error("invalid symbol rate '%s'", arg);
+            return -1;
+        }
+        break;
+    case DEMOD_OPT_ROLLOFF:
+        if (m2sdr_cli_parse_double(arg, &set->demod.rolloff) != 0 ||
+            (set->demod.rolloff != 0 && (set->demod.rolloff < 0.05 || set->demod.rolloff > 1.0))) {
+            m2sdr_cli_error("invalid roll-off '%s' (expected 0.05 to 1, or 0 to find it)", arg);
+            return -1;
+        }
+        break;
+    case DEMOD_OPT_PULSE:
+        if (strcmp(arg, "rrc") == 0) {
+            set->demod.pulse = M2SDR_PULSE_RRC;
+        } else if (strcmp(arg, "rc") == 0) {
+            set->demod.pulse = M2SDR_PULSE_RC;
+        } else if (strcmp(arg, "rect") == 0) {
+            set->demod.pulse = M2SDR_PULSE_RECT;
+        } else {
+            m2sdr_cli_invalid_choice("pulse", arg, "rrc, rc or rect");
+            return -1;
+        }
+        break;
+    case DEMOD_OPT_SAMPLES:
+        if (m2sdr_cli_parse_double(arg, &v) != 0 || v < (double)(1 << AN_DEMOD_MIN_LOG2) || v > (double)(1 << AN_DEMOD_MAX_LOG2)) {
+            m2sdr_cli_error("invalid demodulation samples '%s' (expected %d to %d)", arg,
+                            1 << AN_DEMOD_MIN_LOG2, 1 << AN_DEMOD_MAX_LOG2);
+            return -1;
+        }
+        for (set->demod_log2 = AN_DEMOD_MIN_LOG2; (double)((size_t)2 << set->demod_log2) <= v; set->demod_log2++)
+            ;
+        break;
+    }
+    return 0;
+}
+
+static void demod_help(void)
+{
+    printf("Modulation options:\n"
+           "      --demod            With --report: demodulate the strongest signal, a single carrier\n"
+           "                         with PSK or QAM: constellation, EVM, MER, I/Q errors.\n"
+           "      --modulation NAME  auto, bpsk, qpsk, 8psk, 16qam, 32qam, 64qam, 128qam or 256qam\n"
+           "                         (default: auto).\n"
+           "      --symbol-rate HZ   Symbols per second (default: found from the signal).\n"
+           "      --rolloff A        Roll-off of the pulse (default: found from the signal).\n"
+           "      --pulse NAME       Transmit pulse: rrc, rc or rect (default: rrc).\n"
+           "      --demod-samples N  Samples of its capture (default: %d).\n"
+           "\n", 1 << AN_DEMOD_DEFAULT_LOG2);
 }
 
 #ifdef M2SDR_ANALYZER_GUI
@@ -282,6 +377,10 @@ const struct an_mode an_mode_demod = {
     .analyse     = demod_analyse,
     .report_text = demod_report_text,
     .report_json = demod_report_json,
+    .defaults    = demod_defaults,
+    .options     = demod_options,
+    .option      = demod_option,
+    .help        = demod_help,
 #ifdef M2SDR_ANALYZER_GUI
     .draw        = draw_modulation,
     .results     = draw_modulation_results,

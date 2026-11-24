@@ -18,6 +18,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "m2sdr_cli.h"
+
 #include "analyzer.h"
 
 /* Analysis */
@@ -135,6 +137,32 @@ static void lte_report_json(const struct an_result *res, const struct an_report 
         }
     }
     printf("  }");
+}
+
+/* Command line */
+/*--------------*/
+
+static const struct option lte_options[] = {
+    { "lte", no_argument, NULL, 0 },
+    { NULL, 0, NULL, 0 }
+};
+
+static int lte_option(int id, const char *arg, struct an_cli *cli)
+{
+    (void)id;
+    (void)arg;
+    cli->set->lte_on = true;
+    return 0;
+}
+
+static void lte_help(void)
+{
+    printf("LTE options:\n"
+           "      --lte              With --report: analyse an LTE downlink carrier, FDD with a normal\n"
+           "                         cyclic prefix, tuned on its centre: cell, MIB, EVM, data blocks.\n"
+           "                         The sample rate is 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS, for\n"
+           "                         6, 15, 25, 50 or 100 resource blocks around the centre.\n"
+           "\n");
 }
 
 #ifdef M2SDR_ANALYZER_GUI
@@ -587,6 +615,9 @@ const struct an_mode an_mode_lte = {
     .analyse     = lte_analyse,
     .report_text = lte_report_text,
     .report_json = lte_report_json,
+    .options     = lte_options,
+    .option      = lte_option,
+    .help        = lte_help,
 #ifdef M2SDR_ANALYZER_GUI
     .draw        = draw_lte,
     .results     = draw_lte_results,
