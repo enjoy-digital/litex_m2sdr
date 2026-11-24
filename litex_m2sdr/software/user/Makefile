@@ -211,6 +211,7 @@ TEST_PROGS += tests/test_m2sdr_analysis_cellular
 TEST_PROGS += tests/test_m2sdr_analysis_wireless
 TEST_PROGS += tests/test_m2sdr_analysis_dual
 TEST_PROGS += tests/test_m2sdr_analysis_lab
+TEST_PROGS += tests/test_m2sdr_gen
 
 core-tools: $(CORE_BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp test-analyzer test-fm
@@ -223,6 +224,7 @@ test-libm2sdr: $(TEST_PROGS)
 	./tests/test_si5351_trim
 	./tests/test_m2sdr_cal
 	./tests/test_m2sdr_fm
+	./tests/test_m2sdr_gen
 	./tests/test_m2sdr_analysis
 	./tests/test_m2sdr_analysis_dvbt2
 	./tests/test_m2sdr_analysis_fm
@@ -430,6 +432,11 @@ tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o $(THIRD_PARTY_DI
 
 tests/test_m2sdr_fm: $(LIBM2SDR_STATIC) tests/test_m2sdr_fm.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_fm.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+
+# The generator of m2sdr_gen.c, included by its test.
+tests/test_m2sdr_gen.o: m2sdr_gen.c
+tests/test_m2sdr_gen: $(LIBM2SDR_STATIC) tests/test_m2sdr_gen.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_gen.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o $(M2SDR_LINK_LIBS)
 
 m2sdr_play: $(LIBM2SDR_STATIC) m2sdr_play.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_play.o $(M2SDR_LINK_LIBS) $(PTHREAD_LIBS)

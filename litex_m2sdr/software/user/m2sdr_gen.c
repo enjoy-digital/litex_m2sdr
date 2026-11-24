@@ -57,10 +57,12 @@ void intHandler(int dummy) {
 /* PRBS bit generator (PRBS31: x^31 + x^28 + 1) */
 static uint32_t prbs_lfsr = 0xFFFFFFFFu; /* Initial seed, all 1s */
 
-static int get_prbs_bit(void) {
-    int bit = ((prbs_lfsr >> 30) ^ (prbs_lfsr >> 27)) & 1;
-    prbs_lfsr = (prbs_lfsr << 1) | bit;
-    return bit;
+/* The next 12 bits, first one in the MSB: each is the XOR of bits 30 and 27 of the register
+ * shifted so far, and bits 16 to 30 are there from the start, so the 12 come in one step. */
+static int32_t get_prbs_12bits(void) {
+    const uint32_t bits = ((prbs_lfsr >> 19) ^ (prbs_lfsr >> 16)) & 0xFFF;
+    prbs_lfsr = (prbs_lfsr << 12) | bits;
+    return (int32_t)bits;
 }
 
 struct ofdm_state {
@@ -140,9 +142,27 @@ static void ofdm_generate_symbol(struct ofdm_state *st)
     for (int i = 0; i < st->fft_size; i++) {
         st->time_bins[i].r /= st->fft_size;
         st->time_bins[i].i /= st->fft_size;
-        float mag = hypotf(st->time_bins[i].r, st->time_bins[i].i);
-        if (mag > max_mag)
-            max_mag = mag;
+    }
+    /* The largest magnitude: hypotf() only where it can be, the samples whose squared magnitude
+     * is within 1e-6 of the largest one, instead of on every sample. */
+    {
+        double max_sq = 0.0;
+
+        for (int i = 0; i < st->fft_size; i++) {
+            const double sq = (double)st->time_bins[i].r * st->time_bins[i].r +
+                              (double)st->time_bins[i].i * st->time_bins[i].i;
+            if (sq > max_sq)
+                max_sq = sq;
+        }
+        for (int i = 0; i < st->fft_size; i++) {
+            const double sq = (double)st->time_bins[i].r * st->time_bins[i].r +
+                              (double)st->time_bins[i].i * st->time_bins[i].i;
+            if (sq >= max_sq * (1.0 - 1e-6)) {
+                const float mag = hypotf(st->time_bins[i].r, st->time_bins[i].i);
+                if (mag > max_mag)
+                    max_mag = mag;
+            }
+        }
     }
 
     if (max_mag < 1e-9f)
@@ -288,6 +308,12 @@ static void qam_init(struct qam_state *st, double sample_rate, uint32_t seed)
         st->symbols[i] = qam_random_symbol(st);
 }
 
+/* fminf(fmaxf(x, -1), 1), NaN to -1 included, without the calls to libm. */
+static inline float gen_clamp1(float x)
+{
+    return x > 1.0f ? 1.0f : x >= -1.0f ? x : -1.0f;
+}
+
 /* One sample: the symbols within QAM_SPAN of it, each under the pulse. */
 static void qam_next_sample(struct qam_state *st, float *i_out, float *q_out)
 {
@@ -301,8 +327,8 @@ static void qam_next_sample(struct qam_state *st, float *i_out, float *q_out)
         acc += st->symbols[j] * (st->pulse[k] + (float)(u - k) * (st->pulse[k + 1] - st->pulse[k]));
     }
     acc *= st->scale;
-    *i_out = fminf(fmaxf(crealf(acc), -1.0f), 1.0f);
-    *q_out = fminf(fmaxf(cimagf(acc), -1.0f), 1.0f);
+    *i_out = gen_clamp1(crealf(acc));
+    *q_out = gen_clamp1(cimagf(acc));
     st->frac += st->step;
     while (st->frac >= 1.0) {
         memmove(st->symbols, st->symbols + 1, (2 * QAM_SPAN - 1) * sizeof(st->symbols[0]));
@@ -325,7 +351,54 @@ struct gen_signal_state {
     uint32_t lfsr;
     struct ofdm_state *ofdm;
     struct qam_state *qam;
+    /* Tone: cos and sin of phi, turned by omega from one sample to the next. */
+    double tone_c, tone_s, tone_co, tone_so, tone_omega;
+    unsigned tone_run;             /* Samples before they are taken from phi again. */
 };
+
+/* The tone is turned by a rotation for GEN_TONE_RESYNC samples, then taken again from the
+ * phase with cos() and sin(): the rounding of the rotations stays under 1e-12 of full scale.
+ * That can only change a sample that falls on a step of the conversion to integers, so a value
+ * within GEN_TONE_GUARD of a step (of 12 bits: an integer, truncated; of 8 bits: a half,
+ * rounded) is taken from cos() and sin() too: the samples are the ones of cos() and sin() on
+ * each sample, at a fraction of their cost. The guard also covers the rounding of the value
+ * to float before the conversion (1.3e-4 of a step at most). */
+#define GEN_TONE_RESYNC 1024
+#ifndef GEN_TONE_GUARD
+#define GEN_TONE_GUARD  1e-3       /* 2: cos() and sin() on every sample, the reference of the tests. */
+#endif
+
+static inline int gen_tone_near_step(double value, int use_8bit)
+{
+    const double y = value * (use_8bit ? 127.0 : 2047.0);
+    const double d = fabs(y - (double)(long)y);       /* 0 to 1 from the integer toward zero. */
+
+    return use_8bit ? fabs(d - 0.5) < GEN_TONE_GUARD : (d < GEN_TONE_GUARD || d > 1.0 - GEN_TONE_GUARD);
+}
+
+enum gen_signal {
+    GEN_SIGNAL_NONE,
+    GEN_SIGNAL_TONE,
+    GEN_SIGNAL_OFDM,
+    GEN_SIGNAL_QAM,
+    GEN_SIGNAL_WHITE,
+    GEN_SIGNAL_PRBS,
+};
+
+static enum gen_signal gen_signal_of(const char *type)
+{
+    if (strcmp(type, "tone") == 0)
+        return GEN_SIGNAL_TONE;
+    if (strcmp(type, "ofdm") == 0)
+        return GEN_SIGNAL_OFDM;
+    if (strcmp(type, "qam") == 0)
+        return GEN_SIGNAL_QAM;
+    if (strcmp(type, "white") == 0)
+        return GEN_SIGNAL_WHITE;
+    if (strcmp(type, "prbs") == 0)
+        return GEN_SIGNAL_PRBS;
+    return GEN_SIGNAL_NONE;
+}
 
 static int8_t gen_float_to_sc8(float sample)
 {
@@ -336,7 +409,8 @@ static int8_t gen_float_to_sc8(float sample)
         return 127;
     if (scaled < -128.0f)
         return -128;
-    return (int8_t)lroundf(scaled);
+    /* lroundf(): half of its sign added in double, where the sum is exact, then truncated. */
+    return (int8_t)(int)((double)scaled + copysign(0.5, (double)scaled));
 }
 
 static void gen_fill_payload(uint8_t *payload, size_t payload_bytes, struct gen_signal_state *st)
@@ -345,25 +419,58 @@ static void gen_fill_payload(uint8_t *payload, size_t payload_bytes, struct gen_
     size_t num_frames = payload_bytes / (size_t)bytes_per_frame;
     size_t generated_bytes = num_frames * (size_t)bytes_per_frame;
 
+    /* What does not change in the buffer is read once: the signal, and the place in the PPS
+     * period, which then moves by one per sample (exactly: it is a fmod() of whole samples). */
+    const enum gen_signal signal = gen_signal_of(st->signal_type);
+    double pps_phase = st->pps_freq > 0 ? fmod(st->sample_count, st->pps_period_samples) : 0.0;
+
     for (size_t j = 0; j < num_frames; j++) {
         float I = 0.0f;
         float Q = 0.0f;
 
-        if (strcmp(st->signal_type, "tone") == 0) {
-            I = cos(st->phi) * st->amplitude;
-            Q = sin(st->phi) * st->amplitude;
+        if (signal == GEN_SIGNAL_TONE) {
+            if (st->tone_run == 0 || st->tone_omega != st->omega) {
+                st->tone_c     = cos(st->phi);
+                st->tone_s     = sin(st->phi);
+                st->tone_co    = cos(st->omega);
+                st->tone_so    = sin(st->omega);
+                st->tone_omega = st->omega;
+                st->tone_run   = GEN_TONE_RESYNC;
+            }
+            {
+                double vi = st->tone_c * st->amplitude;
+                double vq = st->tone_s * st->amplitude;
+
+                if (gen_tone_near_step(vi, st->use_8bit) || gen_tone_near_step(vq, st->use_8bit)) {
+                    vi = cos(st->phi) * st->amplitude;
+                    vq = sin(st->phi) * st->amplitude;
+                }
+                I = vi;
+                Q = vq;
+            }
+            /* The phase stays within a turn, for a negative frequency too: left to grow, it
+             * loses its resolution as the tone goes on. */
             st->phi += st->omega;
             if (st->phi >= 2 * M_PI)
                 st->phi -= 2 * M_PI;
-        } else if (strcmp(st->signal_type, "ofdm") == 0) {
+            else if (st->phi < 0)
+                st->phi += 2 * M_PI;
+            {
+                const double c = st->tone_c * st->tone_co - st->tone_s * st->tone_so;
+
+                st->tone_s = st->tone_s * st->tone_co + st->tone_c * st->tone_so;
+                st->tone_c = c;
+                st->tone_run--;
+            }
+        } else if (signal == GEN_SIGNAL_OFDM) {
             ofdm_next_sample(st->ofdm, &I, &Q);
             I *= st->amplitude;
             Q *= st->amplitude;
-        } else if (strcmp(st->signal_type, "qam") == 0) {
+        } else if (signal == GEN_SIGNAL_QAM) {
             qam_next_sample(st->qam, &I, &Q);
             I *= st->amplitude;
             Q *= st->amplitude;
-        } else if (strcmp(st->signal_type, "white") == 0) {
+        } else if (signal == GEN_SIGNAL_WHITE) {
             /* Fast LFSR-based noise avoids rand() in the hot loop. */
             st->lfsr ^= st->lfsr << 13;
             st->lfsr ^= st->lfsr >> 17;
@@ -372,13 +479,10 @@ static void gen_fill_payload(uint8_t *payload, size_t payload_bytes, struct gen_
             int16_t nq = (int16_t)((st->lfsr >> 16) & 0xFFFF);
             I = (ni / 32768.0f) * st->amplitude;
             Q = (nq / 32768.0f) * st->amplitude;
-        } else if (strcmp(st->signal_type, "prbs") == 0) {
-            int32_t value_I = 0;
-            int32_t value_Q = 0;
-            for (int b = 0; b < 12; b++)
-                value_I = (value_I << 1) | get_prbs_bit();
-            for (int b = 0; b < 12; b++)
-                value_Q = (value_Q << 1) | get_prbs_bit();
+        } else if (signal == GEN_SIGNAL_PRBS) {
+            const int32_t value_I = get_prbs_12bits();
+            const int32_t value_Q = get_prbs_12bits();
+
             I = ((float)(value_I - 2048) / 2048.0f) * st->amplitude;
             Q = ((float)(value_Q - 2048) / 2048.0f) * st->amplitude;
         }
@@ -396,11 +500,13 @@ static void gen_fill_payload(uint8_t *payload, size_t payload_bytes, struct gen_
             uint16_t gpio1 = 0, gpio2 = 0;
 
             if (st->pps_freq > 0) {
-                double phase = fmod(st->sample_count, st->pps_period_samples);
-                if (phase < st->pps_high_samples) {
+                if (pps_phase < st->pps_high_samples) {
                     gpio1 = 1 << st->gpio_pin;
                     gpio2 = 1 << st->gpio_pin;
                 }
+                pps_phase += 1.0;
+                if (pps_phase >= st->pps_period_samples)
+                    pps_phase = fmod(st->sample_count + 1, st->pps_period_samples);
             }
 
             ((int16_t *)payload)[4 * j + 0] = (I_int & 0xFFF) | (gpio1 << 12);
