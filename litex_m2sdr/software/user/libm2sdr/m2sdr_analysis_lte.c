@@ -382,7 +382,7 @@ static int grid_channel(struct lte_grid *g, int cell_id, int port, float complex
     float complex crs[2 * LTE_MAX_RB];
     double complex drift = 0;
     int pilot_q[2 * M2SDR_LTE_FRAME_SLOTS], npq = 0;
-    double power = 0, err = 0, slope = 0;
+    double power = 0, err = 0, ref = 0, slope = 0;
     size_t count = 0, kept = 0;
     int ns, li, j, a, q, i;
 
@@ -437,14 +437,17 @@ static int grid_channel(struct lte_grid *g, int cell_id, int port, float complex
                     sum += ls[i];
                 sm[j] = sum / (float)(j1 - j0 + 1);
                 /* EVM of a pilot against the mean of its neighbours, itself left out; the
-                 * noise of that mean is taken off. */
+                 * noise of that mean is taken off. The power of the errors over that of the
+                 * channel: a mean of the ratios of each pilot would blow up where the channel
+                 * is small (notches, noise). */
                 if (port == 0 && j1 > j0) {
                     const float complex others = (sum - ls[j]) / (float)(j1 - j0);
                     const double m = crealf(others) * crealf(others) + cimagf(others) * cimagf(others);
 
                     if (m > 0) {
-                        const float complex e = ls[j] / others - 1.0f;
+                        const float complex e = ls[j] - others;
                         err += (crealf(e) * crealf(e) + cimagf(e) * cimagf(e)) / (1.0 + 1.0 / (j1 - j0));
+                        ref += m;
                         kept++;
                         if (g->nrs < M2SDR_LTE_MAX_POINTS && ((kept - 1) % 8) == 0)
                             g->rs_points[g->nrs++] = ls[j] / others * crs[j - g->rb + LTE_MAX_RB];
@@ -473,7 +476,7 @@ static int grid_channel(struct lte_grid *g, int cell_id, int port, float complex
     }
     g->rs_power[port] = count ? power / (double)count : 0.0;
     if (port == 0) {
-        g->rs_evm          = kept ? sqrt(err / (double)kept) : 0.0;
+        g->rs_evm          = ref > 0 ? sqrt(err / ref) : 0.0;
         g->cfo_residual_hz = cabs(drift) > 0 ? carg(drift) / (2.0 * M_PI * 0.0005) : 0.0;
     }
     free(prev);

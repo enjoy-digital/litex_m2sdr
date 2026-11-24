@@ -513,6 +513,8 @@ struct lte_signal {
     size_t delay;               /* Samples ahead of the first frame. */
     double amp;                 /* Of a resource element; 0: 0.02. */
     int    ports;               /* Antenna ports: 2, or else 1. */
+    size_t echo;                /* A second path this many samples later, of amplitude echo_amp; 0: none. */
+    double echo_amp;
 };
 
 /* Port 1 of a cell of two ports, as one receiver gets it against port 0. */
@@ -660,6 +662,10 @@ static size_t make_lte(float complex *x, size_t max, const struct lte_signal *si
         }
     }
 done:
+    /* The echo before the noise: the notches of the channel are in the noise. */
+    if (sig->echo > 0)
+        for (i = pos; i-- > sig->echo;)
+            x[i] += (float)sig->echo_amp * x[i - sig->echo];
     for (i = 0; i < pos; i++)
         x[i] *= (float complex)cexp(2.0 * M_PI * I * sig->cfo_hz * (double)i / fs);
     /* An element is amp after the FFT of the analysis: noise of evm * amp per element is
@@ -677,6 +683,45 @@ done:
     free(fd);
     free(td);
     return pos;
+}
+
+/* EVM of the reference signals where the channel or the noise make some of their estimates
+ * small: two ports as on air, a deep notch (an echo of -0.5 dB two samples later at 7.68 MSPS,
+ * notches 3.8 MHz apart), then noise at -3 dB (co-channel cells at a cell edge). The EVM is
+ * the power of the errors over that of the channel: noise of evm per element over a channel of
+ * mean power 1 + a^2 reads evm / sqrt(1 + a^2); the smoothing over 5 pilots adds a little where
+ * the channel turns fast. A mean of the ratios of each pilot to its neighbours blows up where
+ * they are small: 270 % for 115 % on air. */
+static void test_lte_evm(void)
+{
+    static const struct lte_signal signals[] = {
+        { 209, 50, 285, 2, 491.0, 0.10, 2222, 0.0, 2, 2, -0.95 },
+        { 209, 25, 285, 2, 491.0, 0.70, 2222, 0.0, 2, 0, 0.0 },
+    };
+    const size_t max = (size_t)(0.052 * 1920000.0 * 8);
+    float complex *x = malloc(max * sizeof(*x));
+    struct m2sdr_lte_result *res = malloc(sizeof(*res));
+    unsigned i;
+
+    if (!x || !res) {
+        failures++;
+        free(x);
+        free(res);
+        return;
+    }
+    for (i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
+        const struct lte_signal *sig = &signals[i];
+        const double fs = 1920000.0 * (1 << sig->rate_index);
+        const size_t count = make_lte(x, (size_t)(0.052 * fs), sig);
+        const double expect = sig->evm / sqrt(1.0 + sig->echo_amp * sig->echo_amp);
+
+        printf("LTE, cell %d, two ports, %s, noise %.0f %%:\n", sig->cell_id, sig->echo ? "deep notches" : "flat channel",
+               100.0 * sig->evm);
+        CHECK("analyse, cell", m2sdr_lte_analyse(x, count, fs, res) == 0 && res->found && res->cell_id == sig->cell_id);
+        CHECK_NEAR("reference signal EVM (%)", 100.0 * res->rs_evm, 100.0 * expect, 25.0 * expect);
+    }
+    free(x);
+    free(res);
 }
 
 static void test_lte(void)
@@ -1392,6 +1437,7 @@ int main(int argc, char **argv)
     test_phase_noise();
     test_demod();
     test_lte();
+    test_lte_evm();
     test_dvbt();
     test_dab();
     if (failures) {
