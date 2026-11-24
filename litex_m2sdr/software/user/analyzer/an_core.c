@@ -44,6 +44,10 @@ int an_registry_init(void)
             fprintf(stderr, "More than %d views and modes in analyzer/modes.h.\n", AN_MODES_MAX);
             return -1;
         }
+        if ((an_modes[m]->analyse || an_modes[m]->analyse_two) && !an_modes[m]->result_size) {
+            fprintf(stderr, "The mode %s analyses without a result_size.\n", an_modes[m]->key);
+            return -1;
+        }
         if (an_modes[m]->result_size > size)
             size = an_modes[m]->result_size;
     }
@@ -75,8 +79,6 @@ void *an_mode_result(const struct an_mode *m, const struct an_result *res)
 
 bool an_mode_result_flag(const struct an_mode *m, const struct an_result *res, size_t off)
 {
-    if (!m->result_size)
-        return *(const bool *)((const char *)res + off);
     return *(const bool *)((const char *)an_mode_result(m, res) + off);
 }
 
@@ -238,21 +240,15 @@ int analyse_two(const float complex *x, const float complex *x2, size_t count, c
 
         if (!mode->analyse && !mode->analyse_two)
             continue;
-        if (mode->result_size) {
-            /* Its block while it is on, kept from a capture to the next; none while it is off. */
-            if (!an_mode_on(mode, set)) {
-                free(res->mode[m]);
-                res->mode[m] = NULL;
-                continue;
-            }
-            if (!res->mode[m] && !(res->mode[m] = calloc(1, mode->result_size)))
-                return -1;
-            *(bool *)((char *)res->mode[m] + mode->valid) = false;
-        } else {
-            *(bool *)((char *)res + mode->valid) = false;
-            if (!an_mode_on(mode, set))
-                continue;
+        /* Its block while it is on, kept from a capture to the next; none while it is off. */
+        if (!an_mode_on(mode, set)) {
+            free(res->mode[m]);
+            res->mode[m] = NULL;
+            continue;
         }
+        if (!res->mode[m] && !(res->mode[m] = calloc(1, mode->result_size)))
+            return -1;
+        *(bool *)((char *)res->mode[m] + mode->valid) = false;
         if (mode->analyse)
             mode->analyse(x, count, set, res);
         /* RX1 and RX2, whichever the spectrum shows. */

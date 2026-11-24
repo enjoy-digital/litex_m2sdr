@@ -409,8 +409,9 @@ struct an_mode {
     const char *title;             /* Its tab: "DVB-T". */
     enum an_category category;
     size_t on;                     /* offsetof(struct an_settings, <flag>); AN_NONE: always measured. */
-    /* Its result: result_size bytes of a type of its own, flat (copied with memcpy), allocated
-     * and zeroed while it is on, see an_mode_result(); 0: its fields are in struct an_result. */
+    /* Its result: result_size bytes of a type of its own (in its file), flat (copied with
+     * memcpy), allocated zeroed when it is turned on and freed when it is off, read with
+     * an_mode_result(). A mode that analyses has one. */
     size_t result_size;
     size_t valid;                  /* offsetof(<its result>, <flag>): cleared before each analysis. */
     size_t found;                  /* offsetof(<its result>, <flag>): something was found (a cell, a
