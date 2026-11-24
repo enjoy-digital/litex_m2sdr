@@ -514,6 +514,13 @@ int main(int argc, char **argv)
         if (an_modes[m]->default_freq > 0 && an_mode_on(an_modes[m], &set) && !freq_given)
             set.freq_hz = an_modes[m]->default_freq;
     }
+    /* What the modes check or do once the options are read. */
+    for (m = 0; an_modes[m]; m++) {
+        const int rc = an_modes[m]->start ? an_modes[m]->start(&cli) : 0;
+
+        if (rc != 0)
+            return rc < 0 ? 1 : 0;
+    }
     if (src.no_rf_init && (file || src.tx_tone)) {
         m2sdr_cli_error("--no-rf-init is for a board, without --tx-tone");
         return 1;
@@ -604,6 +611,14 @@ int main(int argc, char **argv)
         m2sdr_cli_error("Could not store the calibration (no board, no --df-cal-file)");
         source_close(&src);
         return 1;
+    }
+
+    /* What the modes take from the source: files of the board. */
+    for (m = 0; an_modes[m]; m++) {
+        if (an_modes[m]->opened && an_modes[m]->opened(&cli) < 0) {
+            source_close(&src);
+            return 1;
+        }
     }
 
     (void)view;

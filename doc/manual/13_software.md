@@ -799,6 +799,7 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | Coherence | Levels, coherence, gain and phase of RX2 against RX1 over frequency |
 | Direction | Angle of arrival on two antennas, beamscan and MUSIC on a half circle and against the angle |
 | LTE 2x2 | Paths, condition number and singular values per resource block of a 2-port LTE cell |
+| Sweep, Compression, IMD, AM/AM | Lab: the board sends a stimulus on TX and measures a device between TX and RX ([Lab modes](#sw-analyzer-lab)) |
 
 The tabs of the window group the views by category: Spectrum (Spectrum, Time, Statistics),
 Signal (Phase noise, Modulation), Cellular (LTE) and Broadcast (DVB-T, DVB-T2, DAB). `--view`
@@ -1405,6 +1406,82 @@ The rank is an estimate with ideal precoding, not the rank indicator a UE report
 tables of TS 36.213. The noise comes from how the estimate of a block changes over the frame:
 a channel that moves reads as noise. The cell search takes about 0.2 s a capture, a few results a
 second.
+#### Lab modes: a device between TX and RX {#sw-analyzer-lab}
+The Lab tabs (Sweep, Compression, IMD, AM/AM), and `--sweep`, `--compression`, `--imd` and
+`--amam` with `--report`, make the board a small lab instrument: TX sends a known stimulus, the
+device under test (an amplifier, a filter, a mixer at a fixed LO, or a cable) sits between a TX
+port and an RX port, and the capture is compared with the stimulus. The TX LO is set on the RX
+frequency and the stimulus is sent on both TX channels.
+> [!CAUTION]
+> These modes transmit. Connect TX to the device and the device to RX with cables and
+> attenuators, never an antenna: the stimulus is not a licensed emission. The TX attenuation
+> (`--lab-tx-att`, 30 dB by default) is applied from the first capture; check that the device
+> and the RX input can take the level before lowering it. TX is stopped, its attenuation set
+> to 89 dB, at the first capture without a lab mode (another view), when the acquisition is
+> stopped and when the tool ends.
+m2sdr_analyzer --freq 915e6 --sample-rate 7.68e6 --view sweep --lab-tx-att 40
+m2sdr_analyzer --freq 915e6 --sample-rate 7.68e6 --report --sweep --sweep-thru-save    # Thru
+m2sdr_analyzer --freq 915e6 --sample-rate 7.68e6 --report --sweep --json               # Device
+m2sdr_analyzer --freq 915e6 --sample-rate 7.68e6 --report --compression --lab-tx-att 20
+m2sdr_analyzer --freq 915e6 --sample-rate 7.68e6 --report --imd --imd-spacing 100e3
+m2sdr_analyzer --freq 915e6 --sample-rate 7.68e6 --report --amam --amam-stimulus qam
+The stimuli are periodic: one period, looped on TX by a thread of the tool while the captures
+go on. TX and RX share the clock of the board, so the capture is periodic too and the analyses
+work on whole periods, without windows. The measurements are in libm2sdr
+(`m2sdr_analysis_lab.h`), stateless and tested on synthetic devices of known response.
+- **Levels:** the input of the device is the level of the stimulus in dBFS of TX, less the TX
+  attenuation; `--lab-tx-ref` adds the power a 0 dBFS tone gives at 0 dB of attenuation,
+  measured once with a power meter, to read the input in dBm. The output is in dBFS of RX,
+  `--ref-offset` to read dBm. A manual RX gain (`--rx-gain`) keeps the levels comparable.
+- **Timing:** the TX loop is not timed, so the delay through the device is not known: the
+  phase of the sweep is given from its linear part and the group delay from its mean. TX and RX
+  timestamps exist ([Timestamps and timed TX](#sw-lib-time)); a timed start of the loop would
+  give the absolute delay, and is not done yet.
+- **Without a board:** `--lab-stimulus-out PATH` writes the stimulus of the mode given (one
+  period, SC16, two channels) and exits; the analyses run on recordings (`--file`) of it.
+##### Sweep {#sw-analyzer-sweep}
+|S21|, phase and group delay of the device at `--sweep-points` points (201) over a span
+(`--sweep-span`, 0.8 of the sample rate) centred on the frequency. Wider spans are measured in
+steps by retuning. The stimulus is a tone per point (`--sweep-stimulus stepped`, 65536 samples
+a period: the most dynamic range) or a chirp over the period (`chirp`: the same figures, less
+range against spurs). The capture is aligned on the stimulus by correlation, each point is the
+ratio of the capture to the stimulus averaged over three periods, and its SNR is given from
+their spread.
+The response of the radio itself is removed by a thru: a sweep with a cable (and the
+attenuators) in place of the device, stored with `--sweep-thru-save` or the button of the view
+in `~/.config/litex_m2sdr/sweep_thru_<FPGA DNA>.csv` (`--sweep-thru PATH` for another file).
+It holds for the frequency, the sample rate, the span, the points, the gains and the
+attenuation it was taken with; `--sweep-raw` or the box of the view leaves it out.
+##### Compression {#sw-analyzer-compression}
+Gain of the device against the level of a tone (`--tone-offset`, a tenth of the sample rate
+from the centre), the small-signal gain, and the 1 dB and 3 dB compression points interpolated
+between the steps. The steps are in the stimulus: one period holds the tone at `--comp-range`
+(30 dB) of levels in steps of `--comp-step` (1 dB) up to `--comp-top` (-1 dBFS), 8192 samples
+each, so one capture holds them all and the view follows the device live. The TX attenuation
+moves all the steps together; the TX chain of the board is taken as linear over the
+staircase, which holds while its output stays well below its own compression (a high TX
+attenuation and an external driver amplifier for a power device).
+##### IMD {#sw-analyzer-imd}
+Two tones of `--imd-level` (-12 dBFS) each, `--imd-spacing` apart (a hundredth of the sample
+rate), centred at `--tone-offset`. The figures are the levels of the tones and of the IM3 and
+IM5 products, their level in dBc from the mean tone level, the output and input intercepts
+(OIP3 = Pout + (Pout - PIM3) / 2, IIP3 the same less the gain; IP5 alike with a quarter), and
+the other lines as spurs. A product under the noise gives the noise: the intercept is then a
+bound (">="). The intercepts are those of a small-signal device: taken with the tones well
+below compression, they hold at other levels.
+> [!NOTE]
+> The board makes intermodulation of its own: measure the thru first, and keep its products
+> 10 dB under the ones of the device (more TX attenuation, a lower RX gain).
+##### AM/AM {#sw-analyzer-amam}
+AM/AM and AM/PM of the device, its EVM and the ACLR of its output, from a wideband stimulus:
+OFDM-like noise (`--amam-stimulus noise`, a flat band of `--amam-bw`, a fifth of the sample
+rate, with a PAPR of 10 to 12 dB) or PSK/QAM under a root raised cosine (`qam`,
+`--amam-modulation`, `--amam-sps`), of `--amam-level` (-15 dBFS) mean power. The capture is
+aligned on the stimulus to a fraction of a sample; the input amplitudes are binned, and the
+complex gain of each bin gives the AM/AM (compression) and the AM/PM from the small-signal
+gain. The EVM is that of the waveform after its gain, not of demodulated symbols; the ACLR is
+that of the channel of the stimulus and of the adjacent channels that fit in the span. The
+model is memoryless: the filters of the radio and the memory of the device spread the points.
 #### Phase noise {#sw-analyzer-pn}
 
 The Phase noise view, and `--phase-noise` with `--report`, measure the strongest carrier of the

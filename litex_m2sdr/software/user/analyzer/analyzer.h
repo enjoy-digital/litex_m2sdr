@@ -60,6 +60,7 @@
 #include "m2sdr_analysis_wireless.h"
 #include "m2sdr_analysis_timing.h"
 #include "m2sdr_analysis_dual.h"
+#include "m2sdr_analysis_lab.h"
 
 #define AN_DEFAULT_FREQ_HZ     2400e6
 #define AN_DEFAULT_SAMPLE_RATE 7680000.0
@@ -118,9 +119,36 @@
 #define AN_EMC_MIN_LOG2         12
 #define AN_EMC_MAX_LOG2         22
 #define AN_EMC_DEFAULT_CHANNELS 201           /* Default span: 100 RBW (C/D: 12 MHz), for a live speed. */
+#define AN_LAB_TX_ATT_DB        30            /* Default TX attenuation of the lab stimuli. */
 
 /* Settings */
 /*----------*/
+
+/* Lab modes (sweep, compression, imd, amam): the stimulus TX sends and how it is read back. The
+ * level at the input of the device is the level of the stimulus, dBFS, less tx_att, plus
+ * tx_ref_db: 0 reads in dBFS of TX, the power of a 0 dBFS tone at 0 dB of attenuation reads in
+ * dBm. A field at 0 takes its default. */
+struct an_lab_settings {
+    int    tx_att;                 /* dB, 0 to 89. */
+    double tx_ref_db;
+    int    sweep_stimulus;         /* enum m2sdr_sweep_stimulus. */
+    int    sweep_points;
+    double sweep_span_hz;          /* 0: 0.8 of the sample rate. */
+    double sweep_level_dbfs;       /* 0: -10. */
+    bool   sweep_raw;              /* The thru calibration is not applied. */
+    bool   sweep_store;            /* --sweep-thru-save: the sweep is stored as the thru. */
+    double tone_offset_hz;         /* Compression tone, centre of the two tones; 0: a tenth of the sample rate. */
+    double comp_top_dbfs;          /* Highest step of the compression stimulus; 0: -1. */
+    double comp_range_db;          /* 0: 30. */
+    double comp_step_db;           /* 0: 1. */
+    double imd_spacing_hz;         /* 0: a hundredth of the sample rate. */
+    double imd_level_dbfs;         /* Each tone; 0: -12. */
+    int    amam_stimulus;          /* 0: OFDM-like noise, 1: QAM. */
+    double amam_bw_hz;             /* Noise; 0: a fifth of the sample rate. */
+    double amam_level_dbfs;        /* Mean power; 0: -15. */
+    int    amam_modulation;        /* QAM: enum m2sdr_modulation; 0: 16QAM. */
+    int    amam_sps;               /* QAM: samples per symbol, a power of two; 0: 8. */
+};
 
 /* What a capture and its analysis depend on. The UI edits a copy, the worker applies it. */
 struct an_settings {
@@ -181,6 +209,11 @@ struct an_settings {
     double df_cal_deg;
     bool   df_cal_store;           /* --report: store the phase read as the calibration (source at broadside). */
     bool   mimo_on;                /* 2x2 channel of an LTE cell. */
+    bool   sweep_on;               /* Lab: scalar network analysis, TX to RX. */
+    bool   compression_on;         /* Lab: gain against the input level. */
+    bool   imd_on;                 /* Lab: two-tone intermodulation. */
+    bool   amam_on;                /* Lab: AM/AM, AM/PM of a wideband signal. */
+    struct an_lab_settings lab;
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -236,6 +269,8 @@ struct an_source {
     bool   loop;
     double file_rate;
     double file_freq;
+    /* Stimulus looped on TX by a thread, for the lab modes: an_source_tx_start(). */
+    struct an_tx *tx;
     /* Buffer of raw samples. */
     void  *raw;
     size_t raw_bytes;
@@ -250,6 +285,14 @@ int  source_capture(struct an_source *src, const struct an_settings *set, float 
 int  source_capture_two(struct an_source *src, const struct an_settings *set, float complex *x, float complex *x2,
                         size_t count, char *err, size_t err_len);
 void source_close(struct an_source *src);
+
+/* TX of a board: one period of a stimulus (full scale 1.0, on both TX channels) looped until
+ * stopped, the TX LO on the RX frequency, attenuation att dB. The capture of a mode with a
+ * stimulus hook starts it and the one without stops it; a file has no TX. Returns 0, or -1
+ * with err. */
+int  an_source_tx_start(struct an_source *src, const float complex *x, size_t period, int att, char *err, size_t err_len);
+void an_source_tx_stop(struct an_source *src);
+bool an_source_tx_running(const struct an_source *src);
 
 /* Analysis */
 /*----------*/
@@ -326,6 +369,15 @@ struct an_result {
     double df_cal_freq_hz;         /* The frequency of the stored one. */
     struct m2sdr_mimo_result mimo;
     bool   mimo_valid;
+    struct m2sdr_sweep_result sweep;
+    bool   sweep_valid;            /* Measured: the settings make a sweep; sweep.found says the rest. */
+    struct m2sdr_compression_result compression;
+    bool   compression_valid;
+    double compression_freq_hz;    /* Of its tone. */
+    struct m2sdr_imd_result imd;
+    bool   imd_valid;
+    struct m2sdr_amam_result amam;
+    bool   amam_valid;
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
@@ -419,6 +471,10 @@ struct an_mode {
     const struct option *options;
     int    (*option)(int id, const char *arg, struct an_cli *cli);
     void   (*help)(void);             /* Its block of the help, ending with an empty line. */
+    /* After the options, before the source is opened: < 0 an error (after its message), > 0 the
+     * command is done (exit 0). Then once the source is open: < 0 an error. */
+    int    (*start)(struct an_cli *cli);
+    int    (*opened)(struct an_cli *cli);
     /* Capture and analysis. */
     size_t (*samples)(const struct an_settings *set);             /* Samples it needs. */
     void   (*analyse)(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);
@@ -427,6 +483,9 @@ struct an_mode {
     bool   two_channels;
     void   (*analyse_two)(const float complex *x1, const float complex *x2, size_t count, const struct an_settings *set,
                           struct an_result *res);
+    /* Stimulus it needs on TX (lab modes): one period, allocated (freed by the caller), its
+     * length in *period; NULL: none. */
+    float complex *(*stimulus)(const struct an_settings *set, size_t *period);
     /* Its section of the reports, after the ones of the spectrum. JSON: its "key": {...} block,
      * from its first line to its closing brace, with no comma nor newline after it. */
     void   (*report_text)(const struct an_result *res, const struct an_report *rep);
@@ -458,6 +517,27 @@ const char *df_cal_file(void);
 bool   df_cal_lookup(double freq_hz, double *phase_deg, double *at_hz);
 int    df_cal_store(double freq_hz, double phase_deg);
 
+/* Lab: the thru calibration of the sweep, kept per board in a text file like the floor of the
+ * phase noise (analyzer/mode_sweep.c). */
+int  sweep_cal_default_path(uint64_t dna, char *path, size_t len);
+int  sweep_cal_load(const char *path);
+int  sweep_cal_save(const char *path);
+int  sweep_cal_store(const struct m2sdr_sweep_result *thru);
+void sweep_cal_clear(void);
+bool sweep_cal_valid(void);
+/* Lab: writes the stimulus of the lab mode on (one period, SC16, two channels) to a file. */
+int  lab_stimulus_write(const struct an_settings *set, const char *path);
+/* Lab: level at the input of the device of a stimulus of 0 dBFS, and its unit. */
+static inline double lab_input_offset(const struct an_settings *set)
+{
+    return set->lab.tx_ref_db - (double)set->lab.tx_att;
+}
+static inline const char *lab_input_unit(const struct an_settings *set)
+{
+    return set->lab.tx_ref_db != 0.0 ? "dBm" : "dBFS";
+}
+/* JSON: "name": [v, ...] in a section. */
+void lab_json_array(const char *name, const double *v, int n, double add, bool last);
 /* The flag of a mode in settings; NULL for a view of the spectrum. */
 static inline bool *an_mode_flag(const struct an_mode *m, struct an_settings *set)
 {
@@ -600,6 +680,9 @@ void view_full(struct an_ui *ui);
 void traces_reset(struct an_ui *ui);
 void view_retune(struct an_ui *ui, double freq_hz, bool *changed);
 void view_rate(struct an_ui *ui, double rate, bool *changed);
+
+/* Lab views: TX attenuation and reference, and the warning that they transmit. */
+void lab_tx_controls(struct an_ui *ui, bool live, bool *changed);
 
 /* OFDM views: an_trend.c. */
 bool   trend_add(struct an_trend *tr, const struct an_settings *set, bool ok, double mer, const float *mer_bin,

@@ -161,6 +161,7 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_analysis_coherence.o \
 	libm2sdr/m2sdr_analysis_df.o \
 	libm2sdr/m2sdr_analysis_mimo.o \
+	libm2sdr/m2sdr_analysis_lab.o libm2sdr/m2sdr_analysis_sweep.o libm2sdr/m2sdr_analysis_compression.o libm2sdr/m2sdr_analysis_imd.o libm2sdr/m2sdr_analysis_amam.o \
 	libm2sdr/m2sdr_hal_litepcie.o \
 	libm2sdr/m2sdr_hal_liteeth.o \
 	liblitepcie/litepcie_dma.o \
@@ -209,6 +210,7 @@ TEST_PROGS += tests/test_m2sdr_analysis_fm
 TEST_PROGS += tests/test_m2sdr_analysis_cellular
 TEST_PROGS += tests/test_m2sdr_analysis_wireless
 TEST_PROGS += tests/test_m2sdr_analysis_dual
+TEST_PROGS += tests/test_m2sdr_analysis_lab
 
 core-tools: $(CORE_BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp test-analyzer test-fm
@@ -229,6 +231,7 @@ test-libm2sdr: $(TEST_PROGS)
 	./tests/test_m2sdr_analysis_wireless
 	./tests/test_m2sdr_analysis_timing
 	./tests/test_m2sdr_analysis_dual
+	./tests/test_m2sdr_analysis_lab
 
 # Report mode of m2sdr_analyzer on capture files of known content: the spectrum here, and one
 # target per mode in its analyzer/mode_xxx.mk, declared there with its own recipe as
@@ -413,6 +416,8 @@ tests/test_m2sdr_analysis_timing: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_t
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_timing.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 tests/test_m2sdr_analysis_dual: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_dual.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_dual.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+tests/test_m2sdr_analysis_lab: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_lab.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_lab.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_cal.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
@@ -563,6 +568,7 @@ install_dev: $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 	install -m 644 libm2sdr/m2sdr_analysis_cellular.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_analysis_timing.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_analysis_dual.h $(PREFIX)/include/litex_m2sdr/libm2sdr
+	install -m 644 libm2sdr/m2sdr_analysis_lab.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -d $(PREFIX)/share/litex_m2sdr/examples
 	@for ex in example_sync_rx example_sync_tx example_tone_tx example_rx_n; do \
 		if [ -f ../../doc/libm2sdr/$$ex.c ]; then \
