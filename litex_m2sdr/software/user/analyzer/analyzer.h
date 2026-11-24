@@ -320,26 +320,7 @@ struct an_result {
     bool   obw_valid;
     double noise_db_hz;
     struct an_capture_time capture;  /* Set from the source before the analysis. */
-    /* Stability of a carrier: this capture, and the series of the captures of one tuning. */
-    struct m2sdr_carrier_result adev;
-    bool   adev_valid;             /* Measured; adev.found says whether a carrier was. */
-    bool   adev_series_ok;         /* 3 captures or more: adev_series holds their figures. */
-    struct m2sdr_adev_result adev_series;
-    double adev_nominal_hz;        /* Nominal frequency the offsets are taken from. */
-    bool   adev_nominal_given;     /* From the settings; else the first carrier found. */
-    int    adev_npoints;           /* History, oldest first: time from the first point, offset. */
-    float  adev_t_s[AN_ADEV_HISTORY], adev_ppb[AN_ADEV_HISTORY];
-    struct m2sdr_gnss_result gnss;
-    bool   gnss_valid;             /* Measured: the sample rate was 2.048 or 4.096 MSPS. */
     bool   two_channels;           /* The capture had both channels: the modes of two are measured. */
-    struct m2sdr_coherence_result coherence;
-    bool   coherence_valid;
-    struct m2sdr_df_result df;
-    bool   df_valid;
-    double df_spacing_m;           /* Used. */
-    double df_cal_deg;             /* Used, */
-    int    df_cal_source;          /* from: 0 none, 1 the command line or the view, 2 the store. */
-    double df_cal_freq_hz;         /* The frequency of the stored one. */
     struct m2sdr_sweep_result sweep;
     bool   sweep_valid;            /* Measured: the settings make a sweep; sweep.found says the rest. */
     struct m2sdr_compression_result compression;

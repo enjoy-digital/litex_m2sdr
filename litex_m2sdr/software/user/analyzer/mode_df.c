@@ -29,6 +29,22 @@
 
 #define DF_C 299792458.0
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct df_res {
+    bool   df_valid;
+    struct m2sdr_df_result df;
+    double df_spacing_m;           /* Used. */
+    double df_cal_deg;             /* Used, */
+    int    df_cal_source;          /* from: 0 none, 1 the command line or the view, 2 the store. */
+    double df_cal_freq_hz;         /* The frequency of the stored one. */
+};
+
+extern const struct an_mode an_mode_df;
+#define RES(res) ((struct df_res *)an_mode_result(&an_mode_df, (res)))
+
 /* Calibration */
 /*-------------*/
 
@@ -241,22 +257,22 @@ static void df_analyse(const float complex *x1, const float complex *x2, size_t 
     struct m2sdr_df_config cfg;
 
     memset(&cfg, 0, sizeof(cfg));
-    res->df_cal_source = 0;
-    res->df_cal_deg    = 0.0;
+    RES(res)->df_cal_source = 0;
+    RES(res)->df_cal_deg    = 0.0;
     if (set->df_cal_given) {
-        res->df_cal_deg    = set->df_cal_deg;
-        res->df_cal_source = 1;
-    } else if (df_cal_lookup(set->freq_hz, &res->df_cal_deg, &res->df_cal_freq_hz)) {
-        res->df_cal_source = 2;
+        RES(res)->df_cal_deg    = set->df_cal_deg;
+        RES(res)->df_cal_source = 1;
+    } else if (df_cal_lookup(set->freq_hz, &RES(res)->df_cal_deg, &RES(res)->df_cal_freq_hz)) {
+        RES(res)->df_cal_source = 2;
     }
     /* Without a spacing, half the wavelength of the centre: no ambiguity. */
-    res->df_spacing_m = set->df_spacing_m > 0 ? set->df_spacing_m : set->freq_hz > 0 ? 0.5 * DF_C / set->freq_hz : 0.0;
-    cfg.spacing_m     = res->df_spacing_m;
+    RES(res)->df_spacing_m = set->df_spacing_m > 0 ? set->df_spacing_m : set->freq_hz > 0 ? 0.5 * DF_C / set->freq_hz : 0.0;
+    cfg.spacing_m     = RES(res)->df_spacing_m;
     cfg.rf_freq_hz    = set->freq_hz;
     cfg.freq_hz       = set->df_freq_hz;
     cfg.bandwidth_hz  = set->df_bw_hz;
-    cfg.cal_phase_deg = res->df_cal_deg;
-    res->df_valid = m2sdr_df_analyse(x1, x2, count, set->sample_rate, &cfg, &res->df) == 0;
+    cfg.cal_phase_deg = RES(res)->df_cal_deg;
+    RES(res)->df_valid = m2sdr_df_analyse(x1, x2, count, set->sample_rate, &cfg, &RES(res)->df) == 0;
 }
 
 /* Reports */
@@ -264,10 +280,10 @@ static void df_analyse(const float complex *x1, const float complex *x2, size_t 
 
 static const char *df_cal_name(const struct an_result *res, char *text, size_t len)
 {
-    if (res->df_cal_source == 1)
-        snprintf(text, len, "%+.2f deg, given", res->df_cal_deg);
-    else if (res->df_cal_source == 2)
-        snprintf(text, len, "%+.2f deg, stored at %.3f MHz", res->df_cal_deg, res->df_cal_freq_hz / 1e6);
+    if (RES(res)->df_cal_source == 1)
+        snprintf(text, len, "%+.2f deg, given", RES(res)->df_cal_deg);
+    else if (RES(res)->df_cal_source == 2)
+        snprintf(text, len, "%+.2f deg, stored at %.3f MHz", RES(res)->df_cal_deg, RES(res)->df_cal_freq_hz / 1e6);
     else
         snprintf(text, len, "none");
     return text;
@@ -281,11 +297,11 @@ static int df_report_done(const struct an_result *res)
 
     if (!res->set.df_cal_store)
         return 0;
-    if (!res->df_valid || !res->df.found) {
+    if (!RES(res)->df_valid || !RES(res)->df.found) {
         fprintf(stderr, "No signal: no direction finding calibration stored.\n");
         return -1;
     }
-    cal = m2sdr_df_calibration(&res->df, 0.0);
+    cal = m2sdr_df_calibration(&RES(res)->df, 0.0);
     if (df_cal_store(res->set.freq_hz, cal) != 0) {
         fprintf(stderr, "Could not store the calibration%s%s.\n", df_cal_file() ? " in " : " (no board, no --df-cal-file)",
                 df_cal_file() ? df_cal_file() : "");
@@ -297,21 +313,21 @@ static int df_report_done(const struct an_result *res)
 
 static void df_report_text(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_df_result *d = &res->df;
+    const struct m2sdr_df_result *d = &RES(res)->df;
     char text[96];
     int i;
 
     printf("\nDirection finding (RX1, RX2):\n");
     if (!res->two_channels) {
         printf("  Needs both channels: a board, or a file of two channels.\n");
-    } else if (!res->df_valid) {
+    } else if (!RES(res)->df_valid) {
         printf("  Not measured: the centre frequency (--freq) and the spacing must be known, the signal in the capture.\n");
     } else if (!d->found) {
         printf("  No signal stands out on both channels (SNR %.1f dB, coherence %.3f).\n", d->snr_db, d->coherence);
     } else {
         printf("  Signal     : %.6f MHz (%+.1f Hz), %.1f %s, SNR %.1f dB, coherence %.4f\n",
                (res->set.freq_hz + d->freq_hz) / 1e6, d->freq_hz, d->level_db + rep->off, rep->unit, d->snr_db, d->coherence);
-        printf("  Antennas   : %.4f m apart, %.3f wavelengths (%.4f m)\n", res->df_spacing_m, d->spacing_wl, d->wavelength_m);
+        printf("  Antennas   : %.4f m apart, %.3f wavelengths (%.4f m)\n", RES(res)->df_spacing_m, d->spacing_wl, d->wavelength_m);
         printf("  Phase      : %+.3f deg as received, calibration %s: %+.3f deg (+-%.3f)\n", d->phase_raw_deg,
                df_cal_name(res, text, sizeof(text)), d->phase_deg, d->phase_std_deg);
         printf("  Gain       : %+.2f dB (RX2 over RX1)\n", d->gain_db);
@@ -328,8 +344,8 @@ static void df_report_text(const struct an_result *res, const struct an_report *
 
 static void df_report_json(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_df_result *d = &res->df;
-    const bool ok = res->two_channels && res->df_valid && d->found;
+    const struct m2sdr_df_result *d = &RES(res)->df;
+    const bool ok = res->two_channels && RES(res)->df_valid && d->found;
     int i;
 
     printf("  \"df\": {\n");
@@ -342,11 +358,11 @@ static void df_report_json(const struct an_result *res, const struct an_report *
         print_json_number("snr_db", d->snr_db, false);
         print_json_number("coherence", d->coherence, false);
         print_json_number("gain_db", d->gain_db, false);
-        print_json_number("spacing_m", res->df_spacing_m, false);
+        print_json_number("spacing_m", RES(res)->df_spacing_m, false);
         print_json_number("spacing_wavelengths", d->spacing_wl, false);
         print_json_number("phase_raw_deg", d->phase_raw_deg, false);
-        print_json_number("calibration_deg", res->df_cal_deg, false);
-        printf("    \"calibration\": \"%s\",\n", res->df_cal_source == 1 ? "given" : res->df_cal_source == 2 ? "stored" : "none");
+        print_json_number("calibration_deg", RES(res)->df_cal_deg, false);
+        printf("    \"calibration\": \"%s\",\n", RES(res)->df_cal_source == 1 ? "given" : RES(res)->df_cal_source == 2 ? "stored" : "none");
         print_json_number("phase_deg", d->phase_deg, false);
         print_json_number("phase_std_deg", d->phase_std_deg, false);
         print_json_number("angle_deg", d->angle_deg, false);
@@ -368,12 +384,12 @@ static unsigned df_watch_lines;
 
 static int df_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_df_result *d = &res->df;
-    const bool ok = res->two_channels && res->df_valid && d->found;
+    const struct m2sdr_df_result *d = &RES(res)->df;
+    const bool ok = res->two_channels && RES(res)->df_valid && d->found;
     int i;
 
     (void)set;
-    if (!res->df_valid) {
+    if (!RES(res)->df_valid) {
         fprintf(stderr, "Direction finding not measured: check --freq and --df-spacing.\n");
         return -1;
     }
@@ -498,8 +514,8 @@ static void df_linear(const struct m2sdr_df_result *d, ImVec2 size)
 static void draw_df(struct an_ui *ui, bool live, bool *changed)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_df_result *d = &res->df;
-    const bool ok = res->two_channels && res->df_valid && d->found;
+    const struct m2sdr_df_result *d = &RES(res)->df;
+    const bool ok = res->two_channels && RES(res)->df_valid && d->found;
     double cm = ui->set.df_spacing_m, khz = ui->set.df_freq_hz;
     ImVec2 avail;
     char text[128];
@@ -546,7 +562,7 @@ static void draw_df(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Needs both channels: a board, or a file of two channels.", NULL);
         return;
     }
-    if (!res->df_valid) {
+    if (!RES(res)->df_valid) {
         igTextUnformatted("Not measured: the centre frequency and the spacing must be known, the signal in the capture.", NULL);
         return;
     }
@@ -577,12 +593,12 @@ static void draw_df(struct an_ui *ui, bool live, bool *changed)
 static void draw_df_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_df_result *d = &res->df;
+    const struct m2sdr_df_result *d = &RES(res)->df;
     char text[96];
     int i, n = 0;
 
     igSeparatorText("Direction finding");
-    if (!res->two_channels || !res->df_valid || !d->found) {
+    if (!res->two_channels || !RES(res)->df_valid || !d->found) {
         igTextUnformatted("No signal.", NULL);
         return;
     }
@@ -597,7 +613,7 @@ static void draw_df_results(struct an_ui *ui)
         label_value("SNR, coherence", "%.1f dB, %.4f", d->snr_db, d->coherence);
         label_value("Phase", "%+.2f deg (raw %+.2f)", d->phase_deg, d->phase_raw_deg);
         label_value("Calibration", "%s", df_cal_name(res, text, sizeof(text)));
-        label_value("Spacing", "%.2f cm, %.3f lambda", 100.0 * res->df_spacing_m, d->spacing_wl);
+        label_value("Spacing", "%.2f cm, %.3f lambda", 100.0 * RES(res)->df_spacing_m, d->spacing_wl);
         label_value("Gain RX2/RX1", "%+.2f dB", d->gain_db);
         igEndTable();
     }
@@ -613,8 +629,9 @@ const struct an_mode an_mode_df = {
     .title        = "Direction",
     .category     = AN_CAT_TWO_CHANNEL,
     .on           = offsetof(struct an_settings, df_on),
-    .valid        = offsetof(struct an_result, df_valid),
-    .found        = offsetof(struct an_result, df.found),
+    .result_size  = sizeof(struct df_res),
+    .valid        = offsetof(struct df_res, df_valid),
+    .found        = offsetof(struct df_res, df.found),
     .report_rank  = 71,
     .samples      = df_samples,
     .two_channels = true,

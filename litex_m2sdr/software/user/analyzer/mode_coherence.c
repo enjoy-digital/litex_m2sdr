@@ -20,6 +20,18 @@
 
 #include "analyzer.h"
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct coherence_res {
+    bool   coherence_valid;
+    struct m2sdr_coherence_result coherence;
+};
+
+extern const struct an_mode an_mode_coherence;
+#define RES(res) ((struct coherence_res *)an_mode_result(&an_mode_coherence, (res)))
+
 /* Command line */
 /*--------------*/
 
@@ -79,7 +91,7 @@ static void coherence_analyse(const float complex *x1, const float complex *x2, 
         cfg.lo_hz = set->chan_offset_hz - 0.5 * set->chan_bw_hz;
         cfg.hi_hz = set->chan_offset_hz + 0.5 * set->chan_bw_hz;
     }
-    res->coherence_valid = m2sdr_coherence_analyse(x1, x2, count, set->sample_rate, &cfg, &res->coherence) == 0;
+    RES(res)->coherence_valid = m2sdr_coherence_analyse(x1, x2, count, set->sample_rate, &cfg, &RES(res)->coherence) == 0;
 }
 
 /* Reports */
@@ -87,12 +99,12 @@ static void coherence_analyse(const float complex *x1, const float complex *x2, 
 
 static void coherence_report_text(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_coherence_result *c = &res->coherence;
+    const struct m2sdr_coherence_result *c = &RES(res)->coherence;
 
     printf("\nCoherence of RX2 against RX1:\n");
     if (!res->two_channels) {
         printf("  Needs both channels: a board, or a file of two channels.\n");
-    } else if (!res->coherence_valid) {
+    } else if (!RES(res)->coherence_valid) {
         printf("  Not measured: the FFT length or the band does not fit the capture.\n");
     } else if (!c->found) {
         printf("  No signal common to both channels (mean coherence %.3f over %d bins, %u segments).\n", c->coherence,
@@ -112,8 +124,8 @@ static void coherence_report_text(const struct an_result *res, const struct an_r
 
 static void coherence_report_json(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_coherence_result *c = &res->coherence;
-    const bool ok = res->two_channels && res->coherence_valid && c->found;
+    const struct m2sdr_coherence_result *c = &RES(res)->coherence;
+    const bool ok = res->two_channels && RES(res)->coherence_valid && c->found;
 
     printf("  \"coherence\": {\n");
     printf("    \"two_channels\": %s,\n", res->two_channels ? "true" : "false");
@@ -145,11 +157,11 @@ static unsigned coherence_watch_lines;
 
 static int coherence_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_coherence_result *c = &res->coherence;
-    const bool ok = res->two_channels && res->coherence_valid && c->found;
+    const struct m2sdr_coherence_result *c = &RES(res)->coherence;
+    const bool ok = res->two_channels && RES(res)->coherence_valid && c->found;
 
     (void)set;
-    if (!res->coherence_valid) {
+    if (!RES(res)->coherence_valid) {
         fprintf(stderr, "The coherence was not measured: check the FFT length.\n");
         return -1;
     }
@@ -216,7 +228,7 @@ static void draw_coherence(struct an_ui *ui, bool live, bool *changed)
 {
     static const int lens[] = { 256, 512, 1024, 2048, 4096, 8192 };
     const struct an_result *res = &ui->res;
-    const struct m2sdr_coherence_result *c = &res->coherence;
+    const struct m2sdr_coherence_result *c = &RES(res)->coherence;
     const int len = ui->set.coherence_fft_len > 0 ? ui->set.coherence_fft_len : AN_COHERENCE_FFT_LEN;
     ImVec2 avail, half;
     char text[64];
@@ -252,7 +264,7 @@ static void draw_coherence(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Needs both channels: a board, or a file of two channels.", NULL);
         return;
     }
-    if (!res->coherence_valid) {
+    if (!RES(res)->coherence_valid) {
         igTextUnformatted("Not measured: the FFT length or the band does not fit the capture.", NULL);
         return;
     }
@@ -291,10 +303,10 @@ static void draw_coherence(struct an_ui *ui, bool live, bool *changed)
 static void draw_coherence_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_coherence_result *c = &res->coherence;
+    const struct m2sdr_coherence_result *c = &RES(res)->coherence;
 
     igSeparatorText("Coherence");
-    if (!res->two_channels || !res->coherence_valid || !c->found) {
+    if (!res->two_channels || !RES(res)->coherence_valid || !c->found) {
         igTextUnformatted("No common signal.", NULL);
         return;
     }
@@ -325,8 +337,9 @@ const struct an_mode an_mode_coherence = {
     .title        = "Coherence",
     .category     = AN_CAT_TWO_CHANNEL,
     .on           = offsetof(struct an_settings, coherence_on),
-    .valid        = offsetof(struct an_result, coherence_valid),
-    .found        = offsetof(struct an_result, coherence.found),
+    .result_size  = sizeof(struct coherence_res),
+    .valid        = offsetof(struct coherence_res, coherence_valid),
+    .found        = offsetof(struct coherence_res, coherence.found),
     .report_rank  = 70,
     .samples      = coherence_samples,
     .two_channels = true,
