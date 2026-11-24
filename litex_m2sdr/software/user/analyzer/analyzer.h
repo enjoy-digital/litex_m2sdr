@@ -319,8 +319,6 @@ struct an_result {
     double obw_lo_hz, obw_hi_hz;
     bool   obw_valid;
     double noise_db_hz;
-    struct m2sdr_lte_result lte;
-    bool   lte_valid;              /* Measured: the sample rate was one of LTE; lte.found says the rest. */
     struct m2sdr_dvbt_result dvbt;
     bool   dvbt_valid;             /* Measured: the sample rate was one of DVB-T; dvbt.found says the rest. */
     struct m2sdr_dab_result dab;
@@ -333,13 +331,6 @@ struct an_result {
     double pulse_env_s;            /* Time of the capture over them. */
     struct m2sdr_emc_result emc;
     bool   emc_valid;              /* Measured: the band fits the sample rate and the capture. */
-    /* Cellular: measured (rate and length right); found says the rest. */
-    struct m2sdr_nr_result nr;
-    bool   nr_valid;
-    struct m2sdr_gsm_result gsm;
-    bool   gsm_valid;
-    struct m2sdr_tetra_result tetra;
-    bool   tetra_valid;
     struct m2sdr_wifi_result wifi;
     bool   wifi_valid;             /* Measured: the sample rate was 20 MSPS. */
     bool   wifi_no_psdu;           /* The data was not decoded: it took longer than the capture. */
@@ -369,8 +360,6 @@ struct an_result {
     double df_cal_deg;             /* Used, */
     int    df_cal_source;          /* from: 0 none, 1 the command line or the view, 2 the store. */
     double df_cal_freq_hz;         /* The frequency of the stored one. */
-    struct m2sdr_mimo_result mimo;
-    bool   mimo_valid;
     struct m2sdr_sweep_result sweep;
     bool   sweep_valid;            /* Measured: the settings make a sweep; sweep.found says the rest. */
     struct m2sdr_compression_result compression;

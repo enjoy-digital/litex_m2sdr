@@ -20,6 +20,18 @@
 
 static const char *const tetra_burst_names[4] = { "none", "other", "normal", "sync" };
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct tetra_res {
+    bool   tetra_valid;            /* Measured (rate and length right); tetra.found says the rest. */
+    struct m2sdr_tetra_result tetra;
+};
+
+extern const struct an_mode an_mode_tetra;
+#define RES(res) ((struct tetra_res *)an_mode_result(&an_mode_tetra, (res)))
+
 /* Analysis */
 /*----------*/
 
@@ -32,7 +44,7 @@ static void tetra_analyse(const float complex *x, size_t count, const struct an_
 {
     const size_t n = (size_t)(AN_TETRA_SECONDS * set->sample_rate);
 
-    res->tetra_valid = m2sdr_tetra_analyse(x, count < n ? count : n, set->sample_rate, &res->tetra) == 0;
+    RES(res)->tetra_valid = m2sdr_tetra_analyse(x, count < n ? count : n, set->sample_rate, &RES(res)->tetra) == 0;
 }
 
 /* Timeslot (1 to 4) of slot s of the capture, from the SYNC PDU; 0 without it. */
@@ -48,11 +60,11 @@ static int tetra_tn(const struct m2sdr_tetra_result *t, int s)
 
 static void tetra_report_text(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_tetra_result *t = &res->tetra;
+    const struct m2sdr_tetra_result *t = &RES(res)->tetra;
     int s;
 
     printf("\nTETRA:\n");
-    if (!res->tetra_valid) {
+    if (!RES(res)->tetra_valid) {
         printf("  The sample rate must be 144 kSPS to 4 MSPS, with at least three slots of samples.\n");
         return;
     }
@@ -86,12 +98,12 @@ static void tetra_report_text(const struct an_result *res, const struct an_repor
 
 static void tetra_report_json(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_tetra_result *t = &res->tetra;
-    const bool ok = res->tetra_valid && t->found;
+    const struct m2sdr_tetra_result *t = &RES(res)->tetra;
+    const bool ok = RES(res)->tetra_valid && t->found;
     int s;
 
     printf("  \"tetra\": {\n");
-    print_json_number("sync_quality", res->tetra_valid ? t->sync_quality : 0.0, false);
+    print_json_number("sync_quality", RES(res)->tetra_valid ? t->sync_quality : 0.0, false);
     printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
     if (ok) {
         print_json_number("power_db", t->power_dbfs + rep->off, false);
@@ -122,9 +134,9 @@ static unsigned tetra_watch_lines;
 
 static int tetra_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_tetra_result *t = &res->tetra;
+    const struct m2sdr_tetra_result *t = &RES(res)->tetra;
 
-    if (!res->tetra_valid) {
+    if (!RES(res)->tetra_valid) {
         fprintf(stderr, "The sample rate is not one of TETRA (144 kSPS to 4 MSPS).\n");
         return -1;
     }
@@ -216,12 +228,12 @@ static void tetra_keep(struct an_ui *ui)
 {
     const struct an_result *res = &ui->res;
 
-    if (!res->set.tetra_on || !res->tetra_valid)
+    if (!res->set.tetra_on || !RES(res)->tetra_valid)
         return;
     if (res->set.freq_hz != tetra_sync_freq_hz)
         tetra_have_sync = false;
-    if (res->tetra.sync) {
-        tetra_last_sync    = res->tetra;
+    if (RES(res)->tetra.sync) {
+        tetra_last_sync    = RES(res)->tetra;
         tetra_have_sync    = true;
         tetra_sync_freq_hz = res->set.freq_hz;
     }
@@ -230,7 +242,7 @@ static void tetra_keep(struct an_ui *ui)
 static void draw_tetra(struct an_ui *ui, bool live, bool *changed)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_tetra_result *t = &res->tetra;
+    const struct m2sdr_tetra_result *t = &RES(res)->tetra;
     static float pw[M2SDR_TETRA_MAX_SLOTS], mer[M2SDR_TETRA_MAX_SLOTS];
     struct m2sdr_plot plot;
     ImVec2 avail, sq;
@@ -250,7 +262,7 @@ static void draw_tetra(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->tetra_valid) {
+    if (!RES(res)->tetra_valid) {
         igTextUnformatted("The sample rate must be 144 kSPS to 4 MSPS (1 MSPS).", NULL);
         return;
     }
@@ -338,11 +350,11 @@ static void draw_tetra(struct an_ui *ui, bool live, bool *changed)
 static void draw_tetra_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_tetra_result *t = &res->tetra;
+    const struct m2sdr_tetra_result *t = &RES(res)->tetra;
     const struct m2sdr_tetra_result *p = t->sync ? t : tetra_have_sync ? &tetra_last_sync : NULL;
 
     igSeparatorText("TETRA");
-    if (!res->tetra_valid || !t->found) {
+    if (!RES(res)->tetra_valid || !t->found) {
         igTextUnformatted("No carrier.", NULL);
         return;
     }
@@ -390,8 +402,9 @@ const struct an_mode an_mode_tetra = {
     .title        = "TETRA",
     .category     = AN_CAT_CELLULAR,
     .on           = offsetof(struct an_settings, tetra_on),
-    .valid        = offsetof(struct an_result, tetra_valid),
-    .found        = offsetof(struct an_result, tetra.found),
+    .result_size  = sizeof(struct tetra_res),
+    .valid        = offsetof(struct tetra_res, tetra_valid),
+    .found        = offsetof(struct tetra_res, tetra.found),
     .report_rank  = 13,
     .default_rate = AN_TETRA_RATE,
     .psd_short    = true,

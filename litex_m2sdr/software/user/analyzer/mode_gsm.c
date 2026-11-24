@@ -18,6 +18,18 @@
 
 #include "analyzer.h"
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct gsm_res {
+    bool   gsm_valid;              /* Measured (rate and length right); gsm.found says the rest. */
+    struct m2sdr_gsm_result gsm;
+};
+
+extern const struct an_mode an_mode_gsm;
+#define RES(res) ((struct gsm_res *)an_mode_result(&an_mode_gsm, (res)))
+
 /* Bands */
 /*-------*/
 
@@ -89,7 +101,7 @@ static void gsm_analyse(const float complex *x, size_t count, const struct an_se
 {
     const size_t n = (size_t)(AN_GSM_SECONDS * set->sample_rate);
 
-    res->gsm_valid = m2sdr_gsm_analyse(x, count < n ? count : n, set->sample_rate, NULL, &res->gsm) == 0;
+    RES(res)->gsm_valid = m2sdr_gsm_analyse(x, count < n ? count : n, set->sample_rate, NULL, &RES(res)->gsm) == 0;
 }
 
 static int gsm_decoded(const struct m2sdr_gsm_result *g)
@@ -107,13 +119,13 @@ static int gsm_decoded(const struct m2sdr_gsm_result *g)
 static void gsm_report_text(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_gsm_result *g = &res->gsm;
+    const struct m2sdr_gsm_result *g = &RES(res)->gsm;
     int band = 0, arfcn = gsm_hz_arfcn(set->freq_hz, &band), i;
 
     printf("\nGSM:\n");
     if (arfcn >= 0)
         printf("  Channel    : ARFCN %d (%s)\n", arfcn, gsm_band_name(band, arfcn));
-    if (!res->gsm_valid) {
+    if (!RES(res)->gsm_valid) {
         printf("  The sample rate must be 0.5 to 8 MSPS (1.92 MSPS), with at least two frames of samples.\n");
         return;
     }
@@ -136,7 +148,7 @@ static void gsm_report_text(const struct an_result *res, const struct an_report 
     printf("  Burst      : %.1f %s, phase error %.2f deg RMS, %.1f deg peak, EVM %.2f %% (SNR %.1f dB)\n",
            g->burst_power_db + rep->off, rep->unit, g->phase_err_rms_deg, g->phase_err_peak_deg, 100.0 * g->evm, g->snr_db);
     for (i = 0; i < g->nsch; i++) {
-        const struct m2sdr_gsm_sch *s = &res->gsm.sch[i];
+        const struct m2sdr_gsm_sch *s = &RES(res)->gsm.sch[i];
 
         if (s->crc)
             printf("    %8.3f ms  BSIC %2d  FN %7d  %+8.1f Hz  %6.1f %s  %5.2f deg  EVM %5.2f %%\n", 1e3 * s->time_s, s->bsic,
@@ -150,15 +162,15 @@ static void gsm_report_text(const struct an_result *res, const struct an_report 
 static void gsm_report_json(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_gsm_result *g = &res->gsm;
-    const bool fcch = res->gsm_valid && g->fcch;
+    const struct m2sdr_gsm_result *g = &RES(res)->gsm;
+    const bool fcch = RES(res)->gsm_valid && g->fcch;
     int band = 0, arfcn = gsm_hz_arfcn(set->freq_hz, &band), i;
 
     printf("  \"gsm\": {\n");
     if (arfcn >= 0)
         printf("    \"arfcn\": %d,\n    \"band\": \"%s\",\n", arfcn, gsm_band_name(band, arfcn));
     printf("    \"fcch\": %s,\n", fcch ? "true" : "false");
-    printf("    \"found\": %s%s\n", res->gsm_valid && g->found ? "true" : "false", fcch ? "," : "");
+    printf("    \"found\": %s%s\n", RES(res)->gsm_valid && g->found ? "true" : "false", fcch ? "," : "");
     if (fcch) {
         printf("    \"fcch_bursts\": %d,\n", g->fcch_bursts);
         print_json_number("fcch_quality", g->fcch_quality, false);
@@ -193,9 +205,9 @@ static unsigned gsm_watch_lines;
 
 static int gsm_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_gsm_result *g = &res->gsm;
+    const struct m2sdr_gsm_result *g = &RES(res)->gsm;
 
-    if (!res->gsm_valid) {
+    if (!RES(res)->gsm_valid) {
         fprintf(stderr, "The sample rate is not one of GSM (0.5 to 8 MSPS).\n");
         return -1;
     }
@@ -323,7 +335,7 @@ static void gsm_controls(struct an_ui *ui, bool *changed)
 static void draw_gsm(struct an_ui *ui, bool live, bool *changed)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_gsm_result *g = &res->gsm;
+    const struct m2sdr_gsm_result *g = &RES(res)->gsm;
     static float bits[M2SDR_GSM_BURST_BITS];
     struct m2sdr_plot plot;
     ImVec2 avail, sq;
@@ -337,7 +349,7 @@ static void draw_gsm(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->gsm_valid) {
+    if (!RES(res)->gsm_valid) {
         igTextUnformatted("The sample rate must be 0.5 to 8 MSPS (1.92 MSPS).", NULL);
         return;
     }
@@ -430,11 +442,11 @@ static void draw_gsm(struct an_ui *ui, bool live, bool *changed)
 static void draw_gsm_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_gsm_result *g = &res->gsm;
+    const struct m2sdr_gsm_result *g = &RES(res)->gsm;
     int band = 0, arfcn = gsm_hz_arfcn(res->set.freq_hz, &band);
 
     igSeparatorText("GSM");
-    if (!res->gsm_valid || !g->fcch) {
+    if (!RES(res)->gsm_valid || !g->fcch) {
         igTextUnformatted("No FCCH.", NULL);
         return;
     }
@@ -474,8 +486,9 @@ const struct an_mode an_mode_gsm = {
     .title        = "GSM",
     .category     = AN_CAT_CELLULAR,
     .on           = offsetof(struct an_settings, gsm_on),
-    .valid        = offsetof(struct an_result, gsm_valid),
-    .found        = offsetof(struct an_result, gsm.found),
+    .result_size  = sizeof(struct gsm_res),
+    .valid        = offsetof(struct gsm_res, gsm_valid),
+    .found        = offsetof(struct gsm_res, gsm.found),
     .report_rank  = 12,
     .default_rate = AN_GSM_RATE,
     .psd_short    = true,

@@ -22,6 +22,18 @@
 
 #include "analyzer.h"
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct lte_res {
+    bool   lte_valid;              /* Measured: the sample rate was one of LTE; lte.found says the rest. */
+    struct m2sdr_lte_result lte;
+};
+
+extern const struct an_mode an_mode_lte;
+#define RES(res) ((struct lte_res *)an_mode_result(&an_mode_lte, (res)))
+
 /* Analysis */
 /*----------*/
 
@@ -34,7 +46,7 @@ static void lte_analyse(const float complex *x, size_t count, const struct an_se
 {
     const size_t n = (size_t)(AN_LTE_SECONDS * set->sample_rate);
 
-    res->lte_valid = m2sdr_lte_analyse(x, count < n ? count : n, set->sample_rate, &res->lte) == 0;
+    RES(res)->lte_valid = m2sdr_lte_analyse(x, count < n ? count : n, set->sample_rate, &RES(res)->lte) == 0;
 }
 
 /* Reports */
@@ -45,11 +57,11 @@ static void lte_report_text(const struct an_result *res, const struct an_report 
     const struct an_settings *set = &res->set;
     const double off = rep->off;
     const char *unit = rep->unit;
-    const struct m2sdr_lte_result *l = &res->lte;
+    const struct m2sdr_lte_result *l = &RES(res)->lte;
     static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
 
     printf("\nLTE downlink:\n");
-    if (!res->lte_valid) {
+    if (!RES(res)->lte_valid) {
         printf("  The sample rate must be 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS.\n");
     } else if (!l->found) {
         printf("  No cell found (PSS quality %.1f): the capture is tuned on the centre of an FDD carrier\n"
@@ -97,12 +109,12 @@ static void lte_report_json(const struct an_result *res, const struct an_report 
 {
     const struct an_settings *set = &res->set;
     const double off = rep->off;
-    const struct m2sdr_lte_result *l = &res->lte;
+    const struct m2sdr_lte_result *l = &RES(res)->lte;
     static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
 
     printf("  \"lte\": {\n");
-    printf("    \"found\": %s%s\n", res->lte_valid && l->found ? "true" : "false", res->lte_valid && l->found ? "," : "");
-    if (res->lte_valid && l->found) {
+    printf("    \"found\": %s%s\n", RES(res)->lte_valid && l->found ? "true" : "false", RES(res)->lte_valid && l->found ? "," : "");
+    if (RES(res)->lte_valid && l->found) {
         printf("    \"cell_id\": %d,\n", l->cell_id);
         print_json_number("carrier_hz", set->freq_hz + l->freq_error_hz, false);
         print_json_number("carrier_offset_hz", l->freq_error_hz, false);
@@ -201,7 +213,7 @@ static void lte_texture(GLuint *tex, const uint32_t *rgba, int width, int height
 /* Textures of the frame: a column per symbol or per slot, the highest subcarrier at the top. */
 static void lte_textures(struct an_ui *ui)
 {
-    const struct m2sdr_lte_result *l = &ui->res.lte;
+    const struct m2sdr_lte_result *l = &RES(&ui->res)->lte;
     const int k = l->subcarriers, rb = l->data_rb;
     int q, a, ns, b;
 
@@ -230,9 +242,9 @@ static void lte_textures(struct an_ui *ui)
  * cell, or no block of data that is read. */
 static void lte_keep(struct an_ui *ui)
 {
-    const struct m2sdr_lte_result *l = &ui->res.lte;
+    const struct m2sdr_lte_result *l = &RES(&ui->res)->lte;
 
-    if (!ui->res.set.lte_on || !ui->res.lte_valid)
+    if (!ui->res.set.lte_on || !RES(&ui->res)->lte_valid)
         return;
     if (ui->res.set.freq_hz != ui->lte_freq_hz || ui->res.set.sample_rate != ui->lte_rate || ui->res.set.channel != ui->lte_channel) {
         ui->lte_freq_hz = ui->res.set.freq_hz;
@@ -270,10 +282,10 @@ static void lte_close(struct an_ui *ui)
 static const struct m2sdr_lte_result *lte_shown(const struct an_ui *ui, bool *held)
 {
     *held = false;
-    if (!ui->shown->set.lte_on || !ui->shown->lte_valid)
+    if (!ui->shown->set.lte_on || !RES(ui->shown)->lte_valid)
         return NULL;
-    if (ui->shown->lte.found)
-        return &ui->shown->lte;
+    if (RES(ui->shown)->lte.found)
+        return &RES(ui->shown)->lte;
     if (ui->lte_last_ok && ui->seq - ui->lte_last_seq <= AN_LTE_HOLD) {
         *held = true;
         return ui->lte_last;
@@ -335,7 +347,7 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!ui->res.lte_valid) {
+    if (!RES(&ui->res)->lte_valid) {
         igPushTextWrapPos(0.0f);
         igTextUnformatted("The sample rate must be 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS: it sets how many resource "
                           "blocks around the centre are analysed.", NULL);
@@ -346,7 +358,7 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
     if (!l) {
         igPushTextWrapPos(0.0f);
         igText("No cell found (PSS quality %.1f): the capture must be tuned on the centre of an FDD carrier with a "
-               "normal cyclic prefix.", ui->res.lte.sync_quality);
+               "normal cyclic prefix.", RES(&ui->res)->lte.sync_quality);
         igPopTextWrapPos();
         return;
     }
@@ -374,7 +386,7 @@ static void draw_lte(struct an_ui *ui, bool live, bool *changed)
     igPushTextWrapPos(igGetCursorPosX() + left_w);
     if (held)
         igTextColored((ImVec4){ 1.0f, 0.4f, 0.3f, 1.0f }, "No cell in the last capture (PSS quality %.1f): the last frame read "
-                      "is held, with its figures.", ui->res.lte.sync_quality);
+                      "is held, with its figures.", RES(&ui->res)->lte.sync_quality);
     else if (l->mib)
         igText("Resource grid of frame %d, MHz from the centre against the time. Colours: dB over the reference signals.", l->sfn);
     else
@@ -609,8 +621,9 @@ const struct an_mode an_mode_lte = {
     .title       = "LTE",
     .category    = AN_CAT_CELLULAR,
     .on          = offsetof(struct an_settings, lte_on),
-    .valid       = offsetof(struct an_result, lte_valid),
-    .found       = offsetof(struct an_result, lte.found),
+    .result_size = sizeof(struct lte_res),
+    .valid       = offsetof(struct lte_res, lte_valid),
+    .found       = offsetof(struct lte_res, lte.found),
     .report_rank = 10,
     .samples     = lte_samples,
     .analyse     = lte_analyse,
