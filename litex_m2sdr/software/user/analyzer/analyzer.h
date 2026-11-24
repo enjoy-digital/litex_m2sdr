@@ -16,7 +16,8 @@
  * 1. analyzer/mode_xxx.c, everything of the mode: its hooks, static, and its entry
  *    `const struct an_mode an_mode_xxx` (--view key, tab title, category, flag, result flag,
  *    report rank, options and their parser, defaults, help block...): see mode_dab.c. A mode
- *    that --watch follows has a watch_line hook and an option named as its key (--dab).
+ *    that --watch follows has a watch_line hook and an option named as its key (--dab). A mode
+ *    of RX1 and RX2 together sets .two_channels and .analyse_two: see mode_coherence.c.
  * 2. analyzer/modes.h: one line, AN_MODE(xxx), at its place in the tabs.
  * 3. Here: its flag and settings in struct an_settings, its result and result flag in
  *    struct an_result, and the state of its view in struct an_ui if it keeps one.
@@ -58,6 +59,7 @@
 #include "m2sdr_analysis_cellular.h"
 #include "m2sdr_analysis_wireless.h"
 #include "m2sdr_analysis_timing.h"
+#include "m2sdr_analysis_dual.h"
 
 #define AN_DEFAULT_FREQ_HZ     2400e6
 #define AN_DEFAULT_SAMPLE_RATE 7680000.0
@@ -103,6 +105,10 @@
 #define AN_ADEV_SAMPLES         (1 << 17)     /* Capture of a carrier estimate. */
 #define AN_ADEV_HISTORY         1024          /* Captures kept in the series of the Allan deviation. */
 #define AN_GNSS_DEFAULT_MS      10            /* Milliseconds of a GPS acquisition. */
+#define AN_TWO_LOG2             18            /* Samples of a coherence or direction finding capture: 2^18. */
+#define AN_COHERENCE_FFT_LEN    1024          /* Default of the coherence. */
+#define AN_DF_CAL_SPAN_HZ       5e6           /* A stored calibration serves this far from its frequency. */
+#define AN_DF_CAL_MAX           64            /* Calibrations stored per board. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 /* Monitoring. */
@@ -164,6 +170,17 @@ struct an_settings {
     double adev_carrier_hz;        /* Nominal RF frequency of the carrier; 0: the first one found. */
     bool   gnss_on;
     int    gnss_ms;                /* Milliseconds integrated; 0: AN_GNSS_DEFAULT_MS. */
+    /* Two channels: RX1 and RX2 captured together. */
+    bool   coherence_on;           /* Coherence, gain, phase and delay between RX1 and RX2. */
+    int    coherence_fft_len;
+    bool   df_on;                  /* Direction finding with two antennas. */
+    double df_spacing_m;           /* 0: half the wavelength. */
+    double df_freq_hz;             /* Signal, from the centre; 0: the strongest. */
+    double df_bw_hz;               /* 0: the main lobe of its peak. */
+    bool   df_cal_given;           /* df_cal_deg given: the stored calibration is not used. */
+    double df_cal_deg;
+    bool   df_cal_store;           /* --report: store the phase read as the calibration (source at broadside). */
+    bool   mimo_on;                /* 2x2 channel of an LTE cell. */
     /* Set by the worker for a live multiplex whose TPS it read: what it knows of it (fft_len 0:
      * nothing), and whether the capture is a short one. */
     bool   dvbt_fast;
@@ -229,6 +246,9 @@ struct an_source {
 int  file_open(struct an_source *src, const char *path, int capture_index, char *err, size_t err_len);
 int  source_capture(struct an_source *src, const struct an_settings *set, float complex *x,
                     size_t count, char *err, size_t err_len);
+/* The same, the other channel in x2 too (NULL: only x), from the same sample periods. */
+int  source_capture_two(struct an_source *src, const struct an_settings *set, float complex *x, float complex *x2,
+                        size_t count, char *err, size_t err_len);
 void source_close(struct an_source *src);
 
 /* Analysis */
@@ -295,6 +315,17 @@ struct an_result {
     float  adev_t_s[AN_ADEV_HISTORY], adev_ppb[AN_ADEV_HISTORY];
     struct m2sdr_gnss_result gnss;
     bool   gnss_valid;             /* Measured: the sample rate was 2.048 or 4.096 MSPS. */
+    bool   two_channels;           /* The capture had both channels: the modes of two are measured. */
+    struct m2sdr_coherence_result coherence;
+    bool   coherence_valid;
+    struct m2sdr_df_result df;
+    bool   df_valid;
+    double df_spacing_m;           /* Used. */
+    double df_cal_deg;             /* Used, */
+    int    df_cal_source;          /* from: 0 none, 1 the command line or the view, 2 the store. */
+    double df_cal_freq_hz;         /* The frequency of the stored one. */
+    struct m2sdr_mimo_result mimo;
+    bool   mimo_valid;
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
@@ -304,6 +335,11 @@ struct an_result {
 
 size_t capture_samples(const struct an_settings *set);
 int    analyse(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);
+/* Two channels: a mode of two is on. x holds the channel of the settings, x2 the other one
+ * (NULL: not captured, the modes of two are not measured). */
+bool   capture_two_channels(const struct an_settings *set);
+int    analyse_two(const float complex *x, const float complex *x2, size_t count, const struct an_settings *set,
+                   struct an_result *res);
 
 /* Phase noise floor */
 /*-------------------*/
@@ -386,6 +422,11 @@ struct an_mode {
     /* Capture and analysis. */
     size_t (*samples)(const struct an_settings *set);             /* Samples it needs. */
     void   (*analyse)(const float complex *x, size_t count, const struct an_settings *set, struct an_result *res);
+    /* A mode of two channels: RX1 and RX2 of one capture, sample for sample. The core captures
+     * both while it is on, and only calls it with both. */
+    bool   two_channels;
+    void   (*analyse_two)(const float complex *x1, const float complex *x2, size_t count, const struct an_settings *set,
+                          struct an_result *res);
     /* Its section of the reports, after the ones of the spectrum. JSON: its "key": {...} block,
      * from its first line to its closing brace, with no comma nor newline after it. */
     void   (*report_text)(const struct an_result *res, const struct an_report *rep);
@@ -409,6 +450,13 @@ struct an_mode {
 
 /* The views and modes, in the order of their tabs, NULL terminated. */
 extern const struct an_mode *const an_modes[];
+
+/* Direction finding: phase of RX2 against RX1 of the board, per frequency, from a source at
+ * broadside; kept per board (or in the file of --df-cal-file) in a text file (mode_df.c). */
+int    df_cal_init(uint64_t dna);
+const char *df_cal_file(void);
+bool   df_cal_lookup(double freq_hz, double *phase_deg, double *at_hz);
+int    df_cal_store(double freq_hz, double phase_deg);
 
 /* The flag of a mode in settings; NULL for a view of the spectrum. */
 static inline bool *an_mode_flag(const struct an_mode *m, struct an_settings *set)

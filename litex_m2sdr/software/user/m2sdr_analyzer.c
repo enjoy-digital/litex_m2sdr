@@ -597,6 +597,14 @@ int main(int argc, char **argv)
         source_close(&src);
         return 1;
     }
+    /* Direction finding: the calibrations of the board (mode_df.c). */
+    if (src.live && !src.dna)
+        (void)m2sdr_get_fpga_dna(src.dev, &src.dna);
+    if (df_cal_init(src.live ? src.dna : 0) != 0 && set.df_cal_store) {
+        m2sdr_cli_error("Could not store the calibration (no board, no --df-cal-file)");
+        source_close(&src);
+        return 1;
+    }
 
     (void)view;
     if (watch) {

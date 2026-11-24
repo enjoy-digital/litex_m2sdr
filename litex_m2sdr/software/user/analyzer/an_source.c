@@ -216,7 +216,7 @@ static int live_apply(struct an_source *src, const struct an_settings *set, char
     return 0;
 }
 
-static int live_capture(struct an_source *src, const struct an_settings *set, float complex *x,
+static int live_capture(struct an_source *src, const struct an_settings *set, float complex *x, float complex *x2,
                         size_t count, char *err, size_t err_len)
 {
     const unsigned per_buf = m2sdr_bytes_to_samples(M2SDR_FORMAT_SC16_Q11, M2SDR_BUFFER_BYTES);
@@ -263,10 +263,15 @@ static int live_capture(struct an_source *src, const struct an_settings *set, fl
             snprintf(err, err_len, "samples lost in the capture: the host or the link does not follow %.2f MSPS",
                      set->sample_rate / 1e6);
             raw_to_complex(raw, count, 2, 12, 4, set->channel, x);
+            if (x2)
+                raw_to_complex(raw, count, 2, 12, 4, 1 - set->channel, x2);
             return 1;
         }
     }
     raw_to_complex(raw, count, 2, 12, 4, set->channel, x);
+    /* The other channel of the same sample periods: 2T2R interleaves them. */
+    if (x2)
+        raw_to_complex(raw, count, 2, 12, 4, 1 - set->channel, x2);
     return 0;
 }
 
@@ -383,10 +388,15 @@ static int file_read(struct an_source *src, uint64_t offset, uint8_t *dst, size_
     return 0;
 }
 
-static int file_capture(struct an_source *src, const struct an_settings *set, float complex *x,
+static int file_capture(struct an_source *src, const struct an_settings *set, float complex *x, float complex *x2,
                         size_t count, char *err, size_t err_len)
 {
     const size_t set_bytes = (size_t)src->nchannels * 2u * (size_t)src->sample_bytes;
+
+    if (x2 && src->nchannels < 2) {
+        snprintf(err, err_len, "the file has one channel: the modes of two channels need RX1 and RX2 (--nchannels 2)");
+        return -1;
+    }
 
     if (count > src->total_sets) {
         snprintf(err, err_len, "the file holds %llu samples, the capture needs %zu: lower the FFT length, the averages or the samples of the measurement",
@@ -412,6 +422,8 @@ static int file_capture(struct an_source *src, const struct an_settings *set, fl
                    set->channel < src->nchannels ? set->channel : 0, x);
     src->capture.t_s   = (double)src->position / set->sample_rate;
     src->capture.clock = AN_CLOCK_SAMPLES;
+    if (x2)
+        raw_to_complex(src->raw, count, src->sample_bytes, src->nbits, 2 * src->nchannels, set->channel ? 0 : 1, x2);
     src->position += count;
     return 0;
 }
@@ -421,9 +433,15 @@ static int file_capture(struct an_source *src, const struct an_settings *set, fl
 int source_capture(struct an_source *src, const struct an_settings *set, float complex *x,
                    size_t count, char *err, size_t err_len)
 {
+    return source_capture_two(src, set, x, NULL, count, err, err_len);
+}
+
+int source_capture_two(struct an_source *src, const struct an_settings *set, float complex *x, float complex *x2,
+                       size_t count, char *err, size_t err_len)
+{
     err[0] = '\0';
-    return src->live ? live_capture(src, set, x, count, err, err_len)
-                     : file_capture(src, set, x, count, err, err_len);
+    return src->live ? live_capture(src, set, x, x2, count, err, err_len)
+                     : file_capture(src, set, x, x2, count, err, err_len);
 }
 
 void source_close(struct an_source *src)
