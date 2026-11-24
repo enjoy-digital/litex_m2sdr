@@ -326,7 +326,7 @@ struct tetra_signal {
 };
 
 #define TETRA_AMP     0.2
-#define TETRA_SLOTS   24
+#define TETRA_SLOTS   80
 
 static void make_tetra(float complex *x, size_t count, const struct tetra_signal *sig, uint8_t *kind, uint8_t *train)
 {
@@ -779,8 +779,131 @@ static void test_nr(void)
     free(res);
 }
 
-int main(void)
+/* Capture files for the reports of m2sdr_analyzer */
+/*--------------------------------------------------*/
+
+/* SC16 of 12 bits, the same samples on both channels. */
+static int write_sc16(const char *path, const float complex *x, size_t count)
 {
+    FILE *f = fopen(path, "wb");
+    size_t i;
+
+    if (!f)
+        return 1;
+    for (i = 0; i < count; i++) {
+        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
+                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
+
+        if (fwrite(v, sizeof(v), 1, f) != 1) {
+            fclose(f);
+            return 1;
+        }
+    }
+    return fclose(f) == 0 ? 0 : 1;
+}
+
+static const struct nr_signal file_nr = { 30e3, 15.36e6, 500, 8, 8, -90, 777.0, 25.0, 0.3, 400, 3.0, 0.0, -99.0 };
+static const struct gsm_signal file_gsm = { 1.92e6, 45, 1000, 300.0, 1234.0, 30.0 };
+static const struct tetra_signal file_tetra = { 1.0e6, 37.7, -2600.0, 25.0, 17, 1, 1, 0,
+                                                { 1, 23, 0, 1, 0, 1, 208, 12345, 1, 2, 0 } };
+
+static int write_file(const char *path, int which)
+{
+    const double fs = which == 0 ? file_nr.fs : which == 1 ? file_gsm.fs : file_tetra.fs;
+    const size_t count = (size_t)((which == 0 ? 0.025 : which == 1 ? 0.1 : 1.15) * fs);
+    float complex *x = malloc(count * sizeof(*x));
+    uint8_t kind[TETRA_SLOTS], train[TETRA_SLOTS];
+    int rc;
+
+    if (!x)
+        return 1;
+    if (which == 0)
+        make_nr(x, count, &file_nr);
+    else if (which == 1)
+        make_gsm(x, count, &file_gsm);
+    else
+        make_tetra(x, count, &file_tetra, kind, train);
+    rc = write_sc16(path, x, count);
+    free(x);
+    return rc;
+}
+
+static double json_number(const char *json, const char *section, const char *name)
+{
+    char key[64];
+    const char *p;
+
+    snprintf(key, sizeof(key), "\"%s\"", section);
+    p = strstr(json, key);
+    if (!p)
+        return NAN;
+    snprintf(key, sizeof(key), "\"%s\":", name);
+    p = strstr(p, key);
+    return p ? strtod(p + strlen(key), NULL) : NAN;
+}
+
+static int check_file(const char *path, int which)
+{
+    static char json[1 << 17];
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f) {
+        printf("test_m2sdr_analysis_cellular: cannot open %s\n", path);
+        return 1;
+    }
+    n = fread(json, 1, sizeof(json) - 1, f);
+    fclose(f);
+    json[n] = '\0';
+    if (which == 0) {
+        printf("5G NR report of m2sdr_analyzer:\n");
+        CHECK("found", strstr(json, "\"nr\": {\n    \"found\": true") != NULL);
+        CHECK_NEAR("PCI", json_number(json, "nr", "pci"), file_nr.pci, 0.0);
+        CHECK_NEAR("spacing (Hz)", json_number(json, "nr", "scs_hz"), file_nr.scs, 0.0);
+        CHECK("SSBs", json_number(json, "nr", "ssb_count") >= 8);
+        CHECK_NEAR("carrier offset (Hz)", json_number(json, "nr", "carrier_offset_hz"),
+                   file_nr.ssref_bin * file_nr.scs + file_nr.freq_hz, 150.0);
+        CHECK("SS-SINR over 20 dB", json_number(json, "nr", "sinr_db") > 20.0);
+    } else if (which == 1) {
+        printf("GSM report of m2sdr_analyzer:\n");
+        CHECK("FCCH and SCH", strstr(json, "\"fcch\": true") && strstr(json, "\"found\": true"));
+        CHECK_NEAR("ARFCN", json_number(json, "gsm", "arfcn"), 62, 0.0);
+        CHECK_NEAR("BSIC", json_number(json, "gsm", "bsic"), file_gsm.bsic, 0.0);
+        CHECK_NEAR("frame number", json_number(json, "gsm", "fn"), 1010, 0.0);
+        CHECK_NEAR("carrier offset (Hz)", json_number(json, "gsm", "carrier_offset_hz"), file_gsm.freq_hz, 10.0);
+        CHECK("phase error under 3 deg", json_number(json, "gsm", "phase_error_rms_deg") < 3.0);
+    } else {
+        printf("TETRA report of m2sdr_analyzer:\n");
+        CHECK("slots and SYNC PDU", strstr(json, "\"found\": true") && strstr(json, "\"sync\": true"));
+        CHECK_NEAR("colour code", json_number(json, "tetra", "colour_code"), file_tetra.sync.colour_code, 0.0);
+        CHECK_NEAR("MCC", json_number(json, "tetra", "mcc"), file_tetra.sync.mcc, 0.0);
+        CHECK_NEAR("MNC", json_number(json, "tetra", "mnc"), file_tetra.sync.mnc, 0.0);
+        CHECK_NEAR("carrier offset (Hz)", json_number(json, "tetra", "carrier_offset_hz"), file_tetra.freq_hz, 1.0);
+        CHECK("MER over 22 dB", json_number(json, "tetra", "mer_db") > 22.0);
+    }
+    if (failures) {
+        printf("test_m2sdr_analysis_cellular: %d FAILED\n", failures);
+        return 1;
+    }
+    printf("test_m2sdr_analysis_cellular: report checked\n");
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    static const char *const modes[3] = { "nr", "gsm", "tetra" };
+    int m;
+
+    for (m = 0; m < 3 && argc == 3; m++) {
+        char opt[32];
+
+        snprintf(opt, sizeof(opt), "--write-%s", modes[m]);
+        if (strcmp(argv[1], opt) == 0)
+            return write_file(argv[2], m);
+        snprintf(opt, sizeof(opt), "--check-%s", modes[m]);
+        if (strcmp(argv[1], opt) == 0)
+            return check_file(argv[2], m);
+    }
     test_nr();
     test_gsm();
     test_tetra();
