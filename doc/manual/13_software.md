@@ -786,6 +786,9 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | Phase noise | L(f) of the strongest carrier, its amplitude noise, the floor of the board |
 | Modulation | Constellation, eye diagrams and error of each symbol of a PSK or QAM signal |
 | LTE | Cell, resource grid, data blocks and constellations of an LTE downlink carrier |
+| 5G NR | SSBs of the capture (PCI, index, SS-RSRP, SS-SINR, EVM), grid of the strongest, PBCH and DM-RS points |
+| GSM | FCCH and SCH of a BCCH carrier: BSIC, frame number, phase error of each bit, carrier offset |
+| TETRA | Slots of a base station carrier (burst, power, MER), constellation, SYNC PDU |
 | DVB-T | MER and its trace, constellation, channel, MER per carrier and echoes of a DVB-T multiplex |
 | DVB-T2 | Pilot and data MER and their trace, P1, mode and pilot pattern, constellation (rotated or not), channel and echoes of a DVB-T2 multiplex |
 | DAB | MER and its trace, SNR, constellation, channel, MER per carrier and echoes of a DAB/DAB+ ensemble |
@@ -957,6 +960,90 @@ report gives the blocks read in each way.
   reference signals and of the PBCH remain.
 
 Not supported: TDD, the extended cyclic prefix, a PBCH on four antenna ports, the uplink.
+
+#### 5G NR synchronisation signal blocks {#sw-analyzer-nr}
+
+The 5G NR view, and `--nr` with `--report` (and `--watch`), find the synchronisation signal
+blocks (SSB) of a capture, wherever they are in time and frequency: no GSCN raster, the capture
+is tuned near the SSREF of a cell. A capture is 21 ms: the SSBs of a cell repeat every 20 ms.
+
+```sh
+m2sdr_analyzer --freq 3549.12e6 --view nr
+m2sdr_analyzer --freq 3549.12e6 --report --nr
+m2sdr_analyzer --freq 1842.65e6 --sample-rate 7.68e6 --report --nr --nr-scs 15000
+```
+
+The sample rate is the subcarrier spacing of the SSB (15 or 30 kHz) times a power of two:
+15.36 MSPS by default, 7.68 or 30.72 MSPS too. Without `--nr-scs`, 30 kHz is tried first (the
+n77/n78 TDD bands), then 15 kHz; in the view, once SSBs are found on a tuning, the next captures
+search their spacing only. L_max is 4 up to 3 GHz and 8 above: it sets how the index reads from
+the PBCH DM-RS (with 4, the half frame bit too).
+
+| Figure | From |
+|---------------------------|---------------------------------------------------------------------|
+| Candidates | The three PSS slid over the spectra of windows a quarter of a symbol apart, on the products of neighbouring subcarriers |
+| Timing, carrier offset | The PSS against the samples; the halves of the PSS and of the SSS |
+| PCI | N_ID_2 from the PSS, N_ID_1 from the SSS against the channel of the PSS |
+| SSB index | The 8 PBCH DM-RS sequences of the cell |
+| SS-RSRP, SS-SINR | SSS elements against the mean of their neighbours (TS 38.215) |
+| DM-RS EVM, PBCH EVM | DM-RS against the channel around them; PBCH data equalised with the DM-RS against QPSK |
+
+Each symbol gets its channel from its own reference signals, so the phase the upconversion
+gives each symbol (TS 38.211 5.4) does not matter. The MIB is not decoded (polar code): the
+system frame number and the place of the SSB on the carrier are not known. Two cells with the
+same N_ID_2 at the same time and frequency read as the stronger one. One search takes about
+60 ms on 21 ms at 7.68 MSPS for one spacing, 110 ms at 15.36 MSPS.
+
+#### GSM {#sw-analyzer-gsm}
+
+The GSM view, and `--gsm` with `--report` (and `--watch`), read a BCCH carrier (C0): its
+frequency correction bursts (FCCH) and the synchronisation bursts (SCH) one frame after them.
+A capture is 60 ms, an FCCH and its SCH wherever it starts. The scan of a band is left to the
+caller (or to [m2sdr_cal](#sw-cal)); the view tunes to an ARFCN of GSM 850, E-GSM 900, DCS 1800
+or PCS 1900.
+
+```sh
+m2sdr_analyzer --freq 947.4e6 --view gsm
+m2sdr_analyzer --freq 947.4e6 --report --gsm
+```
+
+The sample rate is 0.5 to 8 MSPS, 1.92 MSPS by default; the capture is filtered to 170 kHz and
+resampled to 4 samples a bit.
+
+| Figure | From |
+|---------------------------|---------------------------------------------------------------------|
+| FCCH, carrier offset | The tone 67.7 kHz above the carrier: the square of the turn of the phase over a bit, then the burst against itself 6 bits earlier |
+| SCH timing | Its 64 bits of training |
+| BSIC, frame number | SCH demodulated on the main Laurent pulse of the GMSK, Viterbi, parity (TS 45.003) |
+| Phase error, EVM | The burst against the GMSK of its bits through the same filter, a line (frequency, phase) fitted, as TS 45.005 |
+
+A GSM transmitter is within 5 degrees RMS and 20 degrees peak. There is no equaliser: with
+multipath the SCH decodes worse and the phase error includes the channel.
+
+#### TETRA {#sw-analyzer-tetra}
+
+The TETRA view, and `--tetra` with `--report` (and `--watch`), read a base station carrier
+(EN 300 392-2, continuous downlink). A capture is 1.1 s: the synchronisation burst, with the
+BSCH, comes once a multiframe (1.02 s).
+
+```sh
+m2sdr_analyzer --freq 390.0125e6 --view tetra
+m2sdr_analyzer --freq 390.0125e6 --report --tetra
+```
+
+The sample rate is 144 kSPS to 4 MSPS, 1 MSPS by default; the capture is resampled to 8 samples
+a symbol, through the root raised cosine (0.35).
+
+| Figure | From |
+|---------------------------|---------------------------------------------------------------------|
+| Slots | The training sequence across every slot boundary |
+| Carrier offset | That sequence, then the fourth power of the symbol to symbol turns and the slope of the phase over each slot |
+| Burst of a slot | Normal (training 1 or 2) or synchronisation (frequency correction and synchronisation training) |
+| MER, EVM | Symbols against the pi/4-DQPSK points, a phase every 51 symbols |
+| SYNC PDU | BSCH: descrambled, deinterleaved, rate 2/3 Viterbi, CRC; colour code, TN, FN, MN, MCC, MNC |
+
+The view keeps the SYNC PDU of the last capture that had one. The AACH, the BNCH and the
+traffic are not decoded.
 
 #### DVB-T reception {#sw-analyzer-dvbt}
 
