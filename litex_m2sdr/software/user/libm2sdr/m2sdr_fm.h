@@ -85,6 +85,8 @@ struct m2sdr_fm_rds_info {
     bool     ct_valid;     /* A clock time group was received. */
     int64_t  ct_unix_time; /* UTC, in seconds since 1970. */
     int      ct_offset;    /* Local time minus UTC, in half hours. */
+    uint64_t type_groups[32];  /* Groups counted in `groups`, by type: 2 * type, plus 1 for
+                                * version B (type_groups[0] is 0A, [5] is 2B). */
 };
 
 /* Blocks: 16 information bits, then a 10-bit checkword (generator polynomial
@@ -105,6 +107,27 @@ int m2sdr_fm_rds_decode_block(uint32_t block, uint16_t *data);
 
 /* Name of a Programme Type in the RDS table (Europe); "" above 31. */
 const char *m2sdr_fm_rds_pty_name(unsigned pty);
+
+/* RDS decoder on its own, fed with the multiplex (the discriminator output, any scale), at
+ * mpx_rate from M2SDR_FM_MIN_RATE_RDS. The demodulator below has one inside. NULL on a bad
+ * rate or an allocation failure. */
+struct m2sdr_fm_rds_rx;
+
+struct m2sdr_fm_rds_rx *m2sdr_fm_rds_rx_new(double mpx_rate);
+void m2sdr_fm_rds_rx_free(struct m2sdr_fm_rds_rx *d);
+void m2sdr_fm_rds_rx_process(struct m2sdr_fm_rds_rx *d, const float *mpx, size_t count);
+void m2sdr_fm_rds_rx_info(const struct m2sdr_fm_rds_rx *d, struct m2sdr_fm_rds_info *info);
+
+/* Before a multiplex that does not follow the last one (another capture): the loops and the
+ * sync start again, what was decoded and the counts stay. */
+void m2sdr_fm_rds_rx_restart(struct m2sdr_fm_rds_rx *d);
+
+/* Records the bit decisions from now on, while in sync: up to `max` points (real then
+ * imaginary part) of the matched filter output at the middle of each bit, over the RMS of
+ * that output, the data on the real axis. NULL stops it. The decoder writes into `points`
+ * until then. */
+void m2sdr_fm_rds_rx_points(struct m2sdr_fm_rds_rx *d, float *points, size_t max);
+size_t m2sdr_fm_rds_rx_point_count(const struct m2sdr_fm_rds_rx *d);
 
 struct m2sdr_fm_config {
     double   sample_rate;  /* I/Q sample rate, in Hz. */

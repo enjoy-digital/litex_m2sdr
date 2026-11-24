@@ -403,7 +403,7 @@ static inline float fm_rds_tx_sample(struct fm_rds_tx *e)
 #define FM_RDS_SYNC_LOSS         12  /* Wrong blocks in a row that end it. */
 #define FM_RDS_HIST              32  /* Samples kept for the bit clock: over half a bit. */
 
-struct fm_rds_rx {
+struct m2sdr_fm_rds_rx {
     /* Subcarrier removed with a free 57 kHz phasor, then decimation. */
     double   nco_c, nco_s, step_c, step_s;
     float   *dec_taps;
@@ -422,8 +422,12 @@ struct fm_rds_rx {
     /* Bit clock. */
     double   tau, tau_step;
     unsigned quarter;                    /* Samples in a quarter of a bit. */
-    float    hist_re[FM_RDS_HIST], hist_mag[FM_RDS_HIST];
+    float    hist_re[FM_RDS_HIST], hist_im[FM_RDS_HIST], hist_mag[FM_RDS_HIST];
     unsigned hist_pos;
+
+    /* Optional record of the bit decisions, see m2sdr_fm_rds_rx_points(). */
+    float   *points;
+    size_t   points_max, points_count;
 
     /* Bits, blocks and groups. */
     unsigned prev_bit;
@@ -446,7 +450,7 @@ struct fm_rds_rx {
     struct m2sdr_fm_rds_info info;
 };
 
-static void fm_rds_rx_free(struct fm_rds_rx *d)
+static void fm_rds_rx_free(struct m2sdr_fm_rds_rx *d)
 {
     if (!d)
         return;
@@ -459,9 +463,9 @@ static void fm_rds_rx_free(struct fm_rds_rx *d)
     free(d);
 }
 
-static struct fm_rds_rx *fm_rds_rx_new(double mpx_rate)
+static struct m2sdr_fm_rds_rx *fm_rds_rx_new(double mpx_rate)
 {
-    struct fm_rds_rx *d = calloc(1, sizeof(*d));
+    struct m2sdr_fm_rds_rx *d = calloc(1, sizeof(*d));
     double rate, spb, wn, energy = 0.0;
     unsigned i;
 
@@ -527,7 +531,7 @@ static void fm_rds_rx_chars(char *dst, const uint16_t *words, unsigned count)
 
 /* Text: `width` characters per segment. It is complete with all its segments, or with those
  * up to the one that holds the carriage return. */
-static void fm_rds_rx_text(struct fm_rds_rx *d, unsigned seg, unsigned width, int flag,
+static void fm_rds_rx_text(struct m2sdr_fm_rds_rx *d, unsigned seg, unsigned width, int flag,
                            const uint16_t *words)
 {
     const unsigned len = 16 * width;
@@ -564,7 +568,7 @@ static void fm_rds_rx_text(struct fm_rds_rx *d, unsigned seg, unsigned width, in
 }
 
 /* A group with its four blocks right. */
-static void fm_rds_rx_group(struct fm_rds_rx *d)
+static void fm_rds_rx_group(struct m2sdr_fm_rds_rx *d)
 {
     struct m2sdr_fm_rds_info *info = &d->info;
     const uint16_t *b = d->data;
@@ -573,6 +577,7 @@ static void fm_rds_rx_group(struct fm_rds_rx *d)
     const bool     tp   = (b[1] >> 10) & 1;
 
     info->groups++;
+    info->type_groups[2 * type + (d->version_b ? 1 : 0)]++;
     if (!info->pi_valid || info->pi != b[0]) {
         /* Another station: what was received so far is not its name nor its text. */
         info->pi       = b[0];
@@ -631,7 +636,7 @@ static void fm_rds_rx_group(struct fm_rds_rx *d)
 /* One received bit. Without sync, every bit is tried as the end of a block: two offset words
  * at the distance and in the order of the blocks give the sync. With it, a block ends every
  * 26 bits, and a run of wrong checkwords ends the sync. */
-static void fm_rds_rx_bit(struct fm_rds_rx *d, unsigned bit)
+static void fm_rds_rx_bit(struct m2sdr_fm_rds_rx *d, unsigned bit)
 {
     static const unsigned char block_of[5] = { 0, 1, 2, 2, 3 };
     uint16_t data = 0;
@@ -692,7 +697,7 @@ static void fm_rds_rx_bit(struct fm_rds_rx *d, unsigned bit)
 }
 
 /* One sample of the multiplex. */
-static inline void fm_rds_rx_sample(struct fm_rds_rx *d, float mpx)
+static inline void fm_rds_rx_sample(struct m2sdr_fm_rds_rx *d, float mpx)
 {
     const double c = d->nco_c, s = d->nco_s;
     const double norm = 1.5 - 0.5 * (c * c + s * s);
@@ -742,12 +747,14 @@ static inline void fm_rds_rx_sample(struct fm_rds_rx *d, float mpx)
      * the clock. */
     d->hist_pos = (d->hist_pos + 1) & mask;
     d->hist_re[d->hist_pos]  = vr;
+    d->hist_im[d->hist_pos]  = vi;
     d->hist_mag[d->hist_pos] = sqrtf(vr * vr + vi * vi);
     d->tau += d->tau_step;
     if (d->tau >= 1.0) {
         const float late   = d->hist_mag[d->hist_pos];
         const float early  = d->hist_mag[(d->hist_pos - 2 * d->quarter) & mask];
-        const unsigned bit = d->hist_re[(d->hist_pos - d->quarter) & mask] > 0.0f;
+        const unsigned at  = (d->hist_pos - d->quarter) & mask;
+        const unsigned bit = d->hist_re[at] > 0.0f;
 
         err = (late - early) / sqrtf(level);
         if (err > 1.0f)
@@ -755,9 +762,79 @@ static inline void fm_rds_rx_sample(struct fm_rds_rx *d, float mpx)
         else if (err < -1.0f)
             err = -1.0f;
         d->tau -= 1.0 + FM_RDS_TIMING_GAIN * err;
+        if (d->points && d->info.synced && d->points_count < d->points_max) {
+            const float scale = 1.0f / sqrtf(level);
+
+            d->points[2 * d->points_count + 0] = d->hist_re[at] * scale;
+            d->points[2 * d->points_count + 1] = d->hist_im[at] * scale;
+            d->points_count++;
+        }
         fm_rds_rx_bit(d, bit ^ d->prev_bit);
         d->prev_bit = bit;
     }
+}
+
+struct m2sdr_fm_rds_rx *m2sdr_fm_rds_rx_new(double mpx_rate)
+{
+    if (!(mpx_rate >= M2SDR_FM_MIN_RATE_RDS && mpx_rate <= 1e9))
+        return NULL;
+    return fm_rds_rx_new(mpx_rate);
+}
+
+void m2sdr_fm_rds_rx_free(struct m2sdr_fm_rds_rx *d)
+{
+    fm_rds_rx_free(d);
+}
+
+void m2sdr_fm_rds_rx_process(struct m2sdr_fm_rds_rx *d, const float *mpx, size_t count)
+{
+    size_t n;
+
+    for (n = 0; n < count; n++)
+        fm_rds_rx_sample(d, mpx[n]);
+}
+
+void m2sdr_fm_rds_rx_info(const struct m2sdr_fm_rds_rx *d, struct m2sdr_fm_rds_info *info)
+{
+    *info = d->info;
+}
+
+void m2sdr_fm_rds_rx_restart(struct m2sdr_fm_rds_rx *d)
+{
+    /* Filters, loops and bit clock from zero, as for a new decoder; the decoded fields, the
+     * counts and the name and text being received stay. */
+    memset(d->dec_i.hist, 0, 2 * d->dec_count * sizeof(*d->dec_i.hist));
+    memset(d->dec_q.hist, 0, 2 * d->dec_count * sizeof(*d->dec_q.hist));
+    memset(d->mf_i.hist, 0, 2 * d->mf_count * sizeof(*d->mf_i.hist));
+    memset(d->mf_q.hist, 0, 2 * d->mf_count * sizeof(*d->mf_q.hist));
+    d->dec_i.pos  = d->dec_q.pos = d->mf_i.pos = d->mf_q.pos = 0;
+    d->nco_c      = 1.0;
+    d->nco_s      = 0.0;
+    d->dec_phase  = 0;
+    d->psi        = d->freq = 0.0;
+    d->power      = 0.0f;
+    d->tau        = 0.0;
+    memset(d->hist_re, 0, sizeof(d->hist_re));
+    memset(d->hist_im, 0, sizeof(d->hist_im));
+    memset(d->hist_mag, 0, sizeof(d->hist_mag));
+    d->hist_pos   = 0;
+    d->prev_bit   = 0;
+    d->reg        = 0;
+    d->have_prev  = false;
+    d->group_good = false;
+    d->info.synced = false;
+}
+
+void m2sdr_fm_rds_rx_points(struct m2sdr_fm_rds_rx *d, float *points, size_t max)
+{
+    d->points       = points;
+    d->points_max   = points ? max : 0;
+    d->points_count = 0;
+}
+
+size_t m2sdr_fm_rds_rx_point_count(const struct m2sdr_fm_rds_rx *d)
+{
+    return d->points_count;
 }
 
 /* Modulator */
@@ -1082,7 +1159,7 @@ struct m2sdr_fm_rx {
     float    dc_r, dc_x1[2], dc_y1[2];
     float    audio_gain;         /* Back to full scale: the audio shares the deviation. */
 
-    struct fm_rds_rx *rds;
+    struct m2sdr_fm_rds_rx *rds;
 };
 
 void m2sdr_fm_rx_free(struct m2sdr_fm_rx *rx)

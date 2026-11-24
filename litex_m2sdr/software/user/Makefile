@@ -146,6 +146,7 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_analysis_dvbt.o \
 	libm2sdr/m2sdr_analysis_dab.o \
 	libm2sdr/m2sdr_analysis_dvbt2.o \
+	libm2sdr/m2sdr_analysis_fm.o \
 	libm2sdr/m2sdr_hal_litepcie.o \
 	libm2sdr/m2sdr_hal_liteeth.o \
 	liblitepcie/litepcie_dma.o \
@@ -190,6 +191,7 @@ M2SDR_IMGUI_OBJS := $(M2SDR_IMGUI_SRCS:.cpp=.o)
 all: $(PROGS)
 TEST_PROGS += tests/test_m2sdr_eth_flow
 TEST_PROGS += tests/test_m2sdr_analysis_dvbt2
+TEST_PROGS += tests/test_m2sdr_analysis_fm
 
 core-tools: $(CORE_BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp test-analyzer test-fm
@@ -204,6 +206,7 @@ test-libm2sdr: $(TEST_PROGS)
 	./tests/test_m2sdr_fm
 	./tests/test_m2sdr_analysis
 	./tests/test_m2sdr_analysis_dvbt2
+	./tests/test_m2sdr_analysis_fm
 
 # Report mode of m2sdr_analyzer on capture files of known content: the spectrum here, and one
 # target per mode in its analyzer/mode_xxx.mk, declared there with its own recipe as
@@ -376,6 +379,8 @@ tests/test_m2sdr_analysis: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis.o | $(BU
 tests/test_m2sdr_analysis_dvbt2: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_dvbt2.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_dvbt2.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
+tests/test_m2sdr_analysis_fm: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis_fm.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis_fm.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_cal.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
@@ -521,6 +526,7 @@ install_dev: $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 	install -m 644 libm2sdr/m2sdr_cal.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_fm.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_analysis.h $(PREFIX)/include/litex_m2sdr/libm2sdr
+	install -m 644 libm2sdr/m2sdr_analysis_fm.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -d $(PREFIX)/share/litex_m2sdr/examples
 	@for ex in example_sync_rx example_sync_tx example_tone_tx example_rx_n; do \
 		if [ -f ../../doc/libm2sdr/$$ex.c ]; then \
