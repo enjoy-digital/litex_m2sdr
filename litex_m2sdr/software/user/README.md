@@ -182,6 +182,12 @@ m2sdr_util [options] cmd [args...]
   Dump AD9361 register space for debugging.
 - **ad9361-port-dump**, **ad9361-ensm-dump**
   Dump the AD9361 port configuration or ENSM state.
+- **ad9361-tx-att `[DB [CH]]`**, **ad9361-rx-gain `[DB [CH [LO_MHZ]]]`**
+  Show or change the TX attenuation or the manual RX gain at runtime, without
+  re-initializing the RFIC, eg while a SoapySDR application is streaming (to
+  emulate a fading or a lost link). CH is 1 or 2 (default both), LO_MHZ selects
+  the RX gain table band (default 2400). The streaming application keeps its own
+  cached gain values.
 - **flash-write** / **flash-read**
   Write to/read from the on-board SPI Flash. Over Ethernet,
   `M2SDR_FLASH_LEGACY=1` selects the slower register-by-register path and
