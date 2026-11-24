@@ -9,67 +9,18 @@
  *
  */
 
-#include <complex.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
+#define TEST_NAME "test_m2sdr_analysis_cellular"
+#include "test_analysis_helpers.h"
 
 #include "../libm2sdr/m2sdr_analysis_cellular.h"
 #include "../libm2sdr/m2sdr_fft.h"
 
-static int failures;
-
-#define CHECK_NEAR(name, value, expected, tol) do { \
-    const double v_ = (value), e_ = (expected); \
-    const int ok_ = fabs(v_ - e_) <= (tol); \
-    printf("  %-34s %12.4f (expected %10.4f +-%g) %s\n", name, v_, e_, (double)(tol), ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
-#define CHECK(name, cond) do { \
-    const int ok_ = (cond); \
-    printf("  %-34s %s\n", name, ok_ ? "ok" : "FAIL"); \
-    if (!ok_) failures++; \
-} while (0)
-
 /* Signals */
 /*---------*/
-
-static unsigned long long rng_state = 0x2545f4914f6cdd1dull;
-
-static double rng_uniform(void)
-{
-    rng_state ^= rng_state << 13;
-    rng_state ^= rng_state >> 7;
-    rng_state ^= rng_state << 17;
-    return ((double)(rng_state >> 11) + 0.5) / 9007199254740992.0;
-}
 
 static int rng_bit(void)
 {
     return rng_uniform() < 0.5;
-}
-
-/* Complex Gaussian noise of power `power`. */
-static void add_noise(float complex *x, size_t count, double power)
-{
-    size_t i;
-
-    for (i = 0; i < count; i++) {
-        const double r = sqrt(-power * log(rng_uniform()));
-        const double a = 2.0 * M_PI * rng_uniform();
-        x[i] += (float)(r * cos(a)) + I * (float)(r * sin(a));
-    }
-}
-
-static double now_s(void)
-{
-    struct timespec ts;
-
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + 1e-9 * (double)ts.tv_nsec;
 }
 
 /* GSM */
@@ -308,17 +259,6 @@ static void test_gsm(void)
 
 /* TETRA */
 /*-------*/
-
-static double test_rrc(double t, double alpha)
-{
-    if (fabs(t) < 1e-9)
-        return 1.0 - alpha + 4.0 * alpha / M_PI;
-    if (fabs(fabs(t) - 1.0 / (4.0 * alpha)) < 1e-9)
-        return alpha / sqrt(2.0) * ((1.0 + 2.0 / M_PI) * sin(M_PI / (4.0 * alpha)) +
-                                    (1.0 - 2.0 / M_PI) * cos(M_PI / (4.0 * alpha)));
-    return (sin(M_PI * t * (1.0 - alpha)) + 4.0 * alpha * t * cos(M_PI * t * (1.0 + alpha))) /
-           (M_PI * t * (1.0 - 16.0 * alpha * alpha * t * t));
-}
 
 /* Fields of a SYNC PDU (EN 300 392-2 21.4.4.2 and 18.4.2.1). */
 struct tetra_sync {
@@ -825,26 +765,6 @@ static void test_nr(void)
 /* Capture files for the reports of m2sdr_analyzer */
 /*--------------------------------------------------*/
 
-/* SC16 of 12 bits, the same samples on both channels. */
-static int write_sc16(const char *path, const float complex *x, size_t count)
-{
-    FILE *f = fopen(path, "wb");
-    size_t i;
-
-    if (!f)
-        return 1;
-    for (i = 0; i < count; i++) {
-        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
-                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
-
-        if (fwrite(v, sizeof(v), 1, f) != 1) {
-            fclose(f);
-            return 1;
-        }
-    }
-    return fclose(f) == 0 ? 0 : 1;
-}
-
 static const struct nr_signal file_nr = { 30e3, 15.36e6, 500, 8, 8, -90, 777.0, 25.0, 0.3, 400, 3.0, 0.0, -99.0 };
 static const struct gsm_signal file_gsm = { 1.92e6, 45, 1000, 300.0, 1234.0, 30.0 };
 static const struct tetra_signal file_tetra = { 1.0e6, 37.7, -2600.0, 25.0, 17, 1, 1, 0,
@@ -866,38 +786,17 @@ static int write_file(const char *path, int which)
         make_gsm(x, count, &file_gsm);
     else
         make_tetra(x, count, &file_tetra, kind, train);
-    rc = write_sc16(path, x, count);
+    rc = write_sc16(path, x, x, count);
     free(x);
     return rc;
 }
 
-static double json_number(const char *json, const char *section, const char *name)
-{
-    char key[64];
-    const char *p;
-
-    snprintf(key, sizeof(key), "\"%s\"", section);
-    p = strstr(json, key);
-    if (!p)
-        return NAN;
-    snprintf(key, sizeof(key), "\"%s\":", name);
-    p = strstr(p, key);
-    return p ? strtod(p + strlen(key), NULL) : NAN;
-}
-
 static int check_file(const char *path, int which)
 {
-    static char json[1 << 17];
-    FILE *f = fopen(path, "rb");
-    size_t n;
+    const char *json = read_report(path);
 
-    if (!f) {
-        printf("test_m2sdr_analysis_cellular: cannot open %s\n", path);
+    if (!json)
         return 1;
-    }
-    n = fread(json, 1, sizeof(json) - 1, f);
-    fclose(f);
-    json[n] = '\0';
     if (which == 0) {
         printf("5G NR report of m2sdr_analyzer:\n");
         CHECK("found", strstr(json, "\"nr\": {\n    \"found\": true") != NULL);
@@ -925,12 +824,7 @@ static int check_file(const char *path, int which)
         CHECK_NEAR("carrier offset (Hz)", json_number(json, "tetra", "carrier_offset_hz"), file_tetra.freq_hz, 1.0);
         CHECK("MER over 22 dB", json_number(json, "tetra", "mer_db") > 22.0);
     }
-    if (failures) {
-        printf("test_m2sdr_analysis_cellular: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis_cellular: report checked\n");
-    return 0;
+    return report_done(NULL);
 }
 
 int main(int argc, char **argv)
@@ -951,10 +845,5 @@ int main(int argc, char **argv)
     test_nr();
     test_gsm();
     test_tetra();
-    if (failures) {
-        printf("test_m2sdr_analysis_cellular: %d FAILED\n", failures);
-        return 1;
-    }
-    printf("test_m2sdr_analysis_cellular: all tests passed\n");
-    return 0;
+    return tests_done();
 }
