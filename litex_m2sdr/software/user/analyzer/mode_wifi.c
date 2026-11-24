@@ -23,6 +23,19 @@
 #define WIFI_SKIP_FULL     10        /* Captures without the data after one too slow to decode. */
 #define WIFI_REPORT_PACKETS 32       /* Packets listed in the reports. */
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct wifi_res {
+    bool   wifi_valid;             /* Measured: the sample rate was 20 MSPS. */
+    struct m2sdr_wifi_result wifi;
+    bool   wifi_no_psdu;           /* The data was not decoded: it took longer than the capture. */
+};
+
+extern const struct an_mode an_mode_wifi;
+#define RES(res) ((struct wifi_res *)an_mode_result(&an_mode_wifi, (res)))
+
 /* Analysis */
 /*----------*/
 
@@ -43,8 +56,8 @@ static void wifi_analyse(const float complex *x, size_t count, const struct an_s
 
     if (count > n)
         count = n;
-    res->wifi_valid   = m2sdr_wifi_analyse(x, count, set->sample_rate, &cfg, &res->wifi) == 0;
-    res->wifi_no_psdu = cfg.no_psdu;
+    RES(res)->wifi_valid   = m2sdr_wifi_analyse(x, count, set->sample_rate, &cfg, &RES(res)->wifi) == 0;
+    RES(res)->wifi_no_psdu = cfg.no_psdu;
     if (wifi_skip > 0)
         wifi_skip--;
     else if (now_ms() - t0 > 1e3 * (double)count / set->sample_rate)
@@ -87,17 +100,17 @@ static void mac_text(const uint8_t *a, char *text, size_t len)
 
 static void wifi_report_text(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_wifi_result *w = &res->wifi;
+    const struct m2sdr_wifi_result *w = &RES(res)->wifi;
     char fmt[32], mac[24];
     int i;
 
     printf("\nWi-Fi:\n");
-    if (!res->wifi_valid) {
+    if (!RES(res)->wifi_valid) {
         printf("  The sample rate must be 20 MSPS.\n");
         return;
     }
     printf("  Packets    : %d, %d with a right L-SIG, %d FCS right%s\n", w->packets, w->signal_ok, w->fcs_ok,
-           res->wifi_no_psdu ? " (data not decoded: it took longer than the capture)" : "");
+           RES(res)->wifi_no_psdu ? " (data not decoded: it took longer than the capture)" : "");
     printf("  Airtime    : %.1f %% from the packets, %.1f %% of 4 us slots 6 dB over the floor\n", 100.0 * w->busy_fraction,
            100.0 * w->energy_busy_fraction);
     printf("  Noise      : %.1f %s in 20 MHz\n", w->noise_dbfs + rep->off, rep->unit);
@@ -126,17 +139,17 @@ static void wifi_report_text(const struct an_result *res, const struct an_report
 
 static void wifi_report_json(const struct an_result *res, const struct an_report *rep)
 {
-    const struct m2sdr_wifi_result *w = &res->wifi;
+    const struct m2sdr_wifi_result *w = &RES(res)->wifi;
     char mac[24], fmt[32];
     int i;
 
     printf("  \"wifi\": {\n");
-    printf("    \"valid\": %s%s\n", res->wifi_valid ? "true" : "false", res->wifi_valid ? "," : "");
-    if (res->wifi_valid) {
+    printf("    \"valid\": %s%s\n", RES(res)->wifi_valid ? "true" : "false", RES(res)->wifi_valid ? "," : "");
+    if (RES(res)->wifi_valid) {
         printf("    \"packets\": %d,\n", w->packets);
         printf("    \"signal_ok\": %d,\n", w->signal_ok);
         printf("    \"fcs_ok\": %d,\n", w->fcs_ok);
-        printf("    \"data_decoded\": %s,\n", res->wifi_no_psdu ? "false" : "true");
+        printf("    \"data_decoded\": %s,\n", RES(res)->wifi_no_psdu ? "false" : "true");
         print_json_number("busy_fraction", w->busy_fraction, false);
         print_json_number("energy_busy_fraction", w->energy_busy_fraction, false);
         print_json_number("noise_db", w->noise_dbfs + rep->off, false);
@@ -173,11 +186,11 @@ static unsigned wifi_watch_lines;
 
 static int wifi_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_wifi_result *w = &res->wifi;
+    const struct m2sdr_wifi_result *w = &RES(res)->wifi;
     const struct m2sdr_wifi_packet *best = NULL;
     int i, beacons = 0;
 
-    if (!res->wifi_valid) {
+    if (!RES(res)->wifi_valid) {
         fprintf(stderr, "The sample rate must be 20 MSPS for Wi-Fi.\n");
         return -1;
     }
@@ -270,10 +283,10 @@ static int wifi_nbusy;
 static void wifi_keep(struct an_ui *ui)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_wifi_result *w = &res->wifi;
+    const struct m2sdr_wifi_result *w = &RES(res)->wifi;
     int i, b;
 
-    if (!res->set.wifi_on || !res->wifi_valid)
+    if (!res->set.wifi_on || !RES(res)->wifi_valid)
         return;
     if (res->set.freq_hz != wifi_nets_freq) {
         wifi_nets_freq = res->set.freq_hz;
@@ -341,7 +354,7 @@ static void draw_wifi_channel(struct an_ui *ui, bool *changed)
 
 static void draw_wifi_tables(const struct an_result *res, float height)
 {
-    const struct m2sdr_wifi_result *w = &res->wifi;
+    const struct m2sdr_wifi_result *w = &RES(res)->wifi;
     const double now = now_ms() / 1e3;
     char text[32];
     int i;
@@ -416,7 +429,7 @@ static void draw_wifi_tables(const struct an_result *res, float height)
 static void draw_wifi(struct an_ui *ui, bool live, bool *changed)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_wifi_result *w = &res->wifi;
+    const struct m2sdr_wifi_result *w = &RES(res)->wifi;
     struct m2sdr_plot plot;
     ImVec2 avail, sq;
     float side;
@@ -427,11 +440,11 @@ static void draw_wifi(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->wifi_valid) {
+    if (!RES(res)->wifi_valid) {
         igTextUnformatted("The sample rate must be 20 MSPS.", NULL);
         return;
     }
-    if (res->wifi_no_psdu)
+    if (RES(res)->wifi_no_psdu)
         igTextColored((ImVec4){ 1.0f, 0.8f, 0.3f, 1.0f },
                       "Data not decoded: the last full analysis took longer than the capture; one in %d is full.",
                       WIFI_SKIP_FULL + 1);
@@ -476,17 +489,17 @@ static void draw_wifi(struct an_ui *ui, bool live, bool *changed)
 static void draw_wifi_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_wifi_result *w = &res->wifi;
+    const struct m2sdr_wifi_result *w = &RES(res)->wifi;
 
     igSeparatorText("Wi-Fi");
-    if (!res->wifi_valid) {
+    if (!RES(res)->wifi_valid) {
         igTextUnformatted("No analysis.", NULL);
         return;
     }
     if (igBeginTable("##wifi", 2, ImGuiTableFlags_SizingStretchProp, (ImVec2){ 0.0f, 0.0f }, 0.0f)) {
         label_value("Packets", "%d", w->packets);
         label_value("L-SIG right", "%d", w->signal_ok);
-        label_value("FCS right", "%d%s", w->fcs_ok, res->wifi_no_psdu ? " (data skipped)" : "");
+        label_value("FCS right", "%d%s", w->fcs_ok, RES(res)->wifi_no_psdu ? " (data skipped)" : "");
         label_value("Airtime", "%.1f %%", 100.0 * w->busy_fraction);
         label_value("Energy airtime", "%.1f %%", 100.0 * w->energy_busy_fraction);
         label_value("Noise", "%.1f dBFS", w->noise_dbfs);
@@ -512,7 +525,8 @@ const struct an_mode an_mode_wifi = {
     .title        = "Wi-Fi",
     .category     = AN_CAT_WIRELESS,
     .on           = offsetof(struct an_settings, wifi_on),
-    .valid        = offsetof(struct an_result, wifi_valid),
+    .result_size  = sizeof(struct wifi_res),
+    .valid        = offsetof(struct wifi_res, wifi_valid),
     .report_rank  = 40,
     .default_rate = M2SDR_WIFI_SAMPLE_RATE,
     .default_freq = 2412e6,

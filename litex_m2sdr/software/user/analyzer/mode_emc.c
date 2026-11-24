@@ -32,6 +32,18 @@
 static const char *const emc_band_names[] = { "auto", "A", "B", "C/D" };
 static const char *const emc_band_keys[]  = { "auto", "a", "b", "cd" };
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct emc_res {
+    bool   emc_valid;              /* Measured: the band fits the sample rate and the capture. */
+    struct m2sdr_emc_result emc;
+};
+
+extern const struct an_mode an_mode_emc;
+#define RES(res) ((struct emc_res *)an_mode_result(&an_mode_emc, (res)))
+
 /* Files of the lines, for the view. */
 static char emc_paths[3][512];
 
@@ -174,7 +186,7 @@ static void emc_analyse(const float complex *x, size_t count, const struct an_se
     }
     while (n * 2 <= count && n * 2 <= emc_samples(set))
         n *= 2;
-    res->emc_valid = m2sdr_emc_analyse(x, n, set->sample_rate, &cfg, &res->emc) == 0;
+    RES(res)->emc_valid = m2sdr_emc_analyse(x, n, set->sample_rate, &cfg, &RES(res)->emc) == 0;
 }
 
 /* Reports */
@@ -207,13 +219,13 @@ static int emc_worst(const struct m2sdr_emc_result *e, int *idx, int max)
 static void emc_report_text(const struct an_result *res, const struct an_report *rep)
 {
     const struct m2sdr_emc_config *cfg = &res->set.emc;
-    const struct m2sdr_emc_result *e = &res->emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
     const char *unit = emc_unit(cfg);
     int idx[EMC_REPORT_WORST], n, i;
 
     (void)rep;
     printf("\nEMC (pre-compliance, CISPR 16-1-1 receiver%s):\n", cfg->offset_db == 0.0 && cfg->nfactor == 0 ? ", uncalibrated" : "");
-    if (!res->emc_valid) {
+    if (!RES(res)->emc_valid) {
         printf("  The band does not fit the capture: its sample rate must be 3 RBW at least, with 8 FFT bins in the RBW.\n");
         return;
     }
@@ -254,13 +266,13 @@ static void emc_report_text(const struct an_result *res, const struct an_report 
 static void emc_report_json(const struct an_result *res, const struct an_report *rep)
 {
     const struct m2sdr_emc_config *cfg = &res->set.emc;
-    const struct m2sdr_emc_result *e = &res->emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
     int c;
 
     (void)rep;
     printf("  \"emc\": {\n");
-    printf("    \"valid\": %s%s\n", res->emc_valid ? "true" : "false", res->emc_valid ? "," : "");
-    if (!res->emc_valid) {
+    printf("    \"valid\": %s%s\n", RES(res)->emc_valid ? "true" : "false", RES(res)->emc_valid ? "," : "");
+    if (!RES(res)->emc_valid) {
         printf("  }");
         return;
     }
@@ -395,11 +407,11 @@ static unsigned emc_watch_lines;
 static int emc_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
     const struct m2sdr_emc_config *cfg = &set->emc;
-    const struct m2sdr_emc_result *e = &res->emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
     double qp = NAN, av = NAN;
     int c;
 
-    if (!res->emc_valid) {
+    if (!RES(res)->emc_valid) {
         fprintf(stderr, "The EMC band does not fit the sample rate.\n");
         return -1;
     }
@@ -471,7 +483,7 @@ static void draw_emc_plot(const struct an_result *res, ImVec2 size)
     static float fx[M2SDR_EMC_MAX_CHANNELS], pk[M2SDR_EMC_MAX_CHANNELS], qp[M2SDR_EMC_MAX_CHANNELS], av[M2SDR_EMC_MAX_CHANNELS];
     static float lq[M2SDR_EMC_MAX_CHANNELS], la[M2SDR_EMC_MAX_CHANNELS];
     const struct m2sdr_emc_config *cfg = &res->set.emc;
-    const struct m2sdr_emc_result *e = &res->emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
     const int n = e->nchannels;
     double top = -300.0, bottom = 300.0;
     struct m2sdr_plot plot;
@@ -529,7 +541,7 @@ static void draw_emc_margins(const struct an_result *res, ImVec2 size)
 {
     static const char *const heads[] = { "MHz", "peak", "QP", "AV", "margin QP", "margin AV" };
     const struct m2sdr_emc_config *cfg = &res->set.emc;
-    const struct m2sdr_emc_result *e = &res->emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
     int idx[64], n, i, c;
 
     if (!e->limits) {
@@ -572,7 +584,7 @@ static void draw_emc(struct an_ui *ui, bool live, bool *changed)
 {
     static const char *const bands[] = { "Auto", "A: 9-150 kHz", "B: 0.15-30 MHz", "C/D: 30-1000 MHz" };
     const struct an_result *res = &ui->res;
-    const struct m2sdr_emc_result *e = &res->emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
     int band = (int)ui->set.emc.band;
     double span_mhz = ui->set.emc_span_hz / 1e6;
     ImVec2 avail;
@@ -602,7 +614,7 @@ static void draw_emc(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->emc_valid) {
+    if (!RES(res)->emc_valid) {
         igTextUnformatted("The band does not fit the capture: the sample rate must be 3 RBW at least.", NULL);
         return;
     }
@@ -625,11 +637,11 @@ static void draw_emc(struct an_ui *ui, bool live, bool *changed)
 static void draw_emc_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_emc_result *e = &res->emc;
+    const struct m2sdr_emc_result *e = &RES(res)->emc;
     const struct m2sdr_emc_config *cfg = &res->set.emc;
 
     igSeparatorText("EMC");
-    if (!res->emc_valid) {
+    if (!RES(res)->emc_valid) {
         igTextUnformatted("Band out of the capture.", NULL);
         return;
     }
@@ -659,7 +671,8 @@ const struct an_mode an_mode_emc = {
     .title        = "EMC",
     .category     = AN_CAT_MONITORING,
     .on           = offsetof(struct an_settings, emc_on),
-    .valid        = offsetof(struct an_result, emc_valid),
+    .result_size  = sizeof(struct emc_res),
+    .valid        = offsetof(struct emc_res, emc_valid),
     .report_rank  = 81,
     .psd_short    = true,
     .samples      = emc_samples,

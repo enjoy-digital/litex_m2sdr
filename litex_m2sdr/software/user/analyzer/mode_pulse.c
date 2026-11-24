@@ -28,6 +28,20 @@ static const char *const pulse_mod_names[] = { "CW", "LFM", "other" };
 static const char *const pulse_mod_keys[]  = { "cw", "lfm", "other" };
 static const char *const pri_keys[]        = { "none", "constant", "stagger", "jitter" };
 
+/* Result */
+/*--------*/
+
+/* The result of the mode: its block of struct an_result, read with RES(). */
+struct pulse_res {
+    bool   pulse_valid;            /* Measured; pulse.found says whether there were pulses. */
+    struct m2sdr_pulse_result pulse;
+    float  pulse_env_db[AN_PULSE_ENV_POINTS];   /* Highest power per point of the capture, dBFS. */
+    double pulse_env_s;            /* Time of the capture over them. */
+};
+
+extern const struct an_mode an_mode_pulse;
+#define RES(res) ((struct pulse_res *)an_mode_result(&an_mode_pulse, (res)))
+
 /* Analysis */
 /*----------*/
 
@@ -50,9 +64,9 @@ static void pulse_analyse(const float complex *x, size_t count, const struct an_
 
     memset(&cfg, 0, sizeof(cfg));
     cfg.threshold_db = set->pulse_threshold_db;
-    res->pulse_valid = m2sdr_pulse_analyse(x, n, set->sample_rate, &cfg, &res->pulse) == 0;
+    RES(res)->pulse_valid = m2sdr_pulse_analyse(x, n, set->sample_rate, &cfg, &RES(res)->pulse) == 0;
     /* Envelope for the view: the highest power of each point, so that no pulse is lost. */
-    res->pulse_env_s = (double)n / set->sample_rate;
+    RES(res)->pulse_env_s = (double)n / set->sample_rate;
     for (p = 0; p < AN_PULSE_ENV_POINTS; p++) {
         const size_t a = p * n / AN_PULSE_ENV_POINTS, b = (p + 1) * n / AN_PULSE_ENV_POINTS;
         float peak = 0.0f;
@@ -63,7 +77,7 @@ static void pulse_analyse(const float complex *x, size_t count, const struct an_
             if (v > peak)
                 peak = v;
         }
-        res->pulse_env_db[p] = 10.0f * log10f(peak + 1e-15f);
+        RES(res)->pulse_env_db[p] = 10.0f * log10f(peak + 1e-15f);
     }
 }
 
@@ -73,13 +87,13 @@ static void pulse_analyse(const float complex *x, size_t count, const struct an_
 static void pulse_report_text(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_pulse_result *p = &res->pulse;
+    const struct m2sdr_pulse_result *p = &RES(res)->pulse;
     const double off = rep->off;
     const char *unit = rep->unit;
     int i, k;
 
     printf("\nPulses:\n");
-    if (!res->pulse_valid) {
+    if (!RES(res)->pulse_valid) {
         printf("  The capture is too short (1024 samples at least).\n");
         return;
     }
@@ -89,7 +103,7 @@ static void pulse_report_text(const struct an_result *res, const struct an_repor
         return;
     }
     printf("  Pulses     : %d in %.1f ms (%d listed), noise floor %.1f %s, threshold %.1f %s\n", p->npulses,
-           1e3 * res->pulse_env_s, p->nlisted, p->noise_dbfs + off, unit, p->threshold_dbfs + off, unit);
+           1e3 * RES(res)->pulse_env_s, p->nlisted, p->noise_dbfs + off, unit, p->threshold_dbfs + off, unit);
     printf("  Width      : %.3f us, rise %.3f us, fall %.3f us\n", 1e6 * p->width_s, 1e6 * p->rise_s, 1e6 * p->fall_s);
     printf("  Peak       : %.1f %s\n", p->peak_dbfs + off, unit);
     printf("  Frequency  : %.6f MHz (%+.1f kHz from the centre), %s", (set->freq_hz + p->freq_hz) / 1e6, p->freq_hz / 1e3,
@@ -131,13 +145,13 @@ static void pulse_report_text(const struct an_result *res, const struct an_repor
 static void pulse_report_json(const struct an_result *res, const struct an_report *rep)
 {
     const struct an_settings *set = &res->set;
-    const struct m2sdr_pulse_result *p = &res->pulse;
+    const struct m2sdr_pulse_result *p = &RES(res)->pulse;
     const double off = rep->off;
-    const bool ok = res->pulse_valid && p->found;
+    const bool ok = RES(res)->pulse_valid && p->found;
     int i;
 
     printf("  \"pulse\": {\n");
-    print_json_number("noise_db", res->pulse_valid ? p->noise_dbfs + off : NAN, false);
+    print_json_number("noise_db", RES(res)->pulse_valid ? p->noise_dbfs + off : NAN, false);
     printf("    \"found\": %s%s\n", ok ? "true" : "false", ok ? "," : "");
     if (!ok) {
         printf("  }");
@@ -230,11 +244,11 @@ static unsigned pulse_watch_lines;
 
 static int pulse_watch_line(const struct an_settings *set, const struct an_result *res, double now, bool json)
 {
-    const struct m2sdr_pulse_result *p = &res->pulse;
-    const bool ok = res->pulse_valid && p->found;
+    const struct m2sdr_pulse_result *p = &RES(res)->pulse;
+    const bool ok = RES(res)->pulse_valid && p->found;
     const bool pri = ok && p->pri_kind != M2SDR_PRI_NONE;
 
-    if (!res->pulse_valid) {
+    if (!RES(res)->pulse_valid) {
         fprintf(stderr, "The capture of the pulses is too short.\n");
         return -1;
     }
@@ -280,36 +294,36 @@ static int pulse_watch_line(const struct an_settings *set, const struct an_resul
 
 static void draw_pulse_envelope(const struct an_result *res, float height)
 {
-    const struct m2sdr_pulse_result *p = &res->pulse;
+    const struct m2sdr_pulse_result *p = &RES(res)->pulse;
     struct m2sdr_plot plot;
     double top = -200.0, bottom;
     char text[160];
     int i;
 
     for (i = 0; i < AN_PULSE_ENV_POINTS; i++)
-        if (res->pulse_env_db[i] > top)
-            top = res->pulse_env_db[i];
+        if (RES(res)->pulse_env_db[i] > top)
+            top = RES(res)->pulse_env_db[i];
     bottom = 10.0 * floor((p->noise_dbfs - 10.0) / 10.0);
     top    = 10.0 * ceil((top + 5.0) / 10.0);
     if (top < bottom + 20.0)
         top = bottom + 20.0;
-    if (!m2sdr_plot_begin(&plot, "##pulseenv", (ImVec2){ 0.0f, height }, 0.0, res->pulse_env_s, M2SDR_PLOT_TIME,
+    if (!m2sdr_plot_begin(&plot, "##pulseenv", (ImVec2){ 0.0f, height }, 0.0, RES(res)->pulse_env_s, M2SDR_PLOT_TIME,
                           bottom, top, "Peak power of the capture, dBFS, with the pulses found"))
         return;
     for (i = 0; i < p->nlisted; i++) {
         const struct m2sdr_pulse_info *q = &p->pulses[i];
         /* Narrow pulses get a pixel at least. */
-        const double px = res->pulse_env_s / (double)(plot.p1.x - plot.p0.x);
+        const double px = RES(res)->pulse_env_s / (double)(plot.p1.x - plot.p0.x);
 
         m2sdr_plot_band(&plot, q->start_s, q->start_s + fmax(q->width_s, px), q->truncated ? 0x30ff8080u : 0x3040ff40u);
     }
-    m2sdr_plot_trace(&plot, res->pulse_env_db, AN_PULSE_ENV_POINTS, 0.0, res->pulse_env_s, 0xff40d0ffu);
+    m2sdr_plot_trace(&plot, RES(res)->pulse_env_db, AN_PULSE_ENV_POINTS, 0.0, RES(res)->pulse_env_s, 0xff40d0ffu);
     m2sdr_plot_hline(&plot, p->threshold_dbfs, 0xc04040ffu);
     m2sdr_plot_hline(&plot, p->noise_dbfs, 0xc0a0a0a0u);
     snprintf(text, sizeof(text), "green: pulses (red: cut by the capture), red line: threshold, grey: noise floor");
     m2sdr_plot_text(&plot, 8.0f, -20.0f, text, 0xffc8c8c8u);
     if (plot.hovered) {
-        m2sdr_plot_format(text, sizeof(text), plot.mouse_x, res->pulse_env_s / 1e4, M2SDR_PLOT_TIME);
+        m2sdr_plot_format(text, sizeof(text), plot.mouse_x, RES(res)->pulse_env_s / 1e4, M2SDR_PLOT_TIME);
         m2sdr_plot_text(&plot, -160.0f, 4.0f, text, 0xffffffffu);
         m2sdr_plot_vline(&plot, plot.mouse_x, 0x40ffffffu);
     }
@@ -421,7 +435,7 @@ static void draw_pulse_table(const struct m2sdr_pulse_result *p, ImVec2 size)
 static void draw_pulse(struct an_ui *ui, bool live, bool *changed)
 {
     const struct an_result *res = &ui->res;
-    const struct m2sdr_pulse_result *p = &res->pulse;
+    const struct m2sdr_pulse_result *p = &RES(res)->pulse;
     double ms = 1e3 * pulse_seconds(&ui->set);
     ImVec2 avail;
 
@@ -440,7 +454,7 @@ static void draw_pulse(struct an_ui *ui, bool live, bool *changed)
         igTextUnformatted("Waiting for a capture.", NULL);
         return;
     }
-    if (!res->pulse_valid) {
+    if (!RES(res)->pulse_valid) {
         igTextUnformatted("The capture is too short.", NULL);
         return;
     }
@@ -460,17 +474,17 @@ static void draw_pulse(struct an_ui *ui, bool live, bool *changed)
 static void draw_pulse_results(struct an_ui *ui)
 {
     const struct an_result *res = ui->shown;
-    const struct m2sdr_pulse_result *p = &res->pulse;
+    const struct m2sdr_pulse_result *p = &RES(res)->pulse;
     char text[128];
     int n = 0, k;
 
     igSeparatorText("Pulses");
-    if (!res->pulse_valid || !p->found) {
+    if (!RES(res)->pulse_valid || !p->found) {
         igTextUnformatted("No pulses.", NULL);
         return;
     }
     if (igBeginTable("##pulse", 2, ImGuiTableFlags_SizingStretchProp, (ImVec2){ 0.0f, 0.0f }, 0.0f)) {
-        label_value("Pulses", "%d in %.1f ms", p->npulses, 1e3 * res->pulse_env_s);
+        label_value("Pulses", "%d in %.1f ms", p->npulses, 1e3 * RES(res)->pulse_env_s);
         label_value("Width", "%.3f us", 1e6 * p->width_s);
         label_value("Rise, fall", "%.3f, %.3f us", 1e6 * p->rise_s, 1e6 * p->fall_s);
         label_value("Peak", "%.1f dBFS", p->peak_dbfs);
@@ -515,8 +529,9 @@ const struct an_mode an_mode_pulse = {
     .title        = "Pulses",
     .category     = AN_CAT_MONITORING,
     .on           = offsetof(struct an_settings, pulse_on),
-    .valid        = offsetof(struct an_result, pulse_valid),
-    .found        = offsetof(struct an_result, pulse.found),
+    .result_size  = sizeof(struct pulse_res),
+    .valid        = offsetof(struct pulse_res, pulse_valid),
+    .found        = offsetof(struct pulse_res, pulse.found),
     .report_rank  = 80,
     .psd_short    = true,
     .samples      = pulse_samples,

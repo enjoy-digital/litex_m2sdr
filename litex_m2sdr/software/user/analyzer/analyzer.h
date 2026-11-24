@@ -319,20 +319,6 @@ struct an_result {
     double obw_lo_hz, obw_hi_hz;
     bool   obw_valid;
     double noise_db_hz;
-    struct m2sdr_pulse_result pulse;
-    bool   pulse_valid;            /* Measured; pulse.found says whether there were pulses. */
-    float  pulse_env_db[AN_PULSE_ENV_POINTS];   /* Highest power per point of the capture, dBFS. */
-    double pulse_env_s;            /* Time of the capture over them. */
-    struct m2sdr_emc_result emc;
-    bool   emc_valid;              /* Measured: the band fits the sample rate and the capture. */
-    struct m2sdr_wifi_result wifi;
-    bool   wifi_valid;             /* Measured: the sample rate was 20 MSPS. */
-    bool   wifi_no_psdu;           /* The data was not decoded: it took longer than the capture. */
-    struct m2sdr_adsb_result adsb;
-    struct m2sdr_adsb_state adsb_state;   /* Aircraft of the captures so far. */
-    bool   adsb_valid;             /* Measured: the sample rate was 2 MSPS or more. */
-    struct m2sdr_lora_result lora;
-    bool   lora_valid;             /* Measured: a LoRa bandwidth divides the sample rate by a power of two. */
     struct an_capture_time capture;  /* Set from the source before the analysis. */
     /* Stability of a carrier: this capture, and the series of the captures of one tuning. */
     struct m2sdr_carrier_result adev;
