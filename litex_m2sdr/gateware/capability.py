@@ -148,13 +148,13 @@ class Capability(LiteXModule):
 
         # Board Info.
         # -----------
-        variant_map   = {"m2": 0, "baseboard": 1}
+        variant_map   = {"m2": 0, "baseboard": 1, "rpi5hat": 2}
         variant_value = variant_map.get(variant, 0)
         self._board_info = CSRStatus(32, fields=[
             CSRField("variant",  size=2, offset=0, reset=variant_value, values=[
                 ("``0b00``", "M.2"),
                 ("``0b01``", "Baseboard"),
-                ("``0b10``", "Reserved"),
+                ("``0b10``", "RPI5Hat"),
                 ("``0b11``", "Reserved"),
             ], description="Board variant."),
             CSRField("jtagbone", size=1, offset=2, reset=int(jtagbone), description="JTAGBone enabled."),
