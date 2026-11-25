@@ -2139,6 +2139,23 @@ int SoapyLiteXM2SDR::writeStream(
     const size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
     const bool forceFlush = (flags & (SOAPY_SDR_END_BURST | SOAPY_SDR_ONE_PACKET)) != 0;
 
+    /* Time of the next sample of the hardware timed stream. It is counted in samples from the last time given
+     * by the application. Adding the duration of each write, rounded to the nanosecond, drifts: a write of 2044
+     * samples at 11.52 MSPS lasts 177430.556 ns, counted as 177431, which is +2.5 ppm. An application that stamps
+     * only the first write of a burst (UHD) then had this time ahead by several microseconds per second; after a
+     * few minutes the drift check found the stream "early" by its tolerance and stamped it again with that
+     * time: the stream jumped by the error accumulated (more than half a millisecond). */
+    auto hwNextSet = [this](const long long time_ns) {
+        _tx_stream.hw_next_base_ns = time_ns;
+        _tx_stream.hw_next_samples = 0;
+        _tx_stream.hw_next_ns      = time_ns;
+    };
+    auto hwNextAdvance = [this](const long long samples) {
+        _tx_stream.hw_next_samples += samples;
+        _tx_stream.hw_next_ns = _tx_stream.hw_next_base_ns +
+            samples_to_ns(_tx_stream.samplerate, _tx_stream.hw_next_samples);
+    };
+
     /* Initialize/rebuild the software timeline before interpreting timed writes. */
     if (_tx_stream.timed_tx_enabled && _tx_stream.samplerate > 0.0) {
         refreshTimedTxDefaults();
@@ -2217,8 +2234,7 @@ int SoapyLiteXM2SDR::writeStream(
                             _tx_stream.hw_check_ref_ns    = estimate_ns;
                         }
                     } else if (estimate_ns < calib_early_ns) {
-                        _tx_stream.hw_next_ns += samples_to_ns(_tx_stream.samplerate,
-                            static_cast<long long>(returnedElems));
+                        hwNextAdvance(static_cast<long long>(returnedElems));
                         /* The dropped samples belong to the burst: the next write still continues it (no new
                          * stamp, no wait for a new burst to age before the next check). */
                         _tx_stream.hw_burst_samples += static_cast<long long>(returnedElems);
@@ -2244,8 +2260,7 @@ int SoapyLiteXM2SDR::writeStream(
                 if (drift_ns < -late_tolerance_ns ||
                     (_tx_stream.hw_catchup && drift_ns < catchup_early_ns)) {
                     _tx_stream.hw_catchup = true;
-                    _tx_stream.hw_next_ns += samples_to_ns(_tx_stream.samplerate,
-                        static_cast<long long>(returnedElems));
+                    hwNextAdvance(static_cast<long long>(returnedElems));
                     /* The dropped samples belong to the burst: the next write still continues it, so the
                      * catch-up goes on at every write (a new stamp would restart the 50 ms ageing of the
                      * burst before each check, and a 15 ms catch-up would take about a second). */
@@ -2288,8 +2303,8 @@ int SoapyLiteXM2SDR::writeStream(
                     static_cast<long long>(2 * this->getStreamMTU(stream)));
                 if (now_ns != 0 && timeNs < now_ns + min_lead_ns) {
                     _tx_stream.hw_burst_valid = false;
-                    _tx_stream.hw_next_ns = timeNs + samples_to_ns(_tx_stream.samplerate,
-                        static_cast<long long>(returnedElems));
+                    hwNextSet(timeNs);
+                    hwNextAdvance(static_cast<long long>(returnedElems));
                     _tx_stream.time_error = true;
                     _tx_stream.status_time_ns = timeNs;
                     return static_cast<int>(returnedElems);
@@ -2440,9 +2455,13 @@ int SoapyLiteXM2SDR::writeStream(
     const int accepted = ret;
     if (_tx_stream.hw_burst_valid)
         _tx_stream.hw_burst_samples += accepted;
-    if (_tx_stream.timed_tx_hardware && _tx_stream.hw_next_valid)
-        _tx_stream.hw_next_ns = (has_time ? timeNs : _tx_stream.hw_next_ns) +
-            samples_to_ns(_tx_stream.samplerate, static_cast<long long>(accepted));
+    if (_tx_stream.timed_tx_hardware && _tx_stream.hw_next_valid) {
+        /* A time given by the application is a new origin; the stream's own time (a buffer stamped by the
+         * driver) is not: the count goes on from the last one. */
+        if (has_time && timeNs != _tx_stream.hw_next_ns)
+            hwNextSet(timeNs);
+        hwNextAdvance(static_cast<long long>(accepted));
+    }
     /* srsRAN can end a burst with less than one MTU; submit that tail now. */
     if (forceFlush && static_cast<size_t>(accepted) == returnedElems) {
         if (flags & SOAPY_SDR_END_BURST)

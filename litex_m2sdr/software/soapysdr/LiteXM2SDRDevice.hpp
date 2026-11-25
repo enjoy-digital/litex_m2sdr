@@ -590,6 +590,10 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         bool hw_ref_pending = false;      /* early stamp made: take the reference at the next check */
         long long hw_check_ref_ns = 0;
         long long hw_next_ns = 0;
+        /* hw_next_ns is always hw_next_base_ns + the duration of hw_next_samples: counting from a time
+         * given by the application, never by adding the rounded duration of each write. */
+        long long hw_next_base_ns = 0;
+        long long hw_next_samples = 0;
         long long hw_burst_time_ns = 0;
         long long hw_burst_samples = 0;
         int remainderFlags = 0;
