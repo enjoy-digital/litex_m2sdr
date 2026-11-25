@@ -40,7 +40,8 @@
 #include "m2sdr_tool.h"
 /* With SSE2, kiss_fft is used in its SIMD mode: an FFT per lane, four OFDM symbols per call,
  * each lane with the operations of the scalar FFT. The tool is then linked with the kiss_fft
- * object built that way (see the Makefile).
+ * object built that way (see the Makefile). Both are built with -ffp-contract=off: the samples
+ * do not depend on where the compiler would fuse a product and a sum.
  * M2SDR_GEN_NO_SIMD leaves all of it out: the build the tests compare this one with. */
 #if defined(__SSE2__) && !defined(M2SDR_GEN_NO_SIMD)
 #define GEN_SSE2

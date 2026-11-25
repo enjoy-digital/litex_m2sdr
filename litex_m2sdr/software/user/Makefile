@@ -441,15 +441,26 @@ tests/test_m2sdr_fm: $(LIBM2SDR_STATIC) tests/test_m2sdr_fm.o | $(BUILD_FLAGS_FI
 # m2sdr_gen makes its OFDM symbols four at a time with kiss_fft in its SIMD mode (an FFT per SSE
 # lane, each with the operations of the scalar one) where the compiler has SSE2: m2sdr_gen.c
 # then defines USE_SIMD for kiss_fft.h, and is linked with kiss_fft.c built the same way.
+#
+# The generator and its FFT are built without contraction of a product and a sum into one
+# fused operation (FMA): the compiler does it or not depending on how the code is written and
+# on the target (-march, or the default of the distribution), and it changes the last bit.
+# Without it the samples are the same on every build, which the tests of the generator check.
 M2SDR_GEN_SSE2 := $(shell echo | $(CC) $(EXTRA_CFLAGS) -dM -E - 2>/dev/null | grep -c "define __SSE2__ ")
+M2SDR_GEN_CFLAGS := -ffp-contract=off
+M2SDR_GEN_KISS_FFT := $(THIRD_PARTY_DIR)/kissfft/kiss_fft_gen.o
+M2SDR_GEN_KISS_FFT_SCALAR := $(THIRD_PARTY_DIR)/kissfft/kiss_fft_gen_scalar.o
 ifeq ($(M2SDR_GEN_SSE2),1)
-M2SDR_GEN_KISS_FFT := $(THIRD_PARTY_DIR)/kissfft/kiss_fft_simd.o
-else
-M2SDR_GEN_KISS_FFT := $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o
+M2SDR_GEN_KISS_FFT_CFLAGS := -DUSE_SIMD
 endif
 
-$(THIRD_PARTY_DIR)/kissfft/kiss_fft_simd.o: $(THIRD_PARTY_DIR)/kissfft/kiss_fft.c $(BUILD_FLAGS_FILE)
-	$(CC) -c $(CFLAGS) -DUSE_SIMD -o $@ $<
+$(M2SDR_GEN_KISS_FFT): $(THIRD_PARTY_DIR)/kissfft/kiss_fft.c $(BUILD_FLAGS_FILE)
+	$(CC) -c $(CFLAGS) $(M2SDR_GEN_CFLAGS) $(M2SDR_GEN_KISS_FFT_CFLAGS) -o $@ $<
+
+$(M2SDR_GEN_KISS_FFT_SCALAR): $(THIRD_PARTY_DIR)/kissfft/kiss_fft.c $(BUILD_FLAGS_FILE)
+	$(CC) -c $(CFLAGS) $(M2SDR_GEN_CFLAGS) -o $@ $<
+
+m2sdr_gen.o tests/test_m2sdr_gen.o: CFLAGS += $(M2SDR_GEN_CFLAGS)
 
 # The generator of m2sdr_gen.c, included by its test.
 tests/test_m2sdr_gen.o: m2sdr_gen.c
@@ -459,9 +470,9 @@ tests/test_m2sdr_gen: $(LIBM2SDR_STATIC) tests/test_m2sdr_gen.o $(M2SDR_GEN_KISS
 # The same test without the SSE2 code of the generator, with the scalar kiss_fft: its QAM and
 # OFDM samples are compared with the ones of the build above.
 tests/test_m2sdr_gen_scalar.o: tests/test_m2sdr_gen.c m2sdr_gen.c $(BUILD_FLAGS_FILE)
-	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -DM2SDR_GEN_NO_SIMD -o $@ $<
-tests/test_m2sdr_gen_scalar: $(LIBM2SDR_STATIC) tests/test_m2sdr_gen_scalar.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_gen_scalar.o $(THIRD_PARTY_DIR)/kissfft/kiss_fft.o $(M2SDR_LINK_LIBS)
+	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) $(M2SDR_GEN_CFLAGS) -DM2SDR_GEN_NO_SIMD -o $@ $<
+tests/test_m2sdr_gen_scalar: $(LIBM2SDR_STATIC) tests/test_m2sdr_gen_scalar.o $(M2SDR_GEN_KISS_FFT_SCALAR) | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_gen_scalar.o $(M2SDR_GEN_KISS_FFT_SCALAR) $(M2SDR_LINK_LIBS)
 
 m2sdr_play: $(LIBM2SDR_STATIC) m2sdr_play.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_play.o $(M2SDR_LINK_LIBS) $(PTHREAD_LIBS)
