@@ -360,7 +360,7 @@ class BaseSoC(SoCMini):
         if with_pcie_ptm and not with_pcie:
             raise ValueError("PCIe PTM requires PCIe to be enabled")
 
-        if with_pcie and (variant == "baseboard") and (pcie_lanes != 1):
+        if with_pcie and (variant in ["baseboard", "rpi5hat"]) and (pcie_lanes != 1):
             raise ValueError("The baseboard variant has one PCIe lane: use --pcie-lanes=1.")
 
         if with_rfic_oversampling and (with_eth or with_sata):
@@ -377,7 +377,7 @@ class BaseSoC(SoCMini):
             eth_phy                = eth_phy,
             with_rfic_oversampling = with_rfic_oversampling,
         )
-        if variant == "baseboard":
+        if variant in ["baseboard", "rpi5hat"]:
             platform.add_extension(_io_baseboard)
         if (with_eth or with_sata) and (variant != "baseboard"):
             msg = "Ethernet and SATA are only supported when mounted in the LiteX Acorn Baseboard Mini! "
@@ -399,8 +399,8 @@ class BaseSoC(SoCMini):
             if sys_clk_freq != 125e6:
                 raise ValueError("USB3 requires sys_clk_freq == 125MHz (USB3 QPLL reference).")
 
-        if with_white_rabbit and (variant != "baseboard"):
-            raise ValueError("White Rabbit is only supported with --variant=baseboard (requires baseboard SFP resources).")
+        if with_white_rabbit and (variant not in ["baseboard", "rpi5hat"]):
+            raise ValueError("White Rabbit is only supported with --variant=baseboard/rpi5hat (requires baseboard/rpi5hat SFP resources).")
         if with_white_rabbit and (wr_sfp is None):
             raise ValueError("White Rabbit SFP must be resolved before BaseSoC initialization.")
         if with_eth_ptp and not with_eth:
@@ -1831,7 +1831,7 @@ class BaseSoC(SoCMini):
 def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # Build/Load/Utilities.
-    parser.add_argument("--variant",          default="m2",              help="Design variant.", choices=["m2", "baseboard"])
+    parser.add_argument("--variant",          default="m2",              help="Design variant.", choices=["m2", "baseboard", "rpi5hat"])
     parser.add_argument("--sys-clk-freq",     default=None, type=float,  help="System clock frequency in Hz (default: 100MHz with Ethernet, 125MHz otherwise).")
     parser.add_argument("--reset",            action="store_true",       help="Reset the device.")
     parser.add_argument("--build",            action="store_true",       help="Build bitstream.")

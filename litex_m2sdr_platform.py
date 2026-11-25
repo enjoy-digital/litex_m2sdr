@@ -64,6 +64,15 @@ _io = [
         Subsignal("tx_p",  Pins("M2:PETp3")),   # PCIe_TX3_P.
         Subsignal("tx_n",  Pins("M2:PETn3")),   # PCIe_TX3_N.
     ),
+    ("pcie_x1_rpi5hat", 0,
+        Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
+        Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
+        Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
+        Subsignal("rx_p",  Pins("M2:PERp0")),   # PCIe_RX0_P
+        Subsignal("rx_n",  Pins("M2:PERn0")),   # PCIe_RX0_N.
+        Subsignal("tx_p",  Pins("M2:PETp0")),   # PCIe_TX0_P.
+        Subsignal("tx_n",  Pins("M2:PETn0")),   # PCIe_TX0_N.
+    ),
     ("pcie_x1_m2", 0,
         Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
         Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
