@@ -386,11 +386,13 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
         use_pcie_dma = true;
     } else
 #endif
-    if (play_no_flow_control)
-        (void)m2sdr_liteeth_set_tx_flow_control(dev, false);
     {
-        int rc = m2sdr_sync_config(dev, M2SDR_TX, format,
-                                   0, samples_per_buf, 0, 1000);
+        int rc;
+
+        if (play_no_flow_control)
+            (void)m2sdr_liteeth_set_tx_flow_control(dev, false);
+        rc = m2sdr_sync_config(dev, M2SDR_TX, format,
+                               0, samples_per_buf, 0, 1000);
 
         if (rc != 0) {
             fprintf(stderr, "m2sdr_sync_config failed: %s\n", m2sdr_strerror(rc));
