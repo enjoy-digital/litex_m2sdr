@@ -402,6 +402,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     /* Measured reference clock error in ppm, compensated through the SI5351
      * PLL feedback multiplier (positive = clock runs fast). */
     double _refclk_ppm = 0.0;
+    /* refclk_ppm_mode=rfic: the error is compensated in the AD9361 (LOs, sample clock) and in
+     * the board time instead, and the SI5351 keeps its nominal table. */
+    bool _refclk_ppm_rfic = false;
     /* rf_freq_offset / rx_freq_offset / tx_freq_offset: added to the RF frequencies set on the
      * RFIC, per direction (tests only, see the README). */
     double _rf_freq_offset_hz[2] = {0.0, 0.0}; /* [SOAPY_SDR_TX, SOAPY_SDR_RX] */

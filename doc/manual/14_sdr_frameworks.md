@@ -101,6 +101,7 @@ optional.
 | `clock_source` | `internal`, `external`, `fpga` | Reference of the clock generator |
 | `refclk_freq` | Hz | Reference clock of the AD9361 |
 | `refclk_ppm` | ppm, or `stored` | Correction of a measured reference error |
+| `refclk_ppm_mode` | `si5351`, `rfic` | Where the reference error is corrected |
 | `rx_agc_mode` | `slow`, `fast`, `hybrid`, `mgc` | RX gain control mode, both channels |
 | `rx_agc_pin` | `on`, `off` | Drive the AGC enable pin of the AD9361 |
 | `auto_bandwidth` | `on`, `off` | Follow the sample rate with the bandwidth |
@@ -142,6 +143,11 @@ timed TX mode.
   the reference while streaming, in a range of 100 ppm on each side.
   `refclk_ppm=stored` takes the value of the calibration record of the board, written by
   `m2sdr_cal measure --store`; the open fails when the board has no record.
+- `refclk_ppm_mode=rfic`: the correction is made in the AD9361 (LOs and sample clock) and in the
+  board time, and the clock generator keeps its nominal setting. The default, `si5351`, trims the
+  clock generator: all its clocks are corrected, but the trim adds a slow phase wander to the
+  LOs (about 400 Hz per ppm of trim), which lowers the EVM of OFDM signals. With `rfic` the
+  setting `refclk_ppm` cannot be written while running.
 - `eth_mode=vrt`: the RX stream is meant to come in VRT packets, which carry timestamps, while
   the TX stream stays raw UDP. The driver selects the VRT route when the library is built
   against the `csr.h` of the VRT build; built against the committed `csr.h`, it refuses this mode

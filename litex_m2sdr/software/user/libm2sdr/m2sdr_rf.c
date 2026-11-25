@@ -17,6 +17,7 @@
 #include <strings.h>
 #include <unistd.h>
 #include <limits.h>
+#include <math.h>
 #include <errno.h>
 #include <stdint.h>
 #include <time.h>
@@ -320,6 +321,9 @@ static int m2sdr_validate_config_values(const struct m2sdr_config *cfg)
     if (!(cfg->refclk_ppm >= -M2SDR_REFCLK_PPM_MAX &&
           cfg->refclk_ppm <=  M2SDR_REFCLK_PPM_MAX))
         return M2SDR_ERR_RANGE;
+    if (cfg->refclk_ppm_mode != M2SDR_REFCLK_PPM_MODE_SI5351 &&
+        cfg->refclk_ppm_mode != M2SDR_REFCLK_PPM_MODE_RFIC)
+        return M2SDR_ERR_INVAL;
     if (cfg->tx_freq <= 0 || cfg->rx_freq <= 0)
         return M2SDR_ERR_RANGE;
     if (cfg->tx_att < M2SDR_TX_ATT_MIN_DB || cfg->tx_att > M2SDR_TX_ATT_MAX_DB)
@@ -605,8 +609,9 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
 
     /* Compensate the measured reference error by trimming the PLL feedback
      * away from the nominal table, correcting the AD9361 reference and all
-     * derived clocks together. */
-    if (cfg->refclk_ppm != 0) {
+     * derived clocks together. Not in M2SDR_REFCLK_PPM_MODE_RFIC: the PLL
+     * keeps the nominal table just written. */
+    if (cfg->refclk_ppm != 0 && cfg->refclk_ppm_mode == M2SDR_REFCLK_PPM_MODE_SI5351) {
         M2SDR_LOGF("Trimming SI5351 PLL by %.3f ppm.\n", cfg->refclk_ppm);
         if (!m2sdr_si5351_i2c_trim_pllb_ppm(conn, SI5351_I2C_ADDR,
             si5351_config, si5351_length, cfg->refclk_ppm,
@@ -1959,6 +1964,7 @@ static bool m2sdr_configs_equal(const struct m2sdr_config *a,
            a->bandwidth == b->bandwidth &&
            a->refclk_freq == b->refclk_freq &&
            a->refclk_ppm == b->refclk_ppm &&
+           a->refclk_ppm_mode == b->refclk_ppm_mode &&
            a->tx_freq == b->tx_freq &&
            a->rx_freq == b->rx_freq &&
            a->tx_att == b->tx_att &&
@@ -2190,6 +2196,23 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     if (!init_param)
         return M2SDR_ERR_NO_MEM;
     init_param->reference_clk_rate          = cfg->refclk_freq;
+    if (cfg->refclk_ppm_mode == M2SDR_REFCLK_PPM_MODE_RFIC) {
+        /* The SI5351 is not trimmed: give the AD9361 the real frequency of
+         * its reference, for its LOs and its sample clock. */
+        init_param->reference_clk_rate = m2sdr_refclk_actual_hz(cfg->refclk_freq, cfg->refclk_ppm);
+        if (cfg->refclk_ppm != 0)
+            M2SDR_LOGF("RefClk error %.3f ppm compensated in the AD9361 (reference %u Hz) and the board time.\n",
+                cfg->refclk_ppm, (unsigned)init_param->reference_clk_rate);
+    }
+#ifdef CSR_TIME_GEN_TIME_INC_ADDR
+    /* The board time counts the periods of an SI5351 clock: nominal periods
+     * when the SI5351 is trimmed (or has no error to compensate), real ones in
+     * M2SDR_REFCLK_PPM_MODE_RFIC. Derived from the frequency given to the
+     * AD9361, so that the time and the sample clock stay in step. */
+    if (m2sdr_reg_write(dev, CSR_TIME_GEN_TIME_INC_ADDR,
+            m2sdr_time_inc_for_refclk(cfg->refclk_freq, init_param->reference_clk_rate)) != 0)
+        return m2sdr_transport_error(dev);
+#endif
     init_param->gpio_resetb                 = AD9361_GPIO_RESET_PIN;
     init_param->gpio_sync                   = -1;
     init_param->gpio_cal_sw1                = -1;
@@ -2440,6 +2463,22 @@ int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
     return M2SDR_ERR_OK;
 }
 
+/* Nominal increment of the board time: 10 ns per tick of its 100 MHz clock, Q8.24. */
+#define M2SDR_TIME_INC_NOMINAL (10u << 24)
+
+int64_t m2sdr_refclk_actual_hz(int64_t refclk_freq, double ppm)
+{
+    return llround((double)refclk_freq * (1.0 + ppm * 1e-6));
+}
+
+uint32_t m2sdr_time_inc_for_refclk(int64_t refclk_freq, int64_t actual_hz)
+{
+    if (refclk_freq <= 0 || actual_hz <= 0)
+        return M2SDR_TIME_INC_NOMINAL;
+    /* A clock that runs fast has shorter periods. */
+    return (uint32_t)llround((double)M2SDR_TIME_INC_NOMINAL * (double)refclk_freq / (double)actual_hz);
+}
+
 /* Trim the SI5351 PLL to compensate a measured reference clock error. */
 int m2sdr_set_refclk_ppm(struct m2sdr_dev *dev, double ppm)
 {
@@ -2458,6 +2497,9 @@ int m2sdr_set_refclk_ppm(struct m2sdr_dev *dev, double ppm)
      * without it the active clock topology is unknown. */
     if (!dev->rf_last_config_valid)
         return M2SDR_ERR_STATE;
+    /* Compensated in the AD9361: a retrim would need its clocks set again. */
+    if (dev->rf_last_config.refclk_ppm_mode == M2SDR_REFCLK_PPM_MODE_RFIC)
+        return M2SDR_ERR_UNSUPPORTED;
 
     conn = m2sdr_conn(dev);
     if (!m2sdr_si5351_i2c_check_litei2c(conn))

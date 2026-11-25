@@ -814,8 +814,64 @@ static int test_tx_header_transport_validation(void)
     return 0;
 }
 
+/* M2SDR_REFCLK_PPM_MODE_RFIC: reference frequency given to the AD9361 and
+ * increment of the board time. */
+static int test_refclk_ppm_rfic_helpers(void)
+{
+    const uint32_t nominal = 10u << 24; /* 10 ns per tick, Q8.24. */
+    struct m2sdr_config cfg;
+    int64_t hz;
+    uint32_t inc;
+    double ppm_time, ppm_ref;
+
+    /* No error: nominal frequency and nominal increment. */
+    if (m2sdr_refclk_actual_hz(38400000, 0.0) != 38400000)
+        return -1;
+    if (m2sdr_time_inc_for_refclk(38400000, 38400000) != nominal)
+        return -1;
+    /* Invalid frequencies fall back to the nominal increment. */
+    if (m2sdr_time_inc_for_refclk(0, 38400000) != nominal ||
+        m2sdr_time_inc_for_refclk(38400000, 0) != nominal)
+        return -1;
+
+    /* A reference that runs fast: higher frequency, shorter tick. */
+    hz = m2sdr_refclk_actual_hz(38400000, 4.912);
+    if (hz != 38400189)
+        return -1;
+    inc = m2sdr_time_inc_for_refclk(38400000, hz);
+    if (inc >= nominal)
+        return -1;
+    /* The time and the frequency given to the AD9361 agree to the resolution
+     * of the increment (1 / 2^24 of 10 ns: 0.006 ppm). */
+    ppm_time = ((double)nominal / (double)inc - 1.0) * 1e6;
+    ppm_ref  = ((double)hz / 38400000.0 - 1.0) * 1e6;
+    if (ppm_time - ppm_ref > 0.004 || ppm_ref - ppm_time > 0.004)
+        return -1;
+
+    /* A slow one, on the 40 MHz reference. */
+    hz = m2sdr_refclk_actual_hz(40000000, -100.0);
+    if (hz != 39996000)
+        return -1;
+    if (m2sdr_time_inc_for_refclk(40000000, hz) <= nominal)
+        return -1;
+
+    /* The mode is checked with the rest of the config, and off by default. */
+    m2sdr_config_init(&cfg);
+    if (cfg.refclk_ppm_mode != M2SDR_REFCLK_PPM_MODE_SI5351)
+        return -1;
+    cfg.refclk_ppm_mode = (enum m2sdr_refclk_ppm_mode)7;
+    if (m2sdr_apply_config(NULL, &cfg) != M2SDR_ERR_INVAL)
+        return -1;
+
+    return 0;
+}
+
 int main(void)
 {
+    if (test_refclk_ppm_rfic_helpers() != 0) {
+        fprintf(stderr, "test_refclk_ppm_rfic_helpers failed\n");
+        return 1;
+    }
     if (test_parse_identifier_invalid_ports() != 0) {
         fprintf(stderr, "test_parse_identifier_invalid_ports failed\n");
         return 1;
