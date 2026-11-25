@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <inttypes.h>
 #include <time.h>
 
@@ -2214,7 +2215,6 @@ double SoapyLiteXM2SDR::getSampleRate(
 
     /* RX/TX rates are always programmed together; m2sdr_get_sample_rate()
      * reports the stream rate. */
-    (void)direction;
     int64_t sample_rate = 0;
 
     /* Requested, applied when a single-channel stream is set up (see setSampleRate()). */
@@ -2232,6 +2232,16 @@ double SoapyLiteXM2SDR::getSampleRate(
         SoapySDR::logf(SOAPY_SDR_ERROR,
             "m2sdr_get_sample_rate failed: %s", m2sdr_strerror(rc));
         return 0.0;
+    }
+
+    /* refclk_ppm_mode=rfic: the AD9361 works from the real reference frequency, and its baseband PLL
+     * reaches the requested rate only to a fraction of a Hz, which the integer readback shows as 1 Hz
+     * less or more. Report the requested rate: applications compare it with what they asked for
+     * (srsRAN 4G refuses a rate that is not an exact multiple of its base rate). */
+    if (_refclk_ppm_rfic) {
+        const double requested = (direction == SOAPY_SDR_TX) ? _tx_stream.samplerate : _rx_stream.samplerate;
+        if (requested > 0.0 && std::fabs(static_cast<double>(sample_rate) - requested) <= 2.0)
+            return requested;
     }
 
     return static_cast<double>(sample_rate);
