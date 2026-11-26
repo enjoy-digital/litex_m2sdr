@@ -528,10 +528,13 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         long long last_time_ns = 0;
         bool time_warned = false;
         bool hw_time_warned = false;
-        /* Hardware RX timestamps put on the sample grid (see rxSampleGridTimeNs()): the position
-         * expected for the next buffer, in samples. */
+        /* RX timestamps on the sample grid (see rxSampleGridTimeNs()): the position of the next
+         * buffer, in samples. */
         bool grid_valid = false;
         long long grid_next = 0;
+        /* Board time minus sample-grid time (ns): smoothed, and its rounded copy for the TX path. */
+        double grid_offset_avg_ns = 0.0;
+        std::atomic<long long> grid_offset_ns{0};
         bool vrt_sequence_valid = false;
         uint8_t vrt_sequence_last = 0;
         uint64_t vrt_packets = 0;
