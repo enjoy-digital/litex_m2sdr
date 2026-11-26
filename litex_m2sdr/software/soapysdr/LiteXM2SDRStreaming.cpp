@@ -2114,6 +2114,30 @@ long long SoapyLiteXM2SDR::txCheckNowNs()
     }
 }
 
+/* Age a TX burst must have before the timed-TX check looks at it, in samples.
+ *
+ * 50 ms by default: the estimate of the check needs a queue that drains at the sample rate.
+ *
+ * tx_strict_timing=1 (a terminal) cannot wait that long in two cases, where each check starts a new burst
+ * and so a new wait:
+ * - No on-time reference yet, after an activation. It takes two to four checks to get one, and the stream
+ *   can be milliseconds off meanwhile. srsUE starts its TX stream about 100 ms before its first PRACH
+ *   preamble: with 50 ms per check the first two preambles went out mistimed. 10 ms.
+ * - A catch-up is due, after a write that came too late (the application stalled). The stream is late
+ *   until the catch-up is done. 2.5 ms: the gate has released the first buffer by then (an application
+ *   writes 1.5 to 3 ms ahead). */
+long long SoapyLiteXM2SDR::txCheckMinBurstSamples() const
+{
+    double fraction = 20.0;
+    if (_tx_stream.strict_timing) {
+        if (_tx_stream.hw_catchup)
+            fraction = 400.0;
+        else if (!_tx_stream.hw_check_ref_valid)
+            fraction = 100.0;
+    }
+    return static_cast<long long>(_tx_stream.samplerate / fraction);
+}
+
 /* TX FIFO of the gateware between the DMA reader and the RFIC (bytes). */
 #define M2SDR_TX_FIFO_BYTES 65536LL
 
@@ -2180,9 +2204,9 @@ int SoapyLiteXM2SDR::writeStream(
         if (has_time) {
             _tx_stream.hw_next_valid = true;
         } else if (_tx_stream.hw_next_valid && _tx_stream.hw_burst_valid && usesLibm2sdrStream() &&
-                   _tx_stream.hw_burst_samples > static_cast<long long>(_tx_stream.samplerate / 20.0) &&
+                   _tx_stream.hw_burst_samples > txCheckMinBurstSamples() &&
                    (++_tx_stream.hw_check_count % 16) == 0) {
-            /* Only for a burst that has been streaming for more than 50 ms (a base station): in
+            /* Only for a burst that has been streaming for a while (see txCheckMinBurstSamples()): in
              * a short burst (a terminal) the gate holds the first buffer and the queue does not
              * drain at the sample rate, so the estimate below would not hold.
              * A continuing burst goes out at the pace of the DMA reader, whatever its time: check
