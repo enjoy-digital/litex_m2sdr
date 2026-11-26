@@ -402,6 +402,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     /* Measured reference clock error in ppm, compensated through the SI5351
      * PLL feedback multiplier (positive = clock runs fast). */
     double _refclk_ppm = 0.0;
+    /* refclk_ppm_mode=rfic: the error is compensated in the AD9361 (LOs, sample clock) and in
+     * the board time instead, and the SI5351 keeps its nominal table. */
+    bool _refclk_ppm_rfic = false;
     /* rf_freq_offset / rx_freq_offset / tx_freq_offset: added to the RF frequencies set on the
      * RFIC, per direction (tests only, see the README). */
     double _rf_freq_offset_hz[2] = {0.0, 0.0}; /* [SOAPY_SDR_TX, SOAPY_SDR_RX] */
@@ -528,6 +531,13 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         long long last_time_ns = 0;
         bool time_warned = false;
         bool hw_time_warned = false;
+        /* RX timestamps on the sample grid (see rxSampleGridTimeNs()): the position of the next
+         * buffer, in samples. */
+        bool grid_valid = false;
+        long long grid_next = 0;
+        /* Board time minus sample-grid time (ns): smoothed, and its rounded copy for the TX path. */
+        double grid_offset_avg_ns = 0.0;
+        std::atomic<long long> grid_offset_ns{0};
         bool vrt_sequence_valid = false;
         uint8_t vrt_sequence_last = 0;
         uint64_t vrt_packets = 0;
@@ -659,6 +669,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const long timeoutUs);
     long long txCheckNowNs();
     long long txCheckMinBurstSamples() const;
+    long long rxSampleGridTimeNs(long long hw_time_ns, size_t samples);
     void markTxRemainderTime(const long long payloadTimeNs);
     void setBandwidthUnlocked(
         const int direction,

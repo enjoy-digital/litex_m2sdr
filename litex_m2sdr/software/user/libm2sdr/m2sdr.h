@@ -615,6 +615,21 @@ enum m2sdr_clock_source {
     M2SDR_CLOCK_SOURCE_SI5351C_FPGA  = 2,
 };
 
+/* Where a measured reference clock error (refclk_ppm) is compensated. */
+enum m2sdr_refclk_ppm_mode {
+    /* In the SI5351 PLL feedback: the AD9361 reference and all the clocks derived from the
+     * SI5351 are corrected together. The fractional offset this adds to the PLL modulates its
+     * output at a low frequency (about 400 Hz per ppm of trim), which is several degrees of
+     * phase wander on a 2.4 GHz LO. */
+    M2SDR_REFCLK_PPM_MODE_SI5351 = 0,
+    /* In the AD9361 and the board time: the SI5351 keeps its nominal table (clean reference),
+     * the AD9361 computes its LOs and its sample clock from the real reference frequency, and
+     * the board time advances by the real period of its clock. The other SI5351 outputs keep
+     * the reference error, and the trim cannot be changed at run time
+     * (m2sdr_set_refclk_ppm()). */
+    M2SDR_REFCLK_PPM_MODE_RFIC   = 1,
+};
+
 enum m2sdr_rx_gain_mode {
     M2SDR_RX_GAIN_MODE_MANUAL = 0,
     M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC = 1,
@@ -647,8 +662,9 @@ struct m2sdr_config {
     /* AD9361 reference clock in Hz. */
     int64_t refclk_freq;
     /* Measured reference clock error in ppm (positive = clock runs fast).
-     * Compensated by trimming the SI5351 PLL feedback multiplier, so the
-     * AD9361 reference and all derived clocks are corrected together. */
+     * Compensated as refclk_ppm_mode says: by default by trimming the SI5351
+     * PLL feedback multiplier, so the AD9361 reference and all derived
+     * clocks are corrected together. */
     double  refclk_ppm;
     /* TX LO in Hz. */
     int64_t tx_freq;
@@ -683,6 +699,8 @@ struct m2sdr_config {
     /* Preferred typed RF topology controls. */
     enum m2sdr_channel_layout channel_layout;
     enum m2sdr_clock_source clock_source;
+    /* Where refclk_ppm is compensated (default: the SI5351 PLL). */
+    enum m2sdr_refclk_ppm_mode refclk_ppm_mode;
     /* Legacy string overrides kept for compatibility with old utilities. */
     const char *chan_mode; /* legacy string override: "2t2r" or "1t1r" */
     const char *sync_mode; /* legacy string override: "internal", "external", or "fpga" */
@@ -857,6 +875,13 @@ int  m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw);
  * Requires a prior m2sdr_apply_config() so the active clock topology is
  * known. */
 int  m2sdr_set_refclk_ppm(struct m2sdr_dev *dev, double ppm);
+/* M2SDR_REFCLK_PPM_MODE_RFIC: real frequency in Hz of a reference of nominal
+ * frequency refclk_freq that runs fast by ppm, as given to the AD9361. */
+int64_t  m2sdr_refclk_actual_hz(int64_t refclk_freq, double ppm);
+/* M2SDR_REFCLK_PPM_MODE_RFIC: increment of the board time (ns per tick of its
+ * clock, Q8.24) for a reference of nominal frequency refclk_freq that really
+ * runs at actual_hz. With actual_hz == refclk_freq, the nominal increment. */
+uint32_t m2sdr_time_inc_for_refclk(int64_t refclk_freq, int64_t actual_hz);
 /* Last reference trim applied through the RF config or m2sdr_set_refclk_ppm(). */
 int  m2sdr_get_refclk_ppm(struct m2sdr_dev *dev, double *ppm);
 /* Glitch-free retrim window of the active clock topology in ppm, clamped to
