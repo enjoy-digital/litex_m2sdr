@@ -2073,6 +2073,7 @@ void SoapyLiteXM2SDR::setSampleRate(
             _rx_stream.time0_count = _rx_stream.user_count;
             _rx_stream.time_valid = (_rx_stream.samplerate > 0.0);
             _rx_stream.last_time_ns = _rx_stream.time0_ns;
+            _rx_stream.grid_valid = false;
             _rx_stream.time_warned = false;
         }
         return;
@@ -2202,6 +2203,7 @@ void SoapyLiteXM2SDR::setSampleRate(
         _rx_stream.time0_count = _rx_stream.user_count;
         _rx_stream.time_valid = (_rx_stream.samplerate > 0.0);
         _rx_stream.last_time_ns = _rx_stream.time0_ns;
+        _rx_stream.grid_valid = false;
         _rx_stream.time_warned = false;
     }
 }

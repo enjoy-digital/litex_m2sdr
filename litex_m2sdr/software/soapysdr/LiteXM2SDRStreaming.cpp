@@ -873,6 +873,7 @@ int SoapyLiteXM2SDR::activateStream(
             : _rx_stream.time0_ns;
         _rx_stream.time_warned = false;
         _rx_stream.hw_time_warned = false;
+        _rx_stream.grid_valid = false;
         /* Timed activation: the capture starts now and readStream() drops the samples before
          * the requested time, which needs the hardware RX timestamps. */
         _rx_stream.start_time_ns = 0;
@@ -1224,7 +1225,11 @@ int SoapyLiteXM2SDR::submitTxRemainder(
     }
 
     int submit_flags = _tx_stream.remainderFlags;
-    const long long submit_time_ns = _tx_stream.remainderTimeNs;
+    /* The times of the application are on the sample grid of the RX stream; the gate of the gateware
+     * compares with the board time. */
+    const long long submit_time_ns = _tx_stream.remainderTimeNs +
+        ((_tx_stream.remainderFlags & SOAPY_SDR_HAS_TIME) ?
+            _rx_stream.grid_offset_ns.load(std::memory_order_relaxed) : 0);
     this->releaseWriteBuffer(stream,
                              _tx_stream.remainderHandle,
                              _tx_stream.remainderOffset,
@@ -1518,7 +1523,7 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
             if (_rx_dma_header_bytes != 0 &&
                 m2sdr_get_buffer_metadata(_dev, M2SDR_RX, buffer, &meta) == M2SDR_ERR_OK &&
                 (meta.flags & M2SDR_META_FLAG_HAS_TIME)) {
-                timeNs = static_cast<long long>(meta.timestamp);
+                timeNs = rxSampleGridTimeNs(static_cast<long long>(meta.timestamp), samples_per_buffer);
                 have_hw_time = true;
             } else {
                 timeNs = _rx_stream.time0_ns +
@@ -2098,6 +2103,47 @@ int SoapyLiteXM2SDR::readStream(
         _rx_stream.last_end_ns.store(timeNs + samples_to_ns(_rx_stream.samplerate,
             static_cast<long long>(samp_avail + n)), std::memory_order_relaxed);
     return static_cast<int>(samp_avail + n);
+}
+
+/* Time of an RX buffer on the sample grid.
+ *
+ * The header of a buffer holds the board time at its first sample: exact, but with a few nanoseconds of jitter
+ * (the board clock and the sample clock are two domains), and at a phase against the sample period that
+ * changes at each activation. An application that counts in samples rounds each timestamp to a sample: when
+ * the phase sits near the rounding point, its timestamps then step by one sample more or less than the
+ * samples it received, at random, thousands of times per second.
+ *
+ * So the timestamps returned are whole numbers of sample periods that advance with the samples delivered,
+ * and nothing else: a clock made of the sample count. It is set from the hardware time at the first buffer,
+ * and again when the hardware time is half a buffer away or more (lost buffers).
+ *
+ * Board clock and sample clock may not be locked together (refclk_ppm_mode=rfic: one sample of slip in tens
+ * of seconds). Following the board time would then step the timestamps by one sample now and then, which
+ * breaks the timing of a base station each time. Instead, the difference between the two clocks is tracked
+ * (grid_offset_ns, smoothed) and added to the time of the timed TX buffers, which the gateware compares with
+ * the board time. */
+long long SoapyLiteXM2SDR::rxSampleGridTimeNs(long long hw_time_ns, size_t samples)
+{
+    const double rate = _rx_stream.samplerate;
+    if (rate <= 0.0)
+        return hw_time_ns;
+    const double hw_pos = static_cast<double>(hw_time_ns) * rate / 1e9;
+    bool anchor = !_rx_stream.grid_valid;
+    if (!anchor && std::fabs(hw_pos - static_cast<double>(_rx_stream.grid_next)) > 0.5 * static_cast<double>(samples))
+        anchor = true;
+    if (anchor) {
+        _rx_stream.grid_next  = std::llround(hw_pos);
+        _rx_stream.grid_valid = true;
+    }
+    const long long time_ns = samples_to_ns(rate, _rx_stream.grid_next);
+    const double offset_ns  = static_cast<double>(hw_time_ns - time_ns);
+    if (anchor)
+        _rx_stream.grid_offset_avg_ns = offset_ns;
+    else
+        _rx_stream.grid_offset_avg_ns += (offset_ns - _rx_stream.grid_offset_avg_ns) / 256.0;
+    _rx_stream.grid_offset_ns.store(std::llround(_rx_stream.grid_offset_avg_ns), std::memory_order_relaxed);
+    _rx_stream.grid_next += static_cast<long long>(samples);
+    return time_ns;
 }
 
 /* Board time for the timed-TX checks: the end of the last RX samples when an RX stream runs
