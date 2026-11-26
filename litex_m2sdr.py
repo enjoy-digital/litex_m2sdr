@@ -1492,6 +1492,28 @@ class BaseSoC(SoCMini):
         for techmap in sorted(glob.glob(os.path.join(techmap_dir, "*.v"))):
             template.insert(len(template) - 1, f"techmap -map {techmap}")
         platform.toolchain._yosys_template = template
+        # Bits the design needs and the Project X-Ray database does not have (differential
+        # termination, fabric reference clock of the GTP PLL) are set around fasm2frames: see
+        # litex_m2sdr/gateware/openxc7_bitstream.py.
+        toolchain = platform.toolchain
+        fixup     = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+            "litex_m2sdr", "gateware", "openxc7_bitstream.py")
+        bitstream_options = toolchain._build_openxc7_bitstream_options
+        def bitstream_options_with_fixup(prjxray_db_arg_dir):
+            bitstream_options(prjxray_db_arg_dir)
+            if toolchain._pre_packer_cmd != ["fasm2frames"]:
+                raise NotImplementedError("openXC7 bitstream fix-ups need the fasm2frames/xc7frames2bit flow.")
+            db_root = os.path.join(prjxray_db_arg_dir, toolchain._xc7family)
+            top     = toolchain._build_name
+            fasm, frames = f"python3 {fixup} fasm", f"python3 {fixup} frames"
+            toolchain._pre_packer_cmd = [fasm, "fasm2frames", frames]
+            toolchain._pre_packer_opts[fasm] = (
+                f"--xdc {top}.xdc --package-pins {db_root}/{toolchain.openxc7_part}/package_pins.csv "
+                f"--notes {top}.fixup.json {top}.fasm")
+            toolchain._pre_packer_opts[frames] = (
+                f"--tilegrid {db_root}/{toolchain.openxc7_die}/tilegrid.json "
+                f"--notes {top}.fixup.json {top}.frames")
+        toolchain._build_openxc7_bitstream_options = bitstream_options_with_fixup
         if with_pcie:
             # The pcie_s7 wrapper is a Vivado-generated IP (pcie_7x): without Vivado it cannot be
             # generated during the build, so reuse the plain Verilog sources a previous Vivado
