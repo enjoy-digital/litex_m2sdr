@@ -1469,6 +1469,16 @@ class BaseSoC(SoCMini):
 
     def add_openxc7_support(self, with_pcie=False, pcie_ip_sources=None):
         platform = self.platform
+        # Primitives nextpnr-xilinx does not take as Yosys or LiteX give them are replaced after
+        # the synthesis (litex_m2sdr/gateware/openxc7_techmap): the single-port LUT RAMs small
+        # memories are mapped to, and the IDDR mode of the DDR inputs.
+        from litex.build.yosys_wrapper import YosysWrapper
+        techmap_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+            "litex_m2sdr", "gateware", "openxc7_techmap")
+        template = list(YosysWrapper._default_template)
+        for techmap in sorted(glob.glob(os.path.join(techmap_dir, "*.v"))):
+            template.insert(len(template) - 1, f"techmap -map {techmap}")
+        platform.toolchain._yosys_template = template
         if with_pcie:
             # The pcie_s7 wrapper is a Vivado-generated IP (pcie_7x): without Vivado it cannot be
             # generated during the build, so reuse the plain Verilog sources a previous Vivado

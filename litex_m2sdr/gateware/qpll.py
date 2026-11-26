@@ -114,6 +114,31 @@ class SharedQPLL(LiteXModule):
 
         platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-49]")
 
+        if getattr(platform, "toolchain_name", "vivado") != "vivado":
+            self.use_nextpnr_refclk_ports()
+
+    def use_nextpnr_refclk_ports(self):
+        """Reference clock ports of the GTPE2_COMMON as nextpnr-xilinx takes them (openXC7).
+
+        Vivado takes a reference clock from the fabric on GTGREFCLK, the unused ports tied to a
+        constant. nextpnr-xilinx takes it on GTREFCLK, driven by a BUFG: it moves it to GTGREFCLK0
+        itself and enables that input in the bitstream; it refuses any other driver on GTREFCLK, a
+        constant included, and has a single fabric input. So the unused ports are left out, and
+        the fabric clock goes to the GTREFCLK of its PLL (PLLxREFCLKSEL is kept).
+        """
+        instance = next(special for special in self.qpll._fragment.specials
+            if isinstance(special, Instance) and special.of == "GTPE2_COMMON")
+        refclk_ports = ["GTREFCLK0", "GTREFCLK1", "GTGREFCLK0", "GTGREFCLK1"]
+        instance.items = [item for item in instance.items
+            if not (isinstance(item, Instance.Input) and item.name in refclk_ports)]
+        fabric_refclks = 0
+        for name, config in self.configs.items():
+            if config.settings.refclksel == 0b111:
+                fabric_refclks += 1
+            instance.items.append(Instance.Input(f"GTREFCLK{self.channel_map[name]}", config.refclk))
+        if fabric_refclks > 1:
+            raise ValueError("nextpnr-xilinx routes a single fabric reference clock to a GTPE2_COMMON.")
+
     @staticmethod
     def get_gt_refclks(config):
         if config.settings.refclksel == 0b111:
