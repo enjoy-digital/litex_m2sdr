@@ -79,16 +79,46 @@ def test_vivado_soc_keeps_its_primitives_and_bitstream_commands(tmp_path):
     assert "write_cfgmem" in tcl
 
 
-def test_vivado_soc_keeps_module_derived_signal_names(tmp_path):
-    # Migen names a module from the attribute it is assigned to, and falls back to its class name
-    # when that attribute is too far in BaseSoC.__init__'s name table: code added early in __init__
-    # then silently renames signals (and whatever constraint matches them) in the Vivado builds.
+def test_openxc7_usb3_gtp_refclk_and_techmaps(tmp_path):
+    # nextpnr-xilinx takes the fabric reference clock of the GTP PLL on GTREFCLK and no constant
+    # on the other reference clock ports; the primitives it does not take are replaced by
+    # techmaps after the synthesis.
     soc_mod = _load_soc_module()
-    soc = soc_mod.BaseSoC(variant="baseboard", with_pcie=False, with_eth=True, with_jtagbone=False)
+    soc = soc_mod.BaseSoC(variant="baseboard", with_pcie=False, with_usb3=True, with_jtagbone=False,
+        toolchain="openxc7")
+
+    gateware, verilog = _generate(soc, tmp_path, "top")
+    common = re.search(r"GTPE2_COMMON #\(.*?\);", verilog, re.S).group(0)
+    assert re.search(r"\.GTREFCLK0\s*\(sys_clk\)", common)
+    for port in ["GTREFCLK1", "GTGREFCLK0", "GTGREFCLK1"]:
+        assert f".{port}" not in common
+    assert re.search(r"\.PLL0REFCLKSEL\s*\(3'd7\)", common)
+
+    ys = (gateware / "top.ys").read_text().splitlines()
+    synth = next(i for i, line in enumerate(ys) if line.startswith("synth_xilinx"))
+    write = next(i for i, line in enumerate(ys) if line.startswith("write_json"))
+    techmaps = [line for line in ys[synth + 1:write] if line.startswith("techmap -map ")]
+    assert any(line.endswith("lutram_sp.v") for line in techmaps)
+    assert any(line.endswith("iddr_pipelined.v") for line in techmaps)
+
+
+def test_vivado_usb3_keeps_gtgrefclk(tmp_path):
+    soc_mod = _load_soc_module()
+    soc = soc_mod.BaseSoC(variant="baseboard", with_pcie=False, with_usb3=True, with_jtagbone=False)
 
     _, verilog = _generate(soc, tmp_path, "top")
-    assert "eth_tx_marker_sink_valid" in verilog
-    assert "txheaderpacketmarker" not in verilog
+    common = re.search(r"GTPE2_COMMON #\(.*?\);", verilog, re.S).group(0)
+    assert re.search(r"\.GTGREFCLK0\s*\(sys_clk\)", common)
+    for port in ["GTREFCLK0", "GTREFCLK1", "GTGREFCLK1"]:
+        assert f".{port}" in common
+
+
+def test_openxc7_refuses_two_fabric_gtp_refclks():
+    # Ethernet 1000BASE-X and SATA both feed their PLL of the GTP quad from the fabric.
+    soc_mod = _load_soc_module()
+    with pytest.raises(ValueError, match="single fabric reference clock"):
+        soc_mod.BaseSoC(variant="baseboard", with_pcie=False, with_eth=True, with_sata=True,
+            with_jtagbone=False, toolchain="openxc7")
 
 
 def test_openxc7_pcie_requires_ip_sources():

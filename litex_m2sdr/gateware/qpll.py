@@ -126,6 +126,8 @@ class SharedQPLL(LiteXModule):
         constant included, and has a single fabric input. So the unused ports are left out, and
         the fabric clock goes to the GTREFCLK of its PLL (PLLxREFCLKSEL is kept).
         """
+        if self.qpll is None:
+            return
         instance = next(special for special in self.qpll._fragment.specials
             if isinstance(special, Instance) and special.of == "GTPE2_COMMON")
         refclk_ports = ["GTREFCLK0", "GTREFCLK1", "GTGREFCLK0", "GTGREFCLK1"]
