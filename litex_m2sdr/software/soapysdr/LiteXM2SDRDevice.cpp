@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <inttypes.h>
 #include <time.h>
 
@@ -976,6 +977,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
             _rf_freq_offset_hz[SOAPY_SDR_TX], _rf_freq_offset_hz[SOAPY_SDR_RX]);
     if (args.count("refclk_ppm") > 0)
         _refclk_ppm = resolve_refclk_ppm(_dev, args.at("refclk_ppm"));
+    if (args.count("refclk_ppm_mode") > 0) {
+        const std::string &mode = args.at("refclk_ppm_mode");
+        if (mode != "si5351" && mode != "rfic")
+            throw std::runtime_error("refclk_ppm_mode must be si5351 or rfic");
+        _refclk_ppm_rfic = (mode == "rfic");
+    }
     /* Sample rate (and bandwidth) applied by the RF init, before the application sets its own. */
     double init_samplerate = 30.72e6;
     if (args.count("init_samplerate") > 0) {
@@ -1012,6 +1019,19 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     SoapySDR::log(SOAPY_SDR_INFO, "Initializing AD9361 RFIC");
     AD9361_InitParam init_param = default_init_param;
     init_param.reference_clk_rate = _refclk_hz;
+    if (_refclk_ppm_rfic) {
+        /* The SI5351 is not trimmed: the AD9361 gets the real frequency of its reference. */
+        init_param.reference_clk_rate = m2sdr_refclk_actual_hz(_refclk_hz, _refclk_ppm);
+        SoapySDR::logf(SOAPY_SDR_INFO, "RefClk error %.3f ppm compensated in the AD9361 (reference %u Hz) and the board time",
+            _refclk_ppm, static_cast<unsigned>(init_param.reference_clk_rate));
+    }
+#ifdef CSR_TIME_GEN_TIME_INC_ADDR
+    /* Board time: nominal periods of its clock, or the real ones with refclk_ppm_mode=rfic
+     * (derived from the frequency given to the AD9361: time and sample clock stay in step). */
+    if (do_init)
+        litex_m2sdr_writel(_dev, CSR_TIME_GEN_TIME_INC_ADDR,
+            m2sdr_time_inc_for_refclk(_refclk_hz, init_param.reference_clk_rate));
+#endif
     init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
     init_param.gpio_sync          = -1;
     init_param.gpio_cal_sw1       = -1;
@@ -2195,7 +2215,6 @@ double SoapyLiteXM2SDR::getSampleRate(
 
     /* RX/TX rates are always programmed together; m2sdr_get_sample_rate()
      * reports the stream rate. */
-    (void)direction;
     int64_t sample_rate = 0;
 
     /* Requested, applied when a single-channel stream is set up (see setSampleRate()). */
@@ -2213,6 +2232,16 @@ double SoapyLiteXM2SDR::getSampleRate(
         SoapySDR::logf(SOAPY_SDR_ERROR,
             "m2sdr_get_sample_rate failed: %s", m2sdr_strerror(rc));
         return 0.0;
+    }
+
+    /* refclk_ppm_mode=rfic: the AD9361 works from the real reference frequency, and its baseband PLL
+     * reaches the requested rate only to a fraction of a Hz, which the integer readback shows as 1 Hz
+     * less or more. Report the requested rate: applications compare it with what they asked for
+     * (srsRAN 4G refuses a rate that is not an exact multiple of its base rate). */
+    if (_refclk_ppm_rfic) {
+        const double requested = (direction == SOAPY_SDR_TX) ? _tx_stream.samplerate : _rx_stream.samplerate;
+        if (requested > 0.0 && std::fabs(static_cast<double>(sample_rate) - requested) <= 2.0)
+            return requested;
     }
 
     return static_cast<double>(sample_rate);
@@ -2422,7 +2451,7 @@ void SoapyLiteXM2SDR::applyClockSource(const std::string &source)
     /* Compensate the measured reference error by trimming the PLL feedback
      * away from the nominal table, correcting the AD9361 reference and all
      * derived clocks together. */
-    if (_refclk_ppm != 0.0) {
+    if (_refclk_ppm != 0.0 && !_refclk_ppm_rfic) {
         SoapySDR::logf(SOAPY_SDR_INFO, "Trimming SI5351 PLL by %.3f ppm", _refclk_ppm);
         if (!m2sdr_si5351_i2c_trim_pllb_ppm((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
             config, length, _refclk_ppm, &_si5351_pllb, nullptr))
@@ -3012,6 +3041,8 @@ void SoapyLiteXM2SDR::writeSetting(const std::string &key, const std::string &va
 #ifdef CSR_SI5351_BASE
     if (key == "refclk_ppm") {
         std::lock_guard<std::mutex> lock(_mutex);
+        if (_refclk_ppm_rfic)
+            throw std::runtime_error("refclk_ppm: no run-time retrim with refclk_ppm_mode=rfic");
         const double ppm = resolve_refclk_ppm(_dev, value);
         const uint8_t (*config)[2];
         size_t length;

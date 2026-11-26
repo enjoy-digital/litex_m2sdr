@@ -46,6 +46,10 @@ static void help(void)
            "                         SI5351 PLL (positive = clock runs fast, default: 0).\n"
            "                         'stored': the value of the calibration record of the\n"
            "                         board (m2sdr_cal).\n"
+           "      --refclk-ppm-mode M Where the RefClk error is compensated: si5351 (default:\n"
+           "                         its PLL, with all the derived clocks) or rfic (AD9361 LOs\n"
+           "                         and sample clock, and the board time: the SI5351 keeps a\n"
+           "                         clean reference, without the phase wander of the trim).\n"
            "      --sample-rate SPS  Set RF sample rate in SPS (default: %d, accepts 30.72e6\n"
            "                         or 20M). Rates above 61.44 MSPS select the\n"
            "                         wide-bandwidth mode (~100 MHz analog passband).\n"
@@ -113,6 +117,8 @@ int main(int argc, char **argv)
         { "refclk_freq", required_argument, NULL, 6 },
         { "refclk-ppm", required_argument, NULL, 25 },
         { "refclk_ppm", required_argument, NULL, 25 },
+        { "refclk-ppm-mode", required_argument, NULL, 26 },
+        { "refclk_ppm_mode", required_argument, NULL, 26 },
         { "sample-rate", required_argument, NULL, 7 },
         { "samplerate", required_argument, NULL, 7 },
         { "bandwidth", required_argument, NULL, 8 },
@@ -226,6 +232,16 @@ int main(int argc, char **argv)
                                              M2SDR_REFCLK_PPM_MAX, &cfg.refclk_ppm) != 0) {
                 m2sdr_cli_error("invalid refclk ppm '%s' (expected -%.0f to %.0f)",
                                 optarg, M2SDR_REFCLK_PPM_MAX, M2SDR_REFCLK_PPM_MAX);
+                return 1;
+            }
+            break;
+        case 26:
+            if (strcmp(optarg, "si5351") == 0) {
+                cfg.refclk_ppm_mode = M2SDR_REFCLK_PPM_MODE_SI5351;
+            } else if (strcmp(optarg, "rfic") == 0) {
+                cfg.refclk_ppm_mode = M2SDR_REFCLK_PPM_MODE_RFIC;
+            } else {
+                m2sdr_cli_error("invalid refclk ppm mode '%s' (expected si5351 or rfic)", optarg);
                 return 1;
             }
             break;
