@@ -668,6 +668,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         bool holdLast,
         const long timeoutUs);
     long long txCheckNowNs();
+    long long txCheckMinBurstSamples() const;
     long long rxSampleGridTimeNs(long long hw_time_ns, size_t samples);
     void markTxRemainderTime(const long long payloadTimeNs);
     void setBandwidthUnlocked(
