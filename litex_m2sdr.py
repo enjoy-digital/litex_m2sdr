@@ -1463,12 +1463,25 @@ class BaseSoC(SoCMini):
         # the attribute's index in this function's name table exceeds 255, so referencing new names
         # earlier in __init__ renames unrelated signals of the Vivado builds (ex: eth_tx_marker).
         if toolchain != "vivado":
-            self.add_openxc7_support(with_pcie=with_pcie, pcie_ip_sources=pcie_ip_sources)
+            self.add_openxc7_support(sys_clk_freq, with_pcie=with_pcie, pcie_ip_sources=pcie_ip_sources)
 
     # openXC7 Support ------------------------------------------------------------------------------
 
-    def add_openxc7_support(self, with_pcie=False, pcie_ip_sources=None):
+    def add_openxc7_support(self, sys_clk_freq, with_pcie=False, pcie_ip_sources=None):
         platform = self.platform
+        # nextpnr-xilinx does not derive a clock through a PLL or a clock buffer: a clock without
+        # a period of its own is checked against the fastest one of the design, and the placer
+        # then takes every path for a critical one. The internal clocks get their real period.
+        clocks = [
+            (self.crg.cd_sys.clk,    sys_clk_freq),
+            (self.crg.cd_clk10.clk,  10e6),
+            (self.crg.cd_idelay.clk, 200e6),
+            # The SI5351 clocks after their input buffers, as the clock measurement counts them.
+            (self.clk_measurement.clk_modules["clk2"].cd_counter.clk, 38.4e6),
+            (self.clk_measurement.clk_modules["clk4"].cd_counter.clk, 100e6),
+        ]
+        for clk, freq in clocks:
+            platform.add_period_constraint(clk, 1e9/freq)
         # Primitives nextpnr-xilinx does not take as Yosys or LiteX give them are replaced after
         # the synthesis (litex_m2sdr/gateware/openxc7_techmap): the single-port LUT RAMs small
         # memories are mapped to, and the IDDR mode of the DDR inputs.
