@@ -2016,46 +2016,61 @@ int SoapyLiteXM2SDR::readStream(
      * the samples after it, would be late by the samples already taken, at every read that
      * spans two buffers. */
     size_t handle;
-    int buf_flags = flags & ~SOAPY_SDR_HAS_TIME;
-    long long buf_time_ns = 0;
-    int ret = this->acquireReadBuffer(
-        stream,
-        handle,
-        (const void **)&_rx_stream.remainderBuff,
-        buf_flags,
-        buf_time_ns,
-        timeoutUs);
-    flags |= (buf_flags & ~SOAPY_SDR_HAS_TIME);
+    int buf_flags;
+    long long buf_time_ns;
+    int ret;
+    /* A timed activation drops the buffers captured before the start time. The caller waits for
+     * the first sample like on any other read, up to its timeout: a TIMEOUT per dropped buffer
+     * (177 us at 11.52 MSPS) would use up the retries of an application in a few milliseconds
+     * (srsRAN Project gNB: 10 of them, then the read is given up and the cell never transmits). */
+    const auto start_deadline = std::chrono::steady_clock::now() +
+        std::chrono::microseconds(timeoutUs > 0 ? timeoutUs : 0);
+    for (;;) {
+        buf_flags = flags & ~SOAPY_SDR_HAS_TIME;
+        buf_time_ns = 0;
+        ret = this->acquireReadBuffer(
+            stream,
+            handle,
+            (const void **)&_rx_stream.remainderBuff,
+            buf_flags,
+            buf_time_ns,
+            timeoutUs);
+        flags |= (buf_flags & ~SOAPY_SDR_HAS_TIME);
 
-    if (ret < 0) {
-        if ((ret == SOAPY_SDR_TIMEOUT) && (samp_avail > 0)) {
-            return samp_avail;
+        if (ret < 0) {
+            if ((ret == SOAPY_SDR_TIMEOUT) && (samp_avail > 0)) {
+                return samp_avail;
+            }
+            return ret;
         }
-        return ret;
-    }
 
-    _rx_stream.remainderHandle = handle;
-    _rx_stream.remainderSamps = ret;
-    _rx_stream.remainderTimeNs = buf_time_ns;
+        _rx_stream.remainderHandle = handle;
+        _rx_stream.remainderSamps = ret;
+        _rx_stream.remainderTimeNs = buf_time_ns;
 
-    /* Timed activation: drop what was captured before the requested start time. */
-    if (_rx_stream.start_time_ns != 0 && samp_avail == 0 && (buf_flags & SOAPY_SDR_HAS_TIME)) {
-        const long long buf_end_ns = buf_time_ns + samples_to_ns(_rx_stream.samplerate, ret);
-        if (buf_end_ns <= _rx_stream.start_time_ns) {
-            this->releaseReadBuffer(stream, _rx_stream.remainderHandle);
-            _rx_stream.remainderHandle = -1;
-            _rx_stream.remainderSamps = 0;
-            _rx_stream.remainderOffset = 0;
-            return SOAPY_SDR_TIMEOUT;
+        /* Timed activation: drop what was captured before the requested start time. */
+        if (_rx_stream.start_time_ns != 0 && samp_avail == 0 && (buf_flags & SOAPY_SDR_HAS_TIME)) {
+            const long long buf_end_ns = buf_time_ns + samples_to_ns(_rx_stream.samplerate, ret);
+            if (buf_end_ns <= _rx_stream.start_time_ns) {
+                this->releaseReadBuffer(stream, _rx_stream.remainderHandle);
+                _rx_stream.remainderHandle = -1;
+                _rx_stream.remainderSamps = 0;
+                _rx_stream.remainderOffset = 0;
+                if (!_rx_stream.stop_requested.load() &&
+                    std::chrono::steady_clock::now() < start_deadline)
+                    continue;
+                return SOAPY_SDR_TIMEOUT;
+            }
+            if (buf_time_ns < _rx_stream.start_time_ns) {
+                size_t skip = ns_to_samples_ceil(_rx_stream.samplerate, _rx_stream.start_time_ns - buf_time_ns);
+                if (skip > _rx_stream.remainderSamps)
+                    skip = _rx_stream.remainderSamps;
+                _rx_stream.remainderOffset += skip;
+                _rx_stream.remainderSamps -= skip;
+            }
+            _rx_stream.start_time_ns = 0;
         }
-        if (buf_time_ns < _rx_stream.start_time_ns) {
-            size_t skip = ns_to_samples_ceil(_rx_stream.samplerate, _rx_stream.start_time_ns - buf_time_ns);
-            if (skip > _rx_stream.remainderSamps)
-                skip = _rx_stream.remainderSamps;
-            _rx_stream.remainderOffset += skip;
-            _rx_stream.remainderSamps -= skip;
-        }
-        _rx_stream.start_time_ns = 0;
+        break;
     }
 
     const size_t n = std::min((returnedElems - samp_avail), _rx_stream.remainderSamps);
