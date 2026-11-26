@@ -2346,7 +2346,10 @@ int SoapyLiteXM2SDR::writeStream(
                     _tx_stream.hw_burst_valid = false;
                     _tx_stream.hw_restamp_on_time = true;
                 }
-                if (drift_ns > early_tolerance_ns) {
+                /* With an empty ring the estimate leaves the TX FIFO out and reads early by its size,
+                 * whatever the stream does: a base station then stamped its stream again at every
+                 * check, for as long as the ring stayed empty. No correction on that reading. */
+                if (drift_ns > early_tolerance_ns && (pending > 0 || _tx_stream.strict_timing)) {
                     _tx_stream.hw_burst_valid = false;
                     _tx_stream.hw_restamp_on_time = true; /* early: the gate holds the stamp */
                 }
@@ -2371,7 +2374,24 @@ int SoapyLiteXM2SDR::writeStream(
                  * ahead of it). A new burst starts on an empty ring: two buffers of lead let the gate get it. */
                 const long long min_lead_ns = samples_to_ns(_tx_stream.samplerate,
                     static_cast<long long>(2 * this->getStreamMTU(stream)));
-                if (now_ns != 0 && timeNs < now_ns + min_lead_ns) {
+                bool too_late = (now_ns != 0 && timeNs < now_ns + min_lead_ns);
+                /* A base station (no tx_strict_timing) has nothing that corrects a burst that starts a
+                 * fraction of a buffer late, and the gate turns a late start into exactly that: it airs
+                 * zeros in place of the stamped buffer from the moment it arrives, so all the samples
+                 * behind it are late by the same amount, for good. Its terminals follow the downlink,
+                 * and their uplink then misses its receive windows.
+                 * now_ns lags the board time by the delivery of the RX buffers (0.6 to 1 ms measured at
+                 * 11.52 MSPS): a lead of two buffers against it can already be late. When the call is
+                 * close, read the board clock: one register access, at a burst start only. */
+                if (!too_late && !_tx_stream.strict_timing && now_ns != 0 && timeNs < now_ns + 3 * min_lead_ns) {
+                    try {
+                        const long long board_ns = this->getHardwareTime("") -
+                            _rx_stream.grid_offset_ns.load(std::memory_order_relaxed);
+                        too_late = (timeNs < board_ns + min_lead_ns);
+                    } catch (const std::exception &) {
+                    }
+                }
+                if (too_late) {
                     _tx_stream.hw_burst_valid = false;
                     hwNextSet(timeNs);
                     hwNextAdvance(static_cast<long long>(returnedElems));
