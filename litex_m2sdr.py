@@ -6,6 +6,7 @@
 # Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
+import glob
 import inspect
 import os
 import sys
@@ -54,6 +55,7 @@ from litex_m2sdr.gateware.clock_discipline import MMCMPhaseDiscipline, PTPClock1
 from litex_m2sdr.gateware.si5351           import SI5351
 from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
 from litex_m2sdr.gateware.qpll        import SharedQPLL
+from litex_m2sdr.gateware.openxc7_flow import add_openxc7_flow
 from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
 from litex_m2sdr.gateware.ptp_discipline import PTPTimeDiscipline, TimeDisciplineCDC
 from litex_m2sdr.gateware.ptp_identity   import PTPIdentityTracker
@@ -197,6 +199,9 @@ class CRG(LiteXModule):
         if not with_white_rabbit:
             # Keep clk10 on a dedicated MMCM so the SI5351C FPGA CLKIN path can be phase-steered later.
             self.clk10_mmcm = clk10_mmcm = S7MMCM(speedgrade=-3, fractional=False)
+            if platform.toolchain_name != "vivado":
+                # nextpnr (openXC7) only supports CLKFBOUT_MULT_F up to 63.
+                clk10_mmcm.clkfbout_mult_frange = (2, 63+1)
             self.comb += clk10_mmcm.reset.eq(self.rst)
             clk10_mmcm.register_clkin(clk100, 100e6)
             clk10_mmcm.expose_dps("clk200", with_csr=False)
@@ -235,8 +240,14 @@ class CRG(LiteXModule):
         # OOB clock (LFPS detection) at sys_clk_freq/8. The QPLL GTGREFCLK reference is the 125MHz
         # sys clock: the 100MHz oscillator through a BUFG gave USB3 link errors/Recoveries as soon
         # as the AD9361 ran at 30.72MSPS (clean with the sys clock).
+        # With a slower sys clock (FPGA toolchains that do not reach 125MHz on the Core), the USB3
+        # PIPE/SerDes and the QPLL reference are on a 125MHz usb3 clock of the same PLL.
         if with_usb3:
-            pll.create_clkout(self.cd_oob, sys_clk_freq/8, margin=0)
+            usb3_clk_freq = 125e6
+            if sys_clk_freq != usb3_clk_freq:
+                self.cd_usb3 = ClockDomain()
+                pll.create_clkout(self.cd_usb3, usb3_clk_freq, margin=0)
+            pll.create_clkout(self.cd_oob, usb3_clk_freq/8, margin=0)
 
         # SATA PLL.
         # ---------
@@ -353,6 +364,9 @@ class BaseSoC(SoCMini):
         with_gpio              = False,
         pps_input              = "m2",
         with_rfic_oversampling = False,
+        toolchain              = "vivado",
+        pcie_ip_sources        = None,
+        openxc7_fabric_iddr    = False,
     ):
         if pps_input in ("tp1", "tp2") and with_gpio:
             raise ValueError("PPS input on TP1/TP2 cannot be used with --with-gpio.")
@@ -371,7 +385,7 @@ class BaseSoC(SoCMini):
 
         # Platform ---------------------------------------------------------------------------------
 
-        platform = Platform(build_multiboot=True)
+        platform = Platform(build_multiboot=True, toolchain=toolchain)
         platform.rfic_clk_freq = get_rfic_clk_freq(
             with_eth               = with_eth,
             eth_phy                = eth_phy,
@@ -396,8 +410,8 @@ class BaseSoC(SoCMini):
                 raise ValueError("USB3 cannot be combined with Ethernet, SATA or White Rabbit (yet).")
             if with_rfic_oversampling:
                 raise ValueError("USB3 bandwidth (~440MB/s) does not allow the RFIC oversampling datapath.")
-            if sys_clk_freq != 125e6:
-                raise ValueError("USB3 requires sys_clk_freq == 125MHz (USB3 QPLL reference).")
+            if sys_clk_freq > 125e6:
+                raise ValueError("USB3 requires sys_clk_freq <= 125MHz (125MHz: PIPE/Core in sys, lower: PIPE on a 125MHz clock).")
 
         if with_white_rabbit and (variant not in ["baseboard", "rpi5hat"]):
             raise ValueError("White Rabbit is only supported with --variant=baseboard/rpi5hat (requires baseboard/rpi5hat SFP resources).")
@@ -455,6 +469,7 @@ class BaseSoC(SoCMini):
             eth_refclk_direct = with_eth and (eth_phy == "2500basex"),
             with_sata       = with_sata,
             with_usb3       = with_usb3,
+            usb3_refclk_cd  = "sys" if sys_clk_freq == 125e6 else "usb3",
         )
 
         # Capability -------------------------------------------------------------------------------
@@ -585,7 +600,9 @@ class BaseSoC(SoCMini):
 
         # XADC -------------------------------------------------------------------------------------
 
-        self.xadc = S7SystemMonitor()
+        # The XADC primitive is not supported by the openXC7 flow (no XADC BEL in nextpnr).
+        if toolchain == "vivado":
+            self.xadc = S7SystemMonitor()
 
         # DNA --------------------------------------------------------------------------------------
 
@@ -1448,6 +1465,67 @@ class BaseSoC(SoCMini):
             "clk5" : ClockSignal("clk10"),
         })
 
+        # openXC7 ----------------------------------------------------------------------------------
+
+        # Keep this call last in __init__ and the openXC7 code in its own method: Migen names
+        # modules from the bytecode following their creation and falls back to the class name when
+        # the attribute's index in this function's name table exceeds 255, so referencing new names
+        # earlier in __init__ renames unrelated signals of the Vivado builds (ex: eth_tx_marker).
+        if toolchain != "vivado":
+            self.add_openxc7_support(sys_clk_freq,
+                with_pcie       = with_pcie,
+                pcie_ip_sources = pcie_ip_sources,
+                with_usb3       = with_usb3,
+                fabric_iddr     = openxc7_fabric_iddr)
+
+    # openXC7 Support ------------------------------------------------------------------------------
+
+    def add_openxc7_support(self, sys_clk_freq, with_pcie=False, pcie_ip_sources=None, with_usb3=False,
+        fabric_iddr=False):
+        platform = self.platform
+        # nextpnr-xilinx does not derive a clock through a PLL or a clock buffer: a clock without
+        # a period of its own is checked against the fastest one of the design, and the placer
+        # then takes every path for a critical one. The internal clocks get their real period.
+        clocks = [
+            (self.crg.cd_sys.clk,    sys_clk_freq),
+            (self.crg.cd_clk10.clk,  10e6),
+            (self.crg.cd_idelay.clk, 200e6),
+            # The SI5351 clocks after their input buffers, as the clock measurement counts them.
+            (self.clk_measurement.clk_modules["clk2"].cd_counter.clk, 38.4e6),
+            (self.clk_measurement.clk_modules["clk4"].cd_counter.clk, 100e6),
+        ]
+        if with_usb3:
+            clocks.append((self.crg.cd_oob.clk, 125e6/8))
+            if sys_clk_freq != 125e6:
+                clocks.append((self.crg.cd_usb3.clk, 125e6))
+        for clk, freq in clocks:
+            platform.add_period_constraint(clk, 1e9/freq)
+        # Synthesis and bitstream steps specific to this flow (techmaps, bitstream fix-ups).
+        add_openxc7_flow(platform, fabric_iddr=fabric_iddr)
+        if with_pcie:
+            # The pcie_s7 wrapper is a Vivado-generated IP (pcie_7x): without Vivado it cannot be
+            # generated during the build, so reuse the plain Verilog sources a previous Vivado
+            # build of the same PCIe configuration left in its .gen directory.
+            if pcie_ip_sources is None:
+                raise ValueError("PCIe with the openXC7 toolchain requires pcie_ip_sources (--pcie-ip-sources).")
+            # The IP instantiates macros from Vivado's XPM/UNIMACRO libraries: use local replacements.
+            platform.add_source_dir(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                "litex_m2sdr", "gateware", "openxc7"))
+            pcie_ip_files = [os.path.join(pcie_ip_sources, "synth", "pcie_s7.v")]
+            pcie_ip_files += sorted(glob.glob(os.path.join(pcie_ip_sources, "source", "*.v")))
+            for filename in pcie_ip_files:
+                if not os.path.isfile(filename):
+                    raise ValueError(f"PCIe IP source {filename} not found.")
+                platform.add_source(filename)
+            self.pcie_phy.external_hard_ip = True
+            # The IP leaves the GTP's TXPI_SYNFREQ_PPM at its primitive default (0), which nextpnr
+            # rejects. The TX phase interpolator PPM controller is not used for PCIe: set the value
+            # LiteX's own transceiver PHYs use on the cells that do not define it.
+            platform.toolchain._yosys_cmds += [
+                "hierarchy -top {build_name}",
+                "setparam -set TXPI_SYNFREQ_PPM 3'b001 t:GTPE2_CHANNEL r:TXPI_SYNFREQ_PPM %d",
+            ]
+
     # RFIC Datapath Hook -----------------------------------------------------------------------------
 
     def add_rfic_datapath(self, rfic_sink, rfic_source, tx_source, rx_sink):
@@ -1551,9 +1629,10 @@ class BaseSoC(SoCMini):
         self.usb3 = USB3(platform,
             sfp_pads     = platform.request("sfp", sfp),
             qpll_channel = self.qpll.get_channel("usb3"),
-            refclk_freq  = sys_clk_freq,
+            refclk_freq  = 125e6,
             sys_clk      = self.crg.cd_sys.clk,
             sys_clk_freq = sys_clk_freq,
+            pipe_clk     = getattr(getattr(self.crg, "cd_usb3", None), "clk", None),
             data_width   = 64,
             vid          = vid,
             pid          = pid,
@@ -1832,6 +1911,7 @@ def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # Build/Load/Utilities.
     parser.add_argument("--variant",          default="m2",              help="Design variant.", choices=["m2", "baseboard", "rpi5hat"])
+    parser.add_argument("--toolchain",        default="vivado",          help="FPGA toolchain (openxc7: experimental, build-only).", choices=["vivado", "openxc7"])
     parser.add_argument("--sys-clk-freq",     default=None, type=float,  help="System clock frequency in Hz (default: 100MHz with Ethernet, 125MHz otherwise).")
     parser.add_argument("--reset",            action="store_true",       help="Reset the device.")
     parser.add_argument("--build",            action="store_true",       help="Build bitstream.")
@@ -1852,6 +1932,8 @@ def main():
     parser.add_argument("--pcie-gen",        default=2, type=int, help="PCIe Generation.", choices=[1, 2])
     parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
     parser.add_argument("--pcie-dmas",       default=1, type=int, help="Number of PCIe DMA channels (subclasses may use >1 for side-band streams).")
+    parser.add_argument("--openxc7-fabric-iddr", action="store_true",                help="openXC7: AD9361 DDR inputs captured in fabric flip-flops (archived nextpnr-xilinx 0.8.x).")
+    parser.add_argument("--pcie-ip-sources", default=None,        help="Vivado-generated pcie_s7 IP directory (with synth/ and source/), required for PCIe with --toolchain=openxc7.")
 
     # Ethernet parameters.
     parser.add_argument("--with-eth",        action="store_true",     help="Enable Ethernet Communication.")
@@ -1912,6 +1994,11 @@ def main():
 
     args = parser.parse_args()
 
+    # The openXC7 flow is experimental and build-only: it produces no .bin/multiboot images and its
+    # timing analysis is not a sign-off, so its bitstreams must not be written to the SPI Flash.
+    if (args.toolchain != "vivado") and (args.flash or args.flash_multiboot):
+        parser.error(f"--flash/--flash-multiboot are not supported with --toolchain={args.toolchain}.")
+
     this_dir = os.path.dirname(os.path.abspath(__file__))
 
     wr_env = {
@@ -1952,6 +2039,7 @@ def main():
     soc = BaseSoC(
         # Generic.
         variant       = args.variant,
+        toolchain     = args.toolchain,
         sys_clk_freq  = int(args.sys_clk_freq),
 
         # RFIC.
@@ -1964,6 +2052,8 @@ def main():
         pcie_gen      = args.pcie_gen,
         pcie_lanes    = args.pcie_lanes,
         pcie_dmas     = args.pcie_dmas,
+        pcie_ip_sources = args.pcie_ip_sources,
+        openxc7_fabric_iddr = args.openxc7_fabric_iddr,
 
         # Ethernet.
         with_eth      = args.with_eth,
@@ -2066,6 +2156,8 @@ def main():
             r += "_rfic_oversampling"
         if args.without_jtagbone:
             r += "_no_jtagbone"
+        if args.toolchain != "vivado":
+            r += f"_{args.toolchain}"
         return r
 
     builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")

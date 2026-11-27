@@ -14,6 +14,7 @@ keyword arguments: `--with-eth` is `with_eth=True`, `--eth-phy=2500basex` is
 | Option | Default | Effect |
 |-----------------------------------|-------------|----------------------------------------------------|
 | `--variant` | `m2` | Carrier: `m2` or `baseboard` ([Variants](#soc-variants)) |
+| `--toolchain` | `vivado` | FPGA toolchain: `vivado` or `openxc7`, experimental ([openXC7](#build-openxc7)) |
 | `--sys-clk-freq` | see below | System clock frequency in Hz |
 | `--build` | off | Run Vivado and build the bitstream |
 | `--load` | off | Load the bitstream over JTAG |
@@ -51,6 +52,8 @@ refuses it with Ethernet, SATA or USB3. The BFP8 format does not exist on this b
 | `--pcie-gen` | `2` | PCIe generation: `1` or `2` |
 | `--pcie-lanes` | `1` | Lanes: `1`, `2` or `4`; one lane only on the baseboard |
 | `--pcie-dmas` | `1` | DMA channels; channel 0 carries the samples |
+| `--pcie-ip-sources` | none | Directory of the Vivado-generated PCIe core, required with openXC7 |
+| `--openxc7-fabric-iddr` | off | openXC7, archived nextpnr-xilinx: AD9361 DDR inputs in fabric flip-flops |
 | `--with-pcie-ptm` | off | PCIe PTM requester; needs `--with-pcie`, PCIe Gen2 x1 only |
 | `--with-pcie-reset-workaround` | off | Toggle the PCIe reset until the link is up |
 
@@ -106,7 +109,7 @@ refused, and also needs `--sys-clk-freq` ([System clock](#build-sysclk)).
 | `--usb3-pid` | `0x605a` | USB product identifier |
 | `--with-usb3-debug` | off | Debug registers of the USB3 PHY, transceiver and device core |
 
-USB3 needs the `baseboard` variant and a system clock of 125 MHz, the default without Ethernet.
+USB3 needs the `baseboard` variant and a system clock of 125 MHz, the default without Ethernet, or less: the USB3 PIPE then runs on a 125 MHz clock of its own ([openXC7](#build-openxc7)).
 It can be built alone or with PCIe; the script refuses it with Ethernet, SATA, White Rabbit and
 the oversampling mode. The build needs the USB3-PIPE package. The link is described in
 [USB3 host link](#links-usb3).

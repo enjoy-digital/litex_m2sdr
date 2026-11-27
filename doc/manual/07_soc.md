@@ -75,7 +75,7 @@ The carriers and their connectors are described in [Carriers](#carriers).
 | `--with-pcie`                | PCIe, SATA and one of Ethernet or White Rabbit cannot all be enabled |
 | `--with-white-rabbit`        | Needs the `baseboard` variant and an SFP. Excludes `--with-eth` and `--with-eth-ptp` |
 | `--with-rfic-oversampling`   | Excludes `--with-eth` and `--with-sata`                           |
-| `--with-usb3`                | Needs the `baseboard` variant and a 125 MHz system clock. Excludes Ethernet, SATA, White Rabbit and the oversampling mode |
+| `--with-usb3`                | Needs the `baseboard` variant and a system clock of 125 MHz or less (below: the USB3 PIPE on a 125 MHz clock of its own, [openXC7](#build-openxc7)). Excludes Ethernet, SATA, White Rabbit and the oversampling mode |
 | `--with-pcie-ptm`            | Needs `--with-pcie` and one lane                                  |
 | `--with-eth-ptp`             | Needs `--with-eth`                                                |
 | `--with-eth-ptp-rfic-clock`  | Needs `--with-eth-ptp`. Excludes White Rabbit                     |

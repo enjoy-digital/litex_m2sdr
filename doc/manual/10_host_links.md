@@ -121,7 +121,7 @@ one protocol the map has one entry on channel 0. A link gets its channel by name
 | 5GBASE-R | `refclk_eth`, 103.125 MHz | `GTGREFCLK0` | 5 | 5 |
 | White Rabbit | `refclk_eth`, 125 MHz | `GTGREFCLK0` | 4 | 5 |
 | SATA | `refclk_sata`, 150 MHz | `GTGREFCLK0` | 5 | 4 |
-| USB3 | System clock, 125 MHz | `GTGREFCLK0` | 4 | 5 |
+| USB3 | System clock, 125 MHz (or the USB3 clock, 125 MHz, with a slower system clock) | `GTGREFCLK0` | 4 | 5 |
 
 The Ethernet settings give line rates of 1.25 Gbps, 3.125 Gbps and 5.15625 Gbps, which
 `test/test_qpll.py` checks. The 125 MHz and 103.125 MHz references come from a PLL fed by the

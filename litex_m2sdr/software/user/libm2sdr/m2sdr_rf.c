@@ -51,7 +51,10 @@ bool ad9361_wide_bbf_tune(struct ad9361_rf_phy *phy, uint32_t bbbw);
 #define SI5351_STATUS_LOS      0x10
 #define SI5351_READY_TIMEOUT_MS 100
 #ifdef USE_LITEETH
+/* Overridable at build time: a slow bridge (litex_server --jtag behind a UDP forwarder) needs more. */
+#ifndef M2SDR_LITEETH_RF_INIT_TIMEOUT_MS
 #define M2SDR_LITEETH_RF_INIT_TIMEOUT_MS 5000
+#endif
 #endif
 
 #ifndef M2SDR_LOG_ENABLED

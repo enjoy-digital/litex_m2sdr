@@ -6,6 +6,11 @@
 
 import subprocess
 
+import copy
+
+from migen import Module, Signal, Instance
+
+from litex.build.io               import SDRTristate
 from litex.build.generic_platform import *
 from litex.build.xilinx           import Xilinx7SeriesPlatform
 from litex.build.openfpgaloader   import OpenFPGALoader
@@ -209,18 +214,75 @@ _connectors = [
 # Lanes 1 and 2 are swapped against the PCIe IP's default order, so targets must LOC them.
 M2_PCIE_GT_LOCS = ["GTPE2_CHANNEL_X0Y7", "GTPE2_CHANNEL_X0Y5", "GTPE2_CHANNEL_X0Y6", "GTPE2_CHANNEL_X0Y4"]
 
+# IOs for nextpnr ----------------------------------------------------------------------------------
+
+def _nextpnr_io(io):
+    """IOs with the pull resistors as nextpnr-xilinx reads them: the PULLTYPE property. It ignores
+    Vivado's PULLUP/PULLDOWN, which leaves an open-drain bus without external resistors (the
+    SI5351 I2C) floating."""
+    pulls = {"PULLUP=TRUE": "PULLTYPE=PULLUP", "PULLDOWN=TRUE": "PULLTYPE=PULLDOWN"}
+    def translate(constraint):
+        if isinstance(constraint, Misc):
+            constraint.misc = pulls.get(constraint.misc, constraint.misc)
+        elif isinstance(constraint, Subsignal):
+            for c in constraint.constraints:
+                translate(c)
+    io = copy.deepcopy(io)
+    for entry in io:
+        for constraint in entry[2:]:
+            translate(constraint)
+    return io
+
+# Registered tristate for nextpnr -------------------------------------------------------------------
+
+class _FabricSDRTristateImpl(Module):
+    """Registered tristate with its three registers in the fabric.
+
+    LiteX registers the input of a Xilinx SDRTristate with an IDDR in the IO tile. With
+    nextpnr-xilinx that pad does not work (the SI5351 I2C sees no device). Plain flip-flops and
+    an IOBUF do.
+    """
+    def __init__(self, io, o, oe, i, clk):
+        for j in range(len(io)):
+            _o, _oe_n, _i = Signal(), Signal(), Signal()
+            self.specials += [
+                Instance("FDCE", i_C=clk, i_CE=1, i_CLR=0, i_D=o[j],   o_Q=_o),
+                Instance("FDCE", i_C=clk, i_CE=1, i_CLR=0, i_D=~oe[j], o_Q=_oe_n),
+                Instance("IOBUF", io_IO=io[j], o_O=_i, i_I=_o, i_T=_oe_n),
+            ]
+            if i is not None:
+                self.specials += Instance("FDCE", i_C=clk, i_CE=1, i_CLR=0, i_D=_i, o_Q=i[j])
+
+class _FabricSDRTristate:
+    @staticmethod
+    def lower(dr):
+        return _FabricSDRTristateImpl(dr.io, dr.o, dr.oe, dr.i, dr.clk)
+
 # Platform -----------------------------------------------------------------------------------------
 
 class Platform(Xilinx7SeriesPlatform):
     default_clk_name   = "clk100"
     default_clk_period = 1e9/100e6
 
-    def __init__(self, build_multiboot=False):
+    def __init__(self, build_multiboot=False, toolchain="vivado"):
         device = "xc7a200t"
-        Xilinx7SeriesPlatform.__init__(self, f"{device}sbg484-3", _io, _connectors, toolchain="vivado")
+        io = _io if toolchain == "vivado" else _nextpnr_io(_io)
+        Xilinx7SeriesPlatform.__init__(self, f"{device}sbg484-3", io, _connectors, toolchain=toolchain)
+        self.toolchain_name = toolchain
         self.image_size = {"xc7a200t" : 0x00800000}[device]
         self.rfic_clk_freq = 245.76e6
 
+        if toolchain == "vivado":
+            self.add_vivado_bitstream_commands(build_multiboot=build_multiboot)
+        else:
+            # Open-source flow (openXC7: Yosys + nextpnr + Project X-Ray): experimental and
+            # build-only. Vivado Tcl has no equivalent there, so the pre-placement commands the
+            # design/cores append are collected in a list nothing reads and the platform commands
+            # are dropped (see add_platform_command). Only the .bit is produced: no .bin and no
+            # multiboot images.
+            self.toolchain.pre_placement_commands = []
+
+    def add_vivado_bitstream_commands(self, build_multiboot=False):
         self.toolchain.bitstream_commands = [
             "set_property BITSTREAM.CONFIG.UNUSEDPIN Pulldown [current_design]",
             "set_property BITSTREAM.CONFIG.SPI_BUSWIDTH 4 [current_design]",
@@ -249,6 +311,17 @@ class Platform(Xilinx7SeriesPlatform):
                 "write_bitstream -force {build_name}_fallback.bit ",
                 "write_cfgmem -force -format bin -interface spix1 -size 16 -loadbit \"up 0x0 \
                 {build_name}_fallback.bit\" -file {build_name}_fallback.bin"]
+
+    def get_verilog(self, *args, special_overrides=dict(), **kwargs):
+        if self.toolchain_name != "vivado":
+            special_overrides = {SDRTristate: _FabricSDRTristate, **special_overrides}
+        return Xilinx7SeriesPlatform.get_verilog(self, *args, special_overrides=special_overrides, **kwargs)
+
+    def add_platform_command(self, *args, **kwargs):
+        # Platform commands in this design are Vivado Tcl/XDC (false paths, DRC severities...).
+        if self.toolchain_name != "vivado":
+            return
+        Xilinx7SeriesPlatform.add_platform_command(self, *args, **kwargs)
 
     def detect_ftdi_chip(self):
         lsusb_log = subprocess.run(['lsusb'], capture_output=True, text=True)
