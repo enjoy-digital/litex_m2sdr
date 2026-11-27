@@ -144,10 +144,11 @@ timed TX mode.
   `refclk_ppm=stored` takes the value of the calibration record of the board, written by
   `m2sdr_cal measure --store`; the open fails when the board has no record.
 - `refclk_ppm_mode=rfic`: the correction is made in the AD9361 (LOs and sample clock) and in the
-  board time, and the clock generator keeps its nominal setting. The default, `si5351`, trims the
-  clock generator: all its clocks are corrected, but the trim adds a slow phase wander to the
-  LOs (about 400 Hz per ppm of trim), which lowers the EVM of OFDM signals. With `rfic` the
-  setting `refclk_ppm` cannot be written while running.
+  board time, and the clock generator keeps its nominal setting. `si5351` trims the clock
+  generator: all its clocks are corrected, but the trim adds a slow phase wander to the LOs
+  (about 400 Hz per ppm of trim), which lowers the EVM of OFDM signals. `rfic` is the default
+  when `refclk_ppm` is given at the open. Without it the default is `si5351`, and the setting
+  `refclk_ppm` can be written while running; with `rfic` it cannot.
 - `eth_mode=vrt`: the RX stream is meant to come in VRT packets, which carry timestamps, while
   the TX stream stays raw UDP. The driver selects the VRT route when the library is built
   against the `csr.h` of the VRT build; built against the committed `csr.h`, it refuses this mode
