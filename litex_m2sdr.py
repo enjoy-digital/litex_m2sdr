@@ -366,6 +366,7 @@ class BaseSoC(SoCMini):
         with_rfic_oversampling = False,
         toolchain              = "vivado",
         pcie_ip_sources        = None,
+        openxc7_fabric_iddr    = False,
     ):
         if pps_input in ("tp1", "tp2") and with_gpio:
             raise ValueError("PPS input on TP1/TP2 cannot be used with --with-gpio.")
@@ -1474,11 +1475,13 @@ class BaseSoC(SoCMini):
             self.add_openxc7_support(sys_clk_freq,
                 with_pcie       = with_pcie,
                 pcie_ip_sources = pcie_ip_sources,
-                with_usb3       = with_usb3)
+                with_usb3       = with_usb3,
+                fabric_iddr     = openxc7_fabric_iddr)
 
     # openXC7 Support ------------------------------------------------------------------------------
 
-    def add_openxc7_support(self, sys_clk_freq, with_pcie=False, pcie_ip_sources=None, with_usb3=False):
+    def add_openxc7_support(self, sys_clk_freq, with_pcie=False, pcie_ip_sources=None, with_usb3=False,
+        fabric_iddr=False):
         platform = self.platform
         # nextpnr-xilinx does not derive a clock through a PLL or a clock buffer: a clock without
         # a period of its own is checked against the fastest one of the design, and the placer
@@ -1498,7 +1501,7 @@ class BaseSoC(SoCMini):
         for clk, freq in clocks:
             platform.add_period_constraint(clk, 1e9/freq)
         # Synthesis and bitstream steps specific to this flow (techmaps, bitstream fix-ups).
-        add_openxc7_flow(platform)
+        add_openxc7_flow(platform, fabric_iddr=fabric_iddr)
         if with_pcie:
             # The pcie_s7 wrapper is a Vivado-generated IP (pcie_7x): without Vivado it cannot be
             # generated during the build, so reuse the plain Verilog sources a previous Vivado
@@ -1929,6 +1932,7 @@ def main():
     parser.add_argument("--pcie-gen",        default=2, type=int, help="PCIe Generation.", choices=[1, 2])
     parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
     parser.add_argument("--pcie-dmas",       default=1, type=int, help="Number of PCIe DMA channels (subclasses may use >1 for side-band streams).")
+    parser.add_argument("--openxc7-fabric-iddr", action="store_true",                help="openXC7: AD9361 DDR inputs captured in fabric flip-flops (archived nextpnr-xilinx 0.8.x).")
     parser.add_argument("--pcie-ip-sources", default=None,        help="Vivado-generated pcie_s7 IP directory (with synth/ and source/), required for PCIe with --toolchain=openxc7.")
 
     # Ethernet parameters.
@@ -2049,6 +2053,7 @@ def main():
         pcie_lanes    = args.pcie_lanes,
         pcie_dmas     = args.pcie_dmas,
         pcie_ip_sources = args.pcie_ip_sources,
+        openxc7_fabric_iddr = args.openxc7_fabric_iddr,
 
         # Ethernet.
         with_eth      = args.with_eth,

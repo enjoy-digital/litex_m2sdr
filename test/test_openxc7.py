@@ -99,7 +99,8 @@ def test_openxc7_usb3_gtp_refclk_and_techmaps(tmp_path):
     write = next(i for i, line in enumerate(ys) if line.startswith("write_json"))
     techmaps = [line for line in ys[synth + 1:write] if line.startswith("techmap -map ")]
     assert any(line.endswith("lutram_sp.v") for line in techmaps)
-    assert any(line.endswith("iddr_pipelined.v") for line in techmaps)
+    # The IDDRs are kept (openXC7/nextpnr configures them), replaced only on request.
+    assert not any(line.endswith("iddr_pipelined.v") for line in techmaps)
 
     # The IOs with the pull resistors and the registered tristates as nextpnr-xilinx takes them.
     xdc = (gateware / "top.xdc").read_text()
@@ -215,3 +216,13 @@ def test_openxc7_bitstream_fixups(tmp_path):
     (tmp_path / "package_pins.csv").write_text("pin,bank,site,tile,pin_function\nU6,14,IOB_X0Y118,LIOB33_X0Y117,IO\nV5,14,IOB_X0Y117,LIOB33_X0Y117,IO\n")
     with pytest.raises(ValueError, match="only known for"):
         fixup.fix_fasm(str(tmp_path / "top.fasm"), str(tmp_path / "top.xdc"), str(tmp_path / "package_pins.csv"), str(notes))
+
+
+def test_openxc7_fabric_iddr_on_request(tmp_path):
+    soc_mod = _load_soc_module()
+    soc = soc_mod.BaseSoC(variant="baseboard", with_pcie=False, with_jtagbone=False,
+        toolchain="openxc7", openxc7_fabric_iddr=True)
+
+    gateware, _ = _generate(soc, tmp_path, "top")
+    ys = (gateware / "top.ys").read_text().splitlines()
+    assert any(line.startswith("techmap -map ") and line.endswith("iddr_pipelined.v") for line in ys)
