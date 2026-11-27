@@ -48,7 +48,11 @@ std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev) {
 std::string generateDeviceLabel(
     const SoapySDR::Kwargs &dev,
     const std::string &path) {
-    std::string serialTrimmed = dev.at("serial").substr(dev.at("serial").find_first_not_of('0'));
+    /* Leading zeros removed; a serial of zeros only (FPGA DNA reading 0, ex: openXC7 builds)
+     * gives an empty one instead of an out of range substr(). */
+    const std::string &serial = dev.at("serial");
+    const size_t first = serial.find_first_not_of('0');
+    std::string serialTrimmed = first == std::string::npos ? "" : serial.substr(first);
     return dev.at("device") + " " + path + " " + serialTrimmed;
 }
 
