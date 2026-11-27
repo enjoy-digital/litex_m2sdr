@@ -942,6 +942,8 @@ int SoapyLiteXM2SDR::activateStream(
          * whole activation, it is measured again only after a new activation. */
         _tx_stream.hw_check_ref_valid = false;
         _tx_stream.hw_catchup = false;
+        _tx_stream.hw_late_checks = 0;
+        _tx_stream.hw_early_checks = 0;
         _tx_stream.hw_ref_pending = false;
         _tx_stream.hw_restamp_on_time = false;
         if (_tx_stream.timed_tx_enabled)
@@ -2223,6 +2225,8 @@ int SoapyLiteXM2SDR::writeStream(
 
     const size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
     const bool forceFlush = (flags & (SOAPY_SDR_END_BURST | SOAPY_SDR_ONE_PACKET)) != 0;
+    /* First samples of a timed write that overlaps the previous one, not sent (see below). */
+    size_t tx_skip = 0;
 
     /* Time of the next sample of the hardware timed stream. It is counted in samples from the last time given
      * by the application. Adding the duration of each write, rounded to the nanosecond, drifts: a write of 2044
@@ -2342,8 +2346,27 @@ int SoapyLiteXM2SDR::writeStream(
                  * rest of the burst, its stamped buffers dropped by the gate: far beyond what a
                  * receiver can work with (a terminal must hit its slot within the cyclic prefix). */
                 const long long catchup_early_ns = 300000;
-                if (drift_ns < -late_tolerance_ns ||
-                    (_tx_stream.hw_catchup && drift_ns < catchup_early_ns)) {
+                /* tx_strict_timing: a terminal must air within the cyclic prefix, and the tolerances above
+                 * left it off by up to half a millisecond for good. Measured on a cabled 2x2 link at 20 MHz:
+                 * after srsUE wrote a few milliseconds late (CPU load), the catch-up ended on a reading of
+                 * the estimate that was early by its noise, and the uplink stayed 4 buffers (180 us) late,
+                 * the estimate reading it (median -190 us) but within the tolerance: the base station no
+                 * longer decoded it. So a drift beyond strict_tolerance_ns that persists over a few checks
+                 * (the noise of the estimate is isolated readings, below 80 us late when on time) is
+                 * corrected too: late by a catch-up, early by a stamp (the gate holds it). */
+                const long long strict_tolerance_ns = 100000;
+                const int strict_checks = 4;
+                bool late  = drift_ns < -late_tolerance_ns;
+                bool early = drift_ns > early_tolerance_ns;
+                if (_tx_stream.strict_timing && !_tx_stream.hw_catchup && _tx_stream.hw_check_ref_valid) {
+                    _tx_stream.hw_late_checks  = (drift_ns < -strict_tolerance_ns) ? _tx_stream.hw_late_checks + 1 : 0;
+                    _tx_stream.hw_early_checks = (drift_ns >  strict_tolerance_ns) ? _tx_stream.hw_early_checks + 1 : 0;
+                    late  = late  || _tx_stream.hw_late_checks  >= strict_checks;
+                    early = early || _tx_stream.hw_early_checks >= strict_checks;
+                }
+                if (late || (_tx_stream.hw_catchup && drift_ns < catchup_early_ns)) {
+                    _tx_stream.hw_late_checks = 0;
+                    _tx_stream.hw_early_checks = 0;
                     _tx_stream.hw_catchup = true;
                     hwNextAdvance(static_cast<long long>(returnedElems));
                     /* The dropped samples belong to the burst: the next write still continues it, so the
@@ -2364,7 +2387,8 @@ int SoapyLiteXM2SDR::writeStream(
                 /* With an empty ring the estimate leaves the TX FIFO out and reads early by its size,
                  * whatever the stream does: a base station then stamped its stream again at every
                  * check, for as long as the ring stayed empty. No correction on that reading. */
-                if (drift_ns > early_tolerance_ns && (pending > 0 || _tx_stream.strict_timing)) {
+                if (early && (pending > 0 || _tx_stream.strict_timing)) {
+                    _tx_stream.hw_early_checks = 0;
                     _tx_stream.hw_burst_valid = false;
                     _tx_stream.hw_restamp_on_time = true; /* early: the gate holds the stamp */
                 }
@@ -2503,6 +2527,31 @@ int SoapyLiteXM2SDR::writeStream(
                 gap_ns = timeNs - expected_ns;
                 continues_burst = (gap_ns >= -tolerance_ns) && (gap_ns <= tolerance_ns);
             }
+            /* A timed write that starts before the end of the previous one, by up to one buffer, in
+             * the same burst: srsUE moves its next subframe earlier by each change of its timing
+             * advance (a few to a few tens of samples). Stamped, the partial buffer would carry a
+             * time a few samples in the past: the gate drops it as late, and the burst loses a
+             * buffer and its timing (measured on a cabled link: the uplink then aired 4 buffers
+             * late, beyond what the base station tracks, and the terminal lost its connection).
+             * The new samples overwrite the end of the previous write instead, as on a radio that
+             * keeps its time: the current buffer is rewound by the overlap and, for an overlap
+             * longer than what it holds, the first samples of the write are skipped (their air time
+             * is in buffers already submitted). */
+            if (!continues_burst && _tx_stream.hw_burst_valid && gap_ns < 0) {
+                const long long overlap = std::llround(
+                    static_cast<double>(-gap_ns) * _tx_stream.samplerate / 1e9);
+                if (overlap <= static_cast<long long>(this->getStreamMTU(stream))) {
+                    size_t rewind = 0;
+                    if (_tx_stream.remainderHandle >= 0) {
+                        rewind = std::min(static_cast<size_t>(overlap), _tx_stream.remainderOffset);
+                        _tx_stream.remainderOffset -= rewind;
+                        _tx_stream.remainderSamps  += rewind;
+                    }
+                    _tx_stream.hw_burst_samples -= static_cast<long long>(rewind);
+                    tx_skip = std::min(static_cast<size_t>(overlap) - rewind, returnedElems);
+                    continues_burst = true;
+                }
+            }
             /* A timed write after a gap, in the same burst (srsUE: timed writes without
              * END_BURST): the samples of the partial buffer already went with the previous
              * write, and that buffer already has its stamp. Appended, the new samples would go
@@ -2553,13 +2602,14 @@ int SoapyLiteXM2SDR::writeStream(
         }
     }
 
-    int ret = appendTxSamples(stream, buffs, returnedElems, 0, forceFlush, timeoutUs);
+    int ret = appendTxSamples(stream, buffs, returnedElems - tx_skip, tx_skip, forceFlush, timeoutUs);
     if (ret < 0)
         return ret;
 
-    const int accepted = ret;
+    /* The skipped samples of an overlapping write are consumed too. */
+    const int accepted = ret + static_cast<int>(tx_skip);
     if (_tx_stream.hw_burst_valid)
-        _tx_stream.hw_burst_samples += accepted;
+        _tx_stream.hw_burst_samples += ret;
     if (_tx_stream.timed_tx_hardware && _tx_stream.hw_next_valid) {
         /* A time given by the application is a new origin; the stream's own time (a buffer stamped by the
          * driver) is not: the count goes on from the last one. */

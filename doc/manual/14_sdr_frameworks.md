@@ -348,10 +348,22 @@ nof_ports = 2
 # srsUE, ue.conf
 [rf]
 nof_antennas = 2
+device_args = driver=LiteXM2SDR,refclk_ppm=stored,tx_strict_timing=1
+
+[expert]
+nof_phy_threads = 4
 ```
 
 The driver then opens both channels of the board (`2T2R`). srsENB decodes its uplink on the
 first antenna only.
+
+At 15 and 20 MHz the terminal needs `tx_strict_timing=1` and four PHY threads. Decoding two
+antennas at 20 MHz loads a 4-core terminal host enough that srsUE now and then writes its uplink
+a few milliseconds late. The driver then catches the stream up, and with `tx_strict_timing=1` it
+also corrects an offset of more than 100 us that stays over a few checks. Without it the uplink
+could stay hundreds of microseconds off, beyond what the base station decodes, and the session
+ended in a radio link failure. With three PHY threads (the default) the terminal falls behind
+between 20 and 40 Mbit/s of downlink.
 
 ### Throughput
 
@@ -366,19 +378,13 @@ and the attaches failed.
 | 10 MHz, 1T1R | 33.2 / 35.6 Mbit/s | 21.5 / 21.9 Mbit/s |
 | 10 MHz, 2T2R, TM3 (2 sessions) | 67.4 to 67.7 / 71.1 to 71.2 Mbit/s | 21.5 / 21.9 Mbit/s |
 | 20 MHz, 1T1R | 67.6 to 70.6 / 73.1 Mbit/s | 47.6 / 48.6 Mbit/s |
+| 20 MHz, 2T2R, TM3 (3 sessions) | 32.1 to 38.8 / 41.1 to 46.4 Mbit/s | 47.0 to 47.5 / 36.0 to 48.6 Mbit/s |
 
 At 10 MHz the downlink doubles with 2T2R: rank 2, MCS 27.7, no block errors.
 
-> **Note**
-> At 15 and 20 MHz, 2T2R does not hold a session yet. Under downlink load the base station
-> stops receiving the terminal's uplink: PUCCH and PUSCH no longer correlate and their timing
-> estimates are random, although their energy is still there. The terminal decodes the downlink
-> without errors, so the base station retransmits blocks that were acknowledged, and the session
-> ends in a radio link failure. It also happens with one board in `2T2R` and the other in
-> `1T1R`, on either side. Ruled out so far: RF self-interference (the receive noise floor of a
-> board does not move with its two transmitters on), the CPU of the 4-core terminal host (no
-> thread above 90% in 100 ms windows), late TX writes (none reported), the depth of the TX ring
-> and the number of DMA buffers per interrupt.
+At 20 MHz the 2T2R sessions hold, but the downlink is limited by the CPU of the terminal host
+(Intel Core i5-6500T, 4 cores), not by the link. The UDP downlink is clean up to 40 Mbit/s and
+carries 52 Mbit/s when offered 60. A faster terminal host should reach more.
 
 ## srsRAN Project gNB and srsUE, 5G SA {#fw-srsran-5g}
 
