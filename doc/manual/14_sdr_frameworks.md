@@ -2,7 +2,7 @@
 
 Read this chapter to connect an existing SDR application to the board, or to write one with the
 SoapySDR API in C++ or Python. It covers the SoapySDR driver, the GNU Radio examples, GQRX,
-SigDigger, srsRAN and the SigMF recording format.
+SigDigger, srsRAN 4G, srsRAN Project with srsUE (5G SA) and the SigMF recording format.
 
 ## At a glance {#fw-glance}
 
@@ -333,6 +333,88 @@ rx_gain = 40
 
 srsRAN reaches the clock sources and the sensors `ref_locked` and `lo_locked` through the
 standard SoapySDR API, so its reference selection works with the board.
+
+## srsRAN Project gNB and srsUE, 5G SA {#fw-srsran-5g}
+
+A 5G standalone cell runs between two boards: the srsRAN Project gNB through its UHD backend
+and SoapyUHD, and srsUE through its SoapySDR support. The setup below was measured with the two
+boards cabled through attenuators, TDD with 15 kHz subcarriers, band n39 numbering moved into the
+2.4 GHz ISM band by the driver's frequency offsets.
+
+srsUE needs the fork `enjoy-digital/srsRAN_4G`, branch `srsue-nr-sa-tdd-fixes`: TDD, timing
+and decoding fixes for the 5G SA terminal, which did not attach in TDD on this setup without them.
+
+### Device arguments
+
+gNB (`ru_sdr` section):
+
+```yaml
+device_driver: uhd
+device_args: type=soapy,driver=LiteXM2SDR,refclk_ppm=stored,rx_agc_mode=mgc,tx_offset=25955,tx_freq_offset=579000000,rx_freq_offset=579000000,rf_bandwidth_scale=1.75,tx_gating=1,tx_gating_hold_ns=500000,tx_ring_buffers=24
+srate: 11.52               # 23.04 at 20 MHz, with tx_ring_buffers=48
+time_alignment_calibration: 0
+expert_cfg:
+  tx_mode: continuous
+```
+
+srsUE (`[rf]` section):
+
+```ini
+device_name = soapy
+device_args = driver=LiteXM2SDR,refclk_ppm=stored,rx_agc_mode=mgc,tx_freq_offset=579000000,rx_freq_offset=579000000,tx_strict_timing=1,rf_bandwidth_scale=1.75,tx_offset=25955,tx_gating=1,tx_gating_hold_ns=50000
+srate = 11.52e6            ; 23.04e6 at 20 MHz
+time_adv_nsamples = -40    ; -500 at 20 MHz
+```
+
+- `refclk_ppm=stored` on both boards, after `m2sdr_cal measure --store`. The trim is then applied
+  in the AD9361 (`refclk_ppm_mode=rfic`, the default with a trim): the SI5351 trim costs 2 to 3 dB
+  of SNR on OFDM signals, and the terminal uplink was capped near 21 dB with it.
+- `tx_freq_offset` and `rx_freq_offset` move the band n39 numbering (1899.1 MHz) to 2478.1 MHz.
+  Over the air a 20 MHz carrier must stay below 2483.5 MHz: move it down by 5 MHz or more.
+- `tx_strict_timing=1` on the terminal only: a terminal must hit its uplink slots, so its late
+  writes are dropped and its stream caught up. On the gNB it causes underflow storms.
+- `tx_gating=1` keeps the TX path off between bursts; the hold covers the gaps inside a burst
+  (500 us on the gNB, which streams continuously, 50 us on the terminal).
+- `tx_ring_buffers` limits how far ahead of its RX the gNB fills the TX ring. Without it the gNB
+  runs up to the ring size ahead and its PRACH requests come late.
+- `time_adv_nsamples` is the measured uplink timing of the terminal. At 20 MHz the default
+  equivalent of `-40` at 10 MHz put the preamble too early for the gNB's PRACH detector (most
+  attaches failed); `-500` gives a timing advance of 34 in the random access response.
+
+### Cell configuration
+
+The gNB settings that differ from srsRAN's defaults or examples:
+
+Each setting is named by its key, with its section in parentheses where the key alone is ambiguous.
+
+| Key | 10 MHz | 20 MHz | Why |
+|----------------------------|--------|--------|----------------------------|
+| `coreset0_index` (`pdcch`) | 6 | 12 | as in srsRAN's srsUE example |
+| `prach_config_index` | 9 | 9 | long preamble (srsUE), in an UL slot |
+| `prach_frequency_start` | default | 8 | clear of the PUCCH (PRBs 0 to 7); srsUE needs 3 or more at 20 MHz |
+| `csi_rs_period` | 20 | 20 | with the offsets below, no CSI-RS in the slots of the random access response |
+| CSI-RS slot offsets | 15, 15, 4 | 15, 15, 4 | measurement, zero power, tracking |
+| `tdd_ul_dl_cfg` | 6 DL, 6 DL symbols, 3 UL | same | period of 10 slots |
+| `min_k1` (`pucch`) | 4 | 4 | |
+| `min_k2` (`pusch`) | 3 | 4 | at least the TX delay of the terminal (below) |
+| PDSCH MCS, min and max | 28 | 28 | the SNR allows it |
+| `max_proc_delay` | 2 | 2 | `expert_phy` |
+
+srsUE, at 20 MHz: `[phy.nr] sa_tx_delay_ms = 4` (default 3). Decoding a full 20 MHz slot takes 1 to
+2 ms on a 4-core host; with 3 ms of delay the uplink writes came too late under load, and both
+directions failed. `[phy.nr] pdsch_cb_threads = 2` decodes the code blocks of a transport block in
+parallel. `[phy] worker_cpu_mask` and `sync_cpu_affinity` keep the PHY workers off the core of the
+receive thread.
+
+### Measured
+
+| | 10 MHz (11.52 MSPS) | 20 MHz (23.04 MSPS) |
+|---|---|---|
+| TCP down / up | 14.3 to 14.6 / 9.1 to 9.3 Mbit/s | 28.3 to 29.0 / 20.1 to 20.3 Mbit/s |
+| UDP down / up | 15.0 / 9.6 Mbit/s | 29.5 to 30.1 / 20.9 to 21.0 Mbit/s |
+| PUSCH SINR under load | 23 to 25 dB | 22.9 to 25 dB |
+| DL / UL HARQ errors | about 4% / 0.1 to 2% | about 8 to 9% / 0.4 to 1.2% |
+| Random access | first preamble in 10 of 11 attaches | 1 or 2 preambles |
 
 ## SigMF {#fw-sigmf}
 
