@@ -379,19 +379,20 @@ time_adv_nsamples = -40    ; -500 at 20 MHz
 
 The gNB settings that differ from srsRAN's defaults or examples:
 
-| Setting | 10 MHz | 20 MHz | Why |
-|---|---|---|---|
-| `channel_bandwidth_MHz` | 10 | 20 | |
-| `pdcch: common: coreset0_index` | 6 | 12 | as in srsRAN's srsUE example |
-| `prach: prach_config_index` | 9 | 9 | long preamble (srsUE), in an UL slot of the pattern below |
-| `prach: prach_frequency_start` | default | 8 | clear of the PUCCH (PRBs 0 to 7); srsUE needs 3 or more at 20 MHz |
-| `csi: csi_rs_period` | 20 | 20 | with the offsets below: no CSI-RS in the slots of the random access response |
-| `csi: meas/zp/tracking slot offsets` | 15 / 15 / 4 | 15 / 15 / 4 | |
-| `tdd_ul_dl_cfg` | 10 slots: 6 DL, 6 DL symbols, 3 UL | same | |
-| `pucch: min_k1` | 4 | 4 | |
-| `pusch: min_k2` | 3 | 4 | at least the terminal's TX delay (below) |
-| `pdsch: min_ue_mcs / max_ue_mcs` | 28 / 28 | 28 / 28 | the SNR allows it |
-| `expert_phy: max_proc_delay` | 2 | 2 | |
+Each setting is named by its key, with its section in parentheses where the key alone is ambiguous.
+
+| Key | 10 MHz | 20 MHz | Why |
+|----------------------------|--------|--------|----------------------------|
+| `coreset0_index` (`pdcch`) | 6 | 12 | as in srsRAN's srsUE example |
+| `prach_config_index` | 9 | 9 | long preamble (srsUE), in an UL slot |
+| `prach_frequency_start` | default | 8 | clear of the PUCCH (PRBs 0 to 7); srsUE needs 3 or more at 20 MHz |
+| `csi_rs_period` | 20 | 20 | with the offsets below, no CSI-RS in the slots of the random access response |
+| CSI-RS slot offsets | 15, 15, 4 | 15, 15, 4 | measurement, zero power, tracking |
+| `tdd_ul_dl_cfg` | 6 DL, 6 DL symbols, 3 UL | same | period of 10 slots |
+| `min_k1` (`pucch`) | 4 | 4 | |
+| `min_k2` (`pusch`) | 3 | 4 | at least the TX delay of the terminal (below) |
+| PDSCH MCS, min and max | 28 | 28 | the SNR allows it |
+| `max_proc_delay` | 2 | 2 | `expert_phy` |
 
 srsUE, at 20 MHz: `[phy.nr] sa_tx_delay_ms = 4` (default 3). Decoding a full 20 MHz slot takes 1 to
 2 ms on a 4-core host; with 3 ms of delay the uplink writes came too late under load, and both
