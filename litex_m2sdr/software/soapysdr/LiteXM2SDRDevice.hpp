@@ -596,6 +596,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
          * next checks, which then only see the drift (the estimate has a fixed bias). */
         bool hw_check_ref_valid = false;
         bool hw_catchup = false;          /* dropping samples until slightly early */
+        int  hw_late_checks = 0;          /* tx_strict_timing: consecutive checks found late */
+        int  hw_early_checks = 0;         /* tx_strict_timing: consecutive checks found early */
         bool hw_restamp_on_time = false;  /* next stamp comes from the check (on time or early) */
         bool hw_ref_pending = false;      /* early stamp made: take the reference at the next check */
         long long hw_check_ref_ns = 0;
