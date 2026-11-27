@@ -4,34 +4,15 @@
 # Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
-"""Synthesis and bitstream steps of the openXC7 build (Yosys + nextpnr-xilinx + Project X-Ray,
-experimental), shared by the SoC and the bring-up designs."""
+"""Synthesis and bitstream steps of the openXC7 build (Yosys + openXC7/nextpnr + Project
+X-Ray, experimental), shared by the SoC and the bring-up designs."""
 
 import os
-import glob
 
-def add_openxc7_flow(platform, fabric_iddr=False):
-    """Adapt the LiteX openxc7 toolchain of the platform to the design.
-
-    fabric_iddr: IDDRs in SAME_EDGE_PIPELINED mode (AD9361 data interface) replaced by a capture in
-    fabric flip-flops (openxc7_techmap/iddr_pipelined.v), for the archived nextpnr-xilinx (0.8.x),
-    which does not configure this IDDR mode. The capture timing then depends on the placement
-    (narrower AD9361 delay windows). openXC7/nextpnr (nextpnr-himbaechel, xilinx) configures it as
-    Vivado does: no replacement.
-    """
-    from litex.build.yosys_wrapper import YosysWrapper
+def add_openxc7_flow(platform):
+    """Adapt the LiteX openxc7 toolchain of the platform to the design (openXC7/nextpnr)."""
     toolchain = platform.toolchain
     gateware  = os.path.dirname(os.path.abspath(__file__))
-
-    # Primitives nextpnr-xilinx does not take as Yosys or LiteX give them are replaced after the
-    # synthesis (openxc7_techmap): the single-port LUT RAMs small memories are mapped to, and with
-    # fabric_iddr the IDDR mode of the DDR inputs.
-    template = list(YosysWrapper._default_template)
-    for techmap in sorted(glob.glob(os.path.join(gateware, "openxc7_techmap", "*.v"))):
-        if os.path.basename(techmap) == "iddr_pipelined.v" and not fabric_iddr:
-            continue
-        template.insert(len(template) - 1, f"techmap -map {techmap}")
-    toolchain._yosys_template = template
 
     # The 8b/10b checker ROMs of USB3-PIPE in block RAMs (250MHz RX clock, see USB3): Yosys only
     # does it for such small ROMs with the attribute.

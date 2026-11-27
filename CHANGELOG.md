@@ -28,6 +28,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added `--toolchain=openxc7`: experimental build with the open-source openXC7 flow (Yosys, nextpnr, Project X-Ray). Validated on the board with openXC7/nextpnr: the baseboard SoC without host link (50 MHz, over JTAG) and with USB3 (62.5 MHz: enumeration, CSRs, 2T2R 30.72 MSPS RX stream). Bitstreams are also produced for M.2 PCIe x1 (with `--pcie-ip-sources`) and baseboard SATA, not tested on a board. The Vivado builds are unchanged.
 - USB3 with a system clock below 125 MHz: the USB3 PIPE and SerDes on a 125 MHz clock of their own, the link layer, core and SoC in sys on 64-bit words.
 - Added `bench/usb3_bringup.py`: USB3-only design (with the USB3-PIPE bench SoC and JTAGBone) to validate USB3 on a toolchain before the complete SoC.
+- openXC7: requires openXC7/nextpnr (the archived nextpnr-xilinx is no longer supported); the build now uses the same primitives as the Vivado one (BUFGMUX, IDDR, LUT RAMs, MMCM range, GTP reference clock wiring) instead of replacing them, and nextpnr derives the clocks through the PLLs and MMCMs. `--openxc7-fabric-iddr` removed.
 
 **Low Sample Rates**
 - Fixed RX aliasing below `2.5 MSPS`: the AD9361 RX and TX FIRs now use their dedicated tables, x4 below `1.25 MSPS` and x2 from `1.25` to `2.5 MSPS`, in `libm2sdr` as in the SoapySDR driver. The RX level is about `6 dB` higher below `1.25 MSPS` than above, with the same signal to noise ratio; between `1.25` and `2.5 MSPS` it differs from earlier versions of `libm2sdr`.

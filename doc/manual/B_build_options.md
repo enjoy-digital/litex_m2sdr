@@ -53,7 +53,6 @@ refuses it with Ethernet, SATA or USB3. The BFP8 format does not exist on this b
 | `--pcie-lanes` | `1` | Lanes: `1`, `2` or `4`; one lane only on the baseboard |
 | `--pcie-dmas` | `1` | DMA channels; channel 0 carries the samples |
 | `--pcie-ip-sources` | none | Directory of the Vivado-generated PCIe core, required with openXC7 |
-| `--openxc7-fabric-iddr` | off | openXC7, archived nextpnr-xilinx: AD9361 DDR inputs in fabric flip-flops |
 | `--with-pcie-ptm` | off | PCIe PTM requester; needs `--with-pcie`, PCIe Gen2 x1 only |
 | `--with-pcie-reset-workaround` | off | Toggle the PCIe reset until the link is up |
 

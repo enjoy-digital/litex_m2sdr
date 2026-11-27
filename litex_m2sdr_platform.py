@@ -4,13 +4,9 @@
 # Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
+import copy
 import subprocess
 
-import copy
-
-from migen import Module, Signal, Instance
-
-from litex.build.io               import SDRTristate
 from litex.build.generic_platform import *
 from litex.build.xilinx           import Xilinx7SeriesPlatform
 from litex.build.openfpgaloader   import OpenFPGALoader
@@ -233,31 +229,6 @@ def _nextpnr_io(io):
             translate(constraint)
     return io
 
-# Registered tristate for nextpnr -------------------------------------------------------------------
-
-class _FabricSDRTristateImpl(Module):
-    """Registered tristate with its three registers in the fabric.
-
-    LiteX registers the input of a Xilinx SDRTristate with an IDDR in the IO tile. With
-    nextpnr-xilinx that pad does not work (the SI5351 I2C sees no device). Plain flip-flops and
-    an IOBUF do.
-    """
-    def __init__(self, io, o, oe, i, clk):
-        for j in range(len(io)):
-            _o, _oe_n, _i = Signal(), Signal(), Signal()
-            self.specials += [
-                Instance("FDCE", i_C=clk, i_CE=1, i_CLR=0, i_D=o[j],   o_Q=_o),
-                Instance("FDCE", i_C=clk, i_CE=1, i_CLR=0, i_D=~oe[j], o_Q=_oe_n),
-                Instance("IOBUF", io_IO=io[j], o_O=_i, i_I=_o, i_T=_oe_n),
-            ]
-            if i is not None:
-                self.specials += Instance("FDCE", i_C=clk, i_CE=1, i_CLR=0, i_D=_i, o_Q=i[j])
-
-class _FabricSDRTristate:
-    @staticmethod
-    def lower(dr):
-        return _FabricSDRTristateImpl(dr.io, dr.o, dr.oe, dr.i, dr.clk)
-
 # Platform -----------------------------------------------------------------------------------------
 
 class Platform(Xilinx7SeriesPlatform):
@@ -311,11 +282,6 @@ class Platform(Xilinx7SeriesPlatform):
                 "write_bitstream -force {build_name}_fallback.bit ",
                 "write_cfgmem -force -format bin -interface spix1 -size 16 -loadbit \"up 0x0 \
                 {build_name}_fallback.bit\" -file {build_name}_fallback.bin"]
-
-    def get_verilog(self, *args, special_overrides=dict(), **kwargs):
-        if self.toolchain_name != "vivado":
-            special_overrides = {SDRTristate: _FabricSDRTristate, **special_overrides}
-        return Xilinx7SeriesPlatform.get_verilog(self, *args, special_overrides=special_overrides, **kwargs)
 
     def add_platform_command(self, *args, **kwargs):
         # Platform commands in this design are Vivado Tcl/XDC (false paths, DRC severities...).
