@@ -982,6 +982,11 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         if (mode != "si5351" && mode != "rfic")
             throw std::runtime_error("refclk_ppm_mode must be si5351 or rfic");
         _refclk_ppm_rfic = (mode == "rfic");
+    } else {
+        /* A trim given at the open is applied in the AD9361: the SI5351 trim adds a slow phase wander to the
+         * LOs, which costs 2 to 3 dB of SNR on OFDM signals. Without a trim at the open the two modes give the
+         * same clocks, and si5351 keeps the run-time retrim (the setting refclk_ppm) available. */
+        _refclk_ppm_rfic = (_refclk_ppm != 0.0);
     }
     /* Sample rate (and bandwidth) applied by the RF init, before the application sets its own. */
     double init_samplerate = 30.72e6;
@@ -3044,7 +3049,8 @@ void SoapyLiteXM2SDR::writeSetting(const std::string &key, const std::string &va
     if (key == "refclk_ppm") {
         std::lock_guard<std::mutex> lock(_mutex);
         if (_refclk_ppm_rfic)
-            throw std::runtime_error("refclk_ppm: no run-time retrim with refclk_ppm_mode=rfic");
+            throw std::runtime_error("refclk_ppm: no run-time retrim with refclk_ppm_mode=rfic "
+                "(the default when refclk_ppm is given at the open): open with refclk_ppm_mode=si5351");
         const double ppm = resolve_refclk_ppm(_dev, value);
         const uint8_t (*config)[2];
         size_t length;
