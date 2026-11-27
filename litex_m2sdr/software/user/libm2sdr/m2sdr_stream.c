@@ -1666,9 +1666,12 @@ static void m2sdr_tx_ring_clean(struct m2sdr_dev *dev, int64_t reader)
         return;
     if (end > dev->tx_user_count)
         end = dev->tx_user_count;
-    /* Written more than one turn ago: the buffers were written again since. */
-    if (end - dev->tx_clean_count > buffer_count)
-        dev->tx_clean_count = end - buffer_count;
+    /* A buffer older than one turn of the ring behind the fill position shares its slot with a
+     * newer buffer already written: clearing it would zero those samples. This happens whenever
+     * the application keeps the ring full (tx_ring_buffers unset), since the reader count used
+     * here is the one of the last interrupt. Only the buffers of the last turn are cleared. */
+    if (dev->tx_clean_count < dev->tx_user_count - buffer_count)
+        dev->tx_clean_count = dev->tx_user_count - buffer_count;
     while (dev->tx_clean_count < end) {
         memset(dma->buf_wr + (size_t)(dev->tx_clean_count % buffer_count) * buf_size, 0, buf_size);
         dev->tx_clean_count++;
