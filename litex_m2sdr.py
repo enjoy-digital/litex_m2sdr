@@ -199,9 +199,6 @@ class CRG(LiteXModule):
         if not with_white_rabbit:
             # Keep clk10 on a dedicated MMCM so the SI5351C FPGA CLKIN path can be phase-steered later.
             self.clk10_mmcm = clk10_mmcm = S7MMCM(speedgrade=-3, fractional=False)
-            if platform.toolchain_name != "vivado":
-                # nextpnr (openXC7) only supports CLKFBOUT_MULT_F up to 63.
-                clk10_mmcm.clkfbout_mult_frange = (2, 63+1)
             self.comb += clk10_mmcm.reset.eq(self.rst)
             clk10_mmcm.register_clkin(clk100, 100e6)
             clk10_mmcm.expose_dps("clk200", with_csr=False)
@@ -366,7 +363,6 @@ class BaseSoC(SoCMini):
         with_rfic_oversampling = False,
         toolchain              = "vivado",
         pcie_ip_sources        = None,
-        openxc7_fabric_iddr    = False,
     ):
         if pps_input in ("tp1", "tp2") and with_gpio:
             raise ValueError("PPS input on TP1/TP2 cannot be used with --with-gpio.")
@@ -1475,33 +1471,14 @@ class BaseSoC(SoCMini):
             self.add_openxc7_support(sys_clk_freq,
                 with_pcie       = with_pcie,
                 pcie_ip_sources = pcie_ip_sources,
-                with_usb3       = with_usb3,
-                fabric_iddr     = openxc7_fabric_iddr)
+                with_usb3       = with_usb3)
 
     # openXC7 Support ------------------------------------------------------------------------------
 
-    def add_openxc7_support(self, sys_clk_freq, with_pcie=False, pcie_ip_sources=None, with_usb3=False,
-        fabric_iddr=False):
+    def add_openxc7_support(self, sys_clk_freq, with_pcie=False, pcie_ip_sources=None, with_usb3=False):
         platform = self.platform
-        # nextpnr-xilinx does not derive a clock through a PLL or a clock buffer: a clock without
-        # a period of its own is checked against the fastest one of the design, and the placer
-        # then takes every path for a critical one. The internal clocks get their real period.
-        clocks = [
-            (self.crg.cd_sys.clk,    sys_clk_freq),
-            (self.crg.cd_clk10.clk,  10e6),
-            (self.crg.cd_idelay.clk, 200e6),
-            # The SI5351 clocks after their input buffers, as the clock measurement counts them.
-            (self.clk_measurement.clk_modules["clk2"].cd_counter.clk, 38.4e6),
-            (self.clk_measurement.clk_modules["clk4"].cd_counter.clk, 100e6),
-        ]
-        if with_usb3:
-            clocks.append((self.crg.cd_oob.clk, 125e6/8))
-            if sys_clk_freq != 125e6:
-                clocks.append((self.crg.cd_usb3.clk, 125e6))
-        for clk, freq in clocks:
-            platform.add_period_constraint(clk, 1e9/freq)
         # Synthesis and bitstream steps specific to this flow (techmaps, bitstream fix-ups).
-        add_openxc7_flow(platform, fabric_iddr=fabric_iddr)
+        add_openxc7_flow(platform)
         if with_pcie:
             # The pcie_s7 wrapper is a Vivado-generated IP (pcie_7x): without Vivado it cannot be
             # generated during the build, so reuse the plain Verilog sources a previous Vivado
@@ -1518,13 +1495,6 @@ class BaseSoC(SoCMini):
                     raise ValueError(f"PCIe IP source {filename} not found.")
                 platform.add_source(filename)
             self.pcie_phy.external_hard_ip = True
-            # The IP leaves the GTP's TXPI_SYNFREQ_PPM at its primitive default (0), which nextpnr
-            # rejects. The TX phase interpolator PPM controller is not used for PCIe: set the value
-            # LiteX's own transceiver PHYs use on the cells that do not define it.
-            platform.toolchain._yosys_cmds += [
-                "hierarchy -top {build_name}",
-                "setparam -set TXPI_SYNFREQ_PPM 3'b001 t:GTPE2_CHANNEL r:TXPI_SYNFREQ_PPM %d",
-            ]
 
     # RFIC Datapath Hook -----------------------------------------------------------------------------
 
@@ -1932,7 +1902,6 @@ def main():
     parser.add_argument("--pcie-gen",        default=2, type=int, help="PCIe Generation.", choices=[1, 2])
     parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
     parser.add_argument("--pcie-dmas",       default=1, type=int, help="Number of PCIe DMA channels (subclasses may use >1 for side-band streams).")
-    parser.add_argument("--openxc7-fabric-iddr", action="store_true",                help="openXC7: AD9361 DDR inputs captured in fabric flip-flops (archived nextpnr-xilinx 0.8.x).")
     parser.add_argument("--pcie-ip-sources", default=None,        help="Vivado-generated pcie_s7 IP directory (with synth/ and source/), required for PCIe with --toolchain=openxc7.")
 
     # Ethernet parameters.
@@ -2053,7 +2022,6 @@ def main():
         pcie_lanes    = args.pcie_lanes,
         pcie_dmas     = args.pcie_dmas,
         pcie_ip_sources = args.pcie_ip_sources,
-        openxc7_fabric_iddr = args.openxc7_fabric_iddr,
 
         # Ethernet.
         with_eth      = args.with_eth,

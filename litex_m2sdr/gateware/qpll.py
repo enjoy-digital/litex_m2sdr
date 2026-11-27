@@ -115,36 +115,6 @@ class SharedQPLL(LiteXModule):
 
         platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-49]")
 
-        if getattr(platform, "toolchain_name", "vivado") != "vivado":
-            self.use_nextpnr_refclk_ports()
-
-    def use_nextpnr_refclk_ports(self):
-        """Reference clock ports of the GTPE2_COMMON as nextpnr-xilinx takes them (openXC7).
-
-        Vivado takes a reference clock from the fabric on GTGREFCLK, the unused ports tied to a
-        constant. nextpnr-xilinx refuses a constant on these ports and has a single fabric input,
-        GTGREFCLK0, for both PLLs (PLLxREFCLKSEL is kept). It enables that input in the bitstream
-        when the clock is given on GTREFCLK, which it then renames to GTGREFCLK0: this rename is
-        done while it goes through the ports of the cell, and crashes on some netlists. So the
-        unused ports are left out, the fabric clock goes to GTGREFCLK0, and the build enables
-        the input in the bitstream itself (openxc7_bitstream.py).
-        """
-        if self.qpll is None:
-            return
-        instance = next(special for special in self.qpll._fragment.specials
-            if isinstance(special, Instance) and special.of == "GTPE2_COMMON")
-        refclk_ports = ["GTREFCLK0", "GTREFCLK1", "GTGREFCLK0", "GTGREFCLK1"]
-        instance.items = [item for item in instance.items
-            if not (isinstance(item, Instance.Input) and item.name in refclk_ports)]
-        fabric_refclks = 0
-        for name, config in self.configs.items():
-            if config.settings.refclksel == 0b111:
-                fabric_refclks += 1
-                instance.items.append(Instance.Input("GTGREFCLK0", config.refclk))
-            else:
-                instance.items.append(Instance.Input(f"GTREFCLK{self.channel_map[name]}", config.refclk))
-        if fabric_refclks > 1:
-            raise ValueError("nextpnr-xilinx routes a single fabric reference clock to a GTPE2_COMMON.")
 
     @staticmethod
     def get_gt_refclks(config):
