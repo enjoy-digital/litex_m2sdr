@@ -55,6 +55,7 @@ from litex_m2sdr.gateware.clock_discipline import MMCMPhaseDiscipline, PTPClock1
 from litex_m2sdr.gateware.si5351           import SI5351
 from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
 from litex_m2sdr.gateware.qpll        import SharedQPLL
+from litex_m2sdr.gateware.openxc7_flow import add_openxc7_flow
 from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
 from litex_m2sdr.gateware.ptp_discipline import PTPTimeDiscipline, TimeDisciplineCDC
 from litex_m2sdr.gateware.ptp_identity   import PTPIdentityTracker
@@ -239,8 +240,14 @@ class CRG(LiteXModule):
         # OOB clock (LFPS detection) at sys_clk_freq/8. The QPLL GTGREFCLK reference is the 125MHz
         # sys clock: the 100MHz oscillator through a BUFG gave USB3 link errors/Recoveries as soon
         # as the AD9361 ran at 30.72MSPS (clean with the sys clock).
+        # With a slower sys clock (FPGA toolchains that do not reach 125MHz on the Core), the USB3
+        # PIPE/SerDes and the QPLL reference are on a 125MHz usb3 clock of the same PLL.
         if with_usb3:
-            pll.create_clkout(self.cd_oob, sys_clk_freq/8, margin=0)
+            usb3_clk_freq = 125e6
+            if sys_clk_freq != usb3_clk_freq:
+                self.cd_usb3 = ClockDomain()
+                pll.create_clkout(self.cd_usb3, usb3_clk_freq, margin=0)
+            pll.create_clkout(self.cd_oob, usb3_clk_freq/8, margin=0)
 
         # SATA PLL.
         # ---------
@@ -402,8 +409,8 @@ class BaseSoC(SoCMini):
                 raise ValueError("USB3 cannot be combined with Ethernet, SATA or White Rabbit (yet).")
             if with_rfic_oversampling:
                 raise ValueError("USB3 bandwidth (~440MB/s) does not allow the RFIC oversampling datapath.")
-            if sys_clk_freq != 125e6:
-                raise ValueError("USB3 requires sys_clk_freq == 125MHz (USB3 QPLL reference).")
+            if sys_clk_freq > 125e6:
+                raise ValueError("USB3 requires sys_clk_freq <= 125MHz (125MHz: PIPE/Core in sys, lower: PIPE on a 125MHz clock).")
 
         if with_white_rabbit and (variant not in ["baseboard", "rpi5hat"]):
             raise ValueError("White Rabbit is only supported with --variant=baseboard/rpi5hat (requires baseboard/rpi5hat SFP resources).")
@@ -461,6 +468,7 @@ class BaseSoC(SoCMini):
             eth_refclk_direct = with_eth and (eth_phy == "2500basex"),
             with_sata       = with_sata,
             with_usb3       = with_usb3,
+            usb3_refclk_cd  = "sys" if sys_clk_freq == 125e6 else "usb3",
         )
 
         # Capability -------------------------------------------------------------------------------
@@ -1463,11 +1471,14 @@ class BaseSoC(SoCMini):
         # the attribute's index in this function's name table exceeds 255, so referencing new names
         # earlier in __init__ renames unrelated signals of the Vivado builds (ex: eth_tx_marker).
         if toolchain != "vivado":
-            self.add_openxc7_support(sys_clk_freq, with_pcie=with_pcie, pcie_ip_sources=pcie_ip_sources)
+            self.add_openxc7_support(sys_clk_freq,
+                with_pcie       = with_pcie,
+                pcie_ip_sources = pcie_ip_sources,
+                with_usb3       = with_usb3)
 
     # openXC7 Support ------------------------------------------------------------------------------
 
-    def add_openxc7_support(self, sys_clk_freq, with_pcie=False, pcie_ip_sources=None):
+    def add_openxc7_support(self, sys_clk_freq, with_pcie=False, pcie_ip_sources=None, with_usb3=False):
         platform = self.platform
         # nextpnr-xilinx does not derive a clock through a PLL or a clock buffer: a clock without
         # a period of its own is checked against the fastest one of the design, and the placer
@@ -1480,40 +1491,14 @@ class BaseSoC(SoCMini):
             (self.clk_measurement.clk_modules["clk2"].cd_counter.clk, 38.4e6),
             (self.clk_measurement.clk_modules["clk4"].cd_counter.clk, 100e6),
         ]
+        if with_usb3:
+            clocks.append((self.crg.cd_oob.clk, 125e6/8))
+            if sys_clk_freq != 125e6:
+                clocks.append((self.crg.cd_usb3.clk, 125e6))
         for clk, freq in clocks:
             platform.add_period_constraint(clk, 1e9/freq)
-        # Primitives nextpnr-xilinx does not take as Yosys or LiteX give them are replaced after
-        # the synthesis (litex_m2sdr/gateware/openxc7_techmap): the single-port LUT RAMs small
-        # memories are mapped to, and the IDDR mode of the DDR inputs.
-        from litex.build.yosys_wrapper import YosysWrapper
-        techmap_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-            "litex_m2sdr", "gateware", "openxc7_techmap")
-        template = list(YosysWrapper._default_template)
-        for techmap in sorted(glob.glob(os.path.join(techmap_dir, "*.v"))):
-            template.insert(len(template) - 1, f"techmap -map {techmap}")
-        platform.toolchain._yosys_template = template
-        # Bits the design needs and the Project X-Ray database does not have (differential
-        # termination, fabric reference clock of the GTP PLL) are set around fasm2frames: see
-        # litex_m2sdr/gateware/openxc7_bitstream.py.
-        toolchain = platform.toolchain
-        fixup     = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-            "litex_m2sdr", "gateware", "openxc7_bitstream.py")
-        bitstream_options = toolchain._build_openxc7_bitstream_options
-        def bitstream_options_with_fixup(prjxray_db_arg_dir):
-            bitstream_options(prjxray_db_arg_dir)
-            if toolchain._pre_packer_cmd != ["fasm2frames"]:
-                raise NotImplementedError("openXC7 bitstream fix-ups need the fasm2frames/xc7frames2bit flow.")
-            db_root = os.path.join(prjxray_db_arg_dir, toolchain._xc7family)
-            top     = toolchain._build_name
-            fasm, frames = f"python3 {fixup} fasm", f"python3 {fixup} frames"
-            toolchain._pre_packer_cmd = [fasm, "fasm2frames", frames]
-            toolchain._pre_packer_opts[fasm] = (
-                f"--xdc {top}.xdc --package-pins {db_root}/{toolchain.openxc7_part}/package_pins.csv "
-                f"--notes {top}.fixup.json {top}.fasm")
-            toolchain._pre_packer_opts[frames] = (
-                f"--tilegrid {db_root}/{toolchain.openxc7_die}/tilegrid.json "
-                f"--notes {top}.fixup.json {top}.frames")
-        toolchain._build_openxc7_bitstream_options = bitstream_options_with_fixup
+        # Synthesis and bitstream steps specific to this flow (techmaps, bitstream fix-ups).
+        add_openxc7_flow(platform)
         if with_pcie:
             # The pcie_s7 wrapper is a Vivado-generated IP (pcie_7x): without Vivado it cannot be
             # generated during the build, so reuse the plain Verilog sources a previous Vivado
@@ -1641,9 +1626,10 @@ class BaseSoC(SoCMini):
         self.usb3 = USB3(platform,
             sfp_pads     = platform.request("sfp", sfp),
             qpll_channel = self.qpll.get_channel("usb3"),
-            refclk_freq  = sys_clk_freq,
+            refclk_freq  = 125e6,
             sys_clk      = self.crg.cd_sys.clk,
             sys_clk_freq = sys_clk_freq,
+            pipe_clk     = getattr(getattr(self.crg, "cd_usb3", None), "clk", None),
             data_width   = 64,
             vid          = vid,
             pid          = pid,

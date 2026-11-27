@@ -14,7 +14,8 @@ from liteeth.phy.a7_gtp import QPLLSettings, QPLL
 
 class SharedQPLL(LiteXModule):
     def __init__(self, platform, with_pcie=False, with_eth=False, eth_refclk_freq=156.25e6,
-        eth_refclk_direct=False, eth_phy="1000basex", with_sata=False, with_usb3=False):
+        eth_refclk_direct=False, eth_phy="1000basex", with_sata=False, with_usb3=False,
+        usb3_refclk_cd="sys"):
         assert (with_pcie + with_eth + with_sata + with_usb3) <= 2 # QPLL only has 2 PLLs :(
 
         # PCIe QPLL Settings.
@@ -43,7 +44,7 @@ class SharedQPLL(LiteXModule):
             refclk_div = 1,
         )
 
-        # USB3 QPLL Settings (125MHz sys clock on GTGREFCLK, 2.5GHz VCO for 5Gbps).
+        # USB3 QPLL Settings (125MHz sys clock (or usb3 clock with a slower sys clock) on GTGREFCLK, 2.5GHz VCO for 5Gbps).
         qpll_usb3_settings = QPLLSettings(
             refclksel  = 0b111,
             fbdiv      = 4,
@@ -76,7 +77,7 @@ class SharedQPLL(LiteXModule):
 
         if with_usb3:
             configs["usb3"] = QPLLConfig(
-                refclk   = ClockSignal("sys"),
+                refclk   = ClockSignal(usb3_refclk_cd),
                 settings = qpll_usb3_settings,
             )
 
@@ -121,10 +122,12 @@ class SharedQPLL(LiteXModule):
         """Reference clock ports of the GTPE2_COMMON as nextpnr-xilinx takes them (openXC7).
 
         Vivado takes a reference clock from the fabric on GTGREFCLK, the unused ports tied to a
-        constant. nextpnr-xilinx takes it on GTREFCLK, driven by a BUFG: it moves it to GTGREFCLK0
-        itself and enables that input in the bitstream; it refuses any other driver on GTREFCLK, a
-        constant included, and has a single fabric input. So the unused ports are left out, and
-        the fabric clock goes to the GTREFCLK of its PLL (PLLxREFCLKSEL is kept).
+        constant. nextpnr-xilinx refuses a constant on these ports and has a single fabric input,
+        GTGREFCLK0, for both PLLs (PLLxREFCLKSEL is kept). It enables that input in the bitstream
+        when the clock is given on GTREFCLK, which it then renames to GTGREFCLK0: this rename is
+        done while it goes through the ports of the cell, and crashes on some netlists. So the
+        unused ports are left out, the fabric clock goes to GTGREFCLK0, and the build enables
+        the input in the bitstream itself (openxc7_bitstream.py).
         """
         if self.qpll is None:
             return
@@ -137,7 +140,9 @@ class SharedQPLL(LiteXModule):
         for name, config in self.configs.items():
             if config.settings.refclksel == 0b111:
                 fabric_refclks += 1
-            instance.items.append(Instance.Input(f"GTREFCLK{self.channel_map[name]}", config.refclk))
+                instance.items.append(Instance.Input("GTGREFCLK0", config.refclk))
+            else:
+                instance.items.append(Instance.Input(f"GTREFCLK{self.channel_map[name]}", config.refclk))
         if fabric_refclks > 1:
             raise ValueError("nextpnr-xilinx routes a single fabric reference clock to a GTPE2_COMMON.")
 

@@ -61,6 +61,24 @@ def test_usb3_soc_build_exposes_usb3_csrs(tmp_path):
     assert "constant,config_clock_frequency,125000000" in csr_csv
 
 
+def test_usb3_soc_with_a_slower_sys_clock():
+    # PIPE/SerDes on the 125MHz usb3 clock, LTSSM/Link Layer/Core in sys on 64-bit words.
+    soc_mod = _load_soc_module()
+    soc = soc_mod.BaseSoC(
+        variant="baseboard",
+        with_pcie=False,
+        with_usb3=True,
+        with_jtagbone=False,
+        sys_clk_freq=int(62.5e6),
+    )
+
+    assert soc.usb3.phy.pipe_cd == "usb3"
+    assert soc.usb3.phy.link_words == 2
+    assert soc.usb3.bulk_in.data_width == 64
+    assert soc.usb3.bulk_out.data_width == 64
+    assert soc.usb3.serdes.pll.config == {"linerate": 5e9, "d": 1, "clkin": 125e6}
+
+
 def test_pcie_usb3_soc_shares_qpll():
     soc_mod = _load_soc_module()
     soc = soc_mod.BaseSoC(
@@ -81,7 +99,7 @@ def test_pcie_usb3_soc_shares_qpll():
     ({"variant": "baseboard", "with_eth": True},          "cannot be combined"),
     ({"variant": "baseboard", "with_sata": True},         "cannot be combined"),
     ({"variant": "baseboard", "with_rfic_oversampling": True}, "oversampling"),
-    ({"variant": "baseboard", "sys_clk_freq": int(100e6)}, "125MHz"),
+    ({"variant": "baseboard", "sys_clk_freq": int(150e6)}, "125MHz"),
 ])
 def test_usb3_soc_rejects_unsupported_combinations(kwargs, message):
     soc_mod = _load_soc_module()

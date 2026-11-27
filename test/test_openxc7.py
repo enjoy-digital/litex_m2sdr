@@ -80,8 +80,8 @@ def test_vivado_soc_keeps_its_primitives_and_bitstream_commands(tmp_path):
 
 
 def test_openxc7_usb3_gtp_refclk_and_techmaps(tmp_path):
-    # nextpnr-xilinx takes the fabric reference clock of the GTP PLL on GTREFCLK and no constant
-    # on the other reference clock ports; the primitives it does not take are replaced by
+    # nextpnr-xilinx takes the fabric reference clock of the GTP PLL on GTGREFCLK0 (enabled in the
+    # bitstream by the build) and no constant on the other reference clock ports; the primitives it does not take are replaced by
     # techmaps after the synthesis.
     soc_mod = _load_soc_module()
     soc = soc_mod.BaseSoC(variant="baseboard", with_pcie=False, with_usb3=True, with_jtagbone=False,
@@ -89,8 +89,8 @@ def test_openxc7_usb3_gtp_refclk_and_techmaps(tmp_path):
 
     gateware, verilog = _generate(soc, tmp_path, "top")
     common = re.search(r"GTPE2_COMMON #\(.*?\);", verilog, re.S).group(0)
-    assert re.search(r"\.GTREFCLK0\s*\(sys_clk\)", common)
-    for port in ["GTREFCLK1", "GTGREFCLK0", "GTGREFCLK1"]:
+    assert re.search(r"\.GTGREFCLK0\s*\(sys_clk\)", common)
+    for port in ["GTREFCLK0", "GTREFCLK1", "GTGREFCLK1"]:
         assert f".{port}" not in common
     assert re.search(r"\.PLL0REFCLKSEL\s*\(3'd7\)", common)
 
@@ -176,7 +176,8 @@ def test_openxc7_bitstream_fixups(tmp_path):
         in_only,
         "RIOB33_X105Y117.IOB_Y1." + fixup.IOB_IN_ONLY,
         "RIOB33_X105Y189.IOB_Y0." + fixup.IOB_IN_ONLY,
-        "GTP_COMMON_MID_LEFT_X103Y231.GTPE2_COMMON.GTGREFCLK0_USED",
+        # A clock routed to GTGREFCLK0, that nextpnr-xilinx does not enable by itself.
+        "GTP_COMMON_MID_LEFT_X103Y231.GTPE2_COMMON_GTGREFCLK0.GTPE2_CLK0_5",
         "GTP_COMMON_MID_LEFT_X103Y231.GTPE2_COMMON.GTREFCLK0_USED",
     ]) + "\n")
     notes = tmp_path / "top.fixup.json"

@@ -17,6 +17,9 @@ bitstream of the same design (prjxray's bit2fasm --verbose lists the bits it doe
 - The fabric reference clock of a GTP PLL (GTGREFCLK0_USED) on the mid-column tiles of the
   XC7A200T: the database has the feature for the edge-column tile only, where it is the same three
   bits 28 frames further (283 of the 284 features the tiles share differ by that offset).
+  nextpnr-xilinx only writes the feature for a clock given on GTREFCLK, that it moves to
+  GTGREFCLK0 with a port rename that crashes on some netlists: the clock is given on GTGREFCLK0
+  instead (see SharedQPLL), and the input is enabled here wherever a clock is routed to it.
 
 The build runs this file twice, around fasm2frames:
 
@@ -38,6 +41,7 @@ DIFF_TERM_TILES     = ("RIOB33",)
 GTGREFCLK_BITS      = ["00_1438", "00_1439", "01_1438"]
 GTGREFCLK_TILES     = ("GTP_COMMON_MID_LEFT", "GTP_COMMON_MID_RIGHT")
 GTGREFCLK_FEATURE   = "GTPE2_COMMON.GTGREFCLK0_USED"
+GTGREFCLK_ROUTE     = "GTPE2_COMMON_GTGREFCLK0."   # A clock routed to the input.
 
 IOB_IN_ONLY   = "LVCMOS12_LVCMOS15_LVCMOS18_LVCMOS25_LVCMOS33_LVDS_25_LVTTL_SSTL135_SSTL15_TMDS_33.IN_ONLY"
 IOB_SLEW_FAST = "LVCMOS12_LVCMOS15_LVCMOS18_LVCMOS25_LVCMOS33_LVTTL.SLEW.FAST"
@@ -72,17 +76,26 @@ def fix_fasm(fasm, xdc, package_pins, notes):
 
     bits  = [(tile, bit) for tile in tiles for bit in DIFF_TERM_BITS]
     lines = []
+    gtgrefclk_tiles = []                          # GTP tiles with a clock routed to GTGREFCLK0.
     for line in open(fasm).read().split("\n"):
         feature = line.strip()
         tile, _, name = feature.partition(".")
         # The P pad of a terminated pair is not input-only.
         if tile in tiles and name == f"IOB_Y0.{IOB_IN_ONLY}":
             continue
-        # Not in the database for these tiles: set in the frames.
-        if tile_type(tile) in GTGREFCLK_TILES and name == GTGREFCLK_FEATURE:
-            bits += [(tile, bit) for bit in GTGREFCLK_BITS]
+        if name.startswith(GTGREFCLK_ROUTE) and tile not in gtgrefclk_tiles:
+            gtgrefclk_tiles.append(tile)
+        if name == GTGREFCLK_FEATURE:
+            if tile not in gtgrefclk_tiles:
+                gtgrefclk_tiles.append(tile)
             continue
         lines.append(line)
+    for tile in gtgrefclk_tiles:
+        if tile_type(tile) in GTGREFCLK_TILES:
+            # Not in the database for these tiles: set in the frames.
+            bits += [(tile, bit) for bit in GTGREFCLK_BITS]
+        else:
+            lines.append(f"{tile}.{GTGREFCLK_FEATURE}")
     for tile in tiles:
         lines += [
             f"{tile}.IOB_Y0.IN_TERM.NONE",
