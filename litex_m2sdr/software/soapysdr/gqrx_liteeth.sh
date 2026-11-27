@@ -18,7 +18,10 @@ UDP_BUF_COUNT="${LITEX_M2SDR_UDP_BUF_COUNT:-128}"
 UDP_RCVBUF="${LITEX_M2SDR_UDP_RCVBUF:-16777216}"
 SOAPY_INDEX="${LITEX_M2SDR_GQRX_SOAPY_INDEX:-}"
 
-if [[ "$ETH_IP" == eth:* ]]; then
+if [[ -n "${LITEX_M2SDR_DEVICE:-}" ]]; then
+    # Any libm2sdr identifier, ex: usb:path=2-2 (SoapySDRUtil --find="driver=LiteXM2SDR" lists them).
+    DEVICE_ID="$LITEX_M2SDR_DEVICE"
+elif [[ "$ETH_IP" == eth:* ]]; then
     DEVICE_ID="$ETH_IP"
 elif [[ "$ETH_IP" == *:* ]]; then
     DEVICE_ID="eth:$ETH_IP"

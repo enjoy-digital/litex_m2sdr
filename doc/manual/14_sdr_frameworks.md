@@ -249,6 +249,12 @@ LITEX_M2SDR_ETH_IP=192.168.1.50 LITEX_M2SDR_SAMPLE_RATE=2000000 \
     LITEX_M2SDR_FREQUENCY=100000000 ./gqrx_liteeth.sh
 ```
 
+`LITEX_M2SDR_DEVICE` takes any device identifier instead, for example a USB3 board:
+
+```sh
+LITEX_M2SDR_DEVICE=usb:path=2-2 LITEX_M2SDR_FREQUENCY=98200000 ./gqrx_liteeth.sh
+```
+
 While GQRX receives from an Ethernet board with SATA, `m2sdr_sata` can record the same stream
 to the SSD and replay it into GQRX; see [SATA recording](#flow-sata).
 
