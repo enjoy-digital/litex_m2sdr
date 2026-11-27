@@ -55,7 +55,6 @@ from litex_m2sdr.gateware.clock_discipline import MMCMPhaseDiscipline, PTPClock1
 from litex_m2sdr.gateware.si5351           import SI5351
 from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
 from litex_m2sdr.gateware.qpll        import SharedQPLL
-from litex_m2sdr.gateware.openxc7_flow import add_openxc7_flow
 from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
 from litex_m2sdr.gateware.ptp_discipline import PTPTimeDiscipline, TimeDisciplineCDC
 from litex_m2sdr.gateware.ptp_identity   import PTPIdentityTracker
@@ -596,9 +595,7 @@ class BaseSoC(SoCMini):
 
         # XADC -------------------------------------------------------------------------------------
 
-        # The XADC primitive is not supported by the openXC7 flow (no XADC BEL in nextpnr).
-        if toolchain == "vivado":
-            self.xadc = S7SystemMonitor()
+        self.xadc = S7SystemMonitor()
 
         # DNA --------------------------------------------------------------------------------------
 
@@ -1477,8 +1474,6 @@ class BaseSoC(SoCMini):
 
     def add_openxc7_support(self, sys_clk_freq, with_pcie=False, pcie_ip_sources=None, with_usb3=False):
         platform = self.platform
-        # Synthesis and bitstream steps specific to this flow (techmaps, bitstream fix-ups).
-        add_openxc7_flow(platform)
         if with_pcie:
             # The pcie_s7 wrapper is a Vivado-generated IP (pcie_7x): without Vivado it cannot be
             # generated during the build, so reuse the plain Verilog sources a previous Vivado

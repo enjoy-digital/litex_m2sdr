@@ -56,7 +56,6 @@ from litex_m2sdr_platform import Platform, _io_baseboard
 
 from litex_m2sdr.gateware.qpll         import SharedQPLL
 from litex_m2sdr.gateware.usb3         import USB3QPLLChannel, get_usb3_sfp_pads
-from litex_m2sdr.gateware.openxc7_flow import add_openxc7_flow
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -123,16 +122,6 @@ class USB3SoC(USB3BaseSoC):
         # Analyzer ---------------------------------------------------------------------------------
         if with_analyzer:
             self.analyzer = usb3_analyzer(self, group=analyzer_group, csv=analyzer_csv)
-
-        # openXC7 ----------------------------------------------------------------------------------
-        if openxc7:
-            # nextpnr-xilinx does not derive the clocks through the PLL.
-            clocks = [(self.crg.cd_sys.clk, sys_clk_freq), (self.crg.cd_oob.clk, usb3_clk_freq/8)]
-            if phy_cd is not None:
-                clocks.append((self.crg.cd_usb3.clk, usb3_clk_freq))
-            for clk, freq in clocks:
-                platform.add_period_constraint(clk, 1e9/freq)
-            add_openxc7_flow(platform)
 
 # Build --------------------------------------------------------------------------------------------
 

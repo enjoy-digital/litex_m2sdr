@@ -4,7 +4,6 @@
 # Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
-import copy
 import subprocess
 
 from litex.build.generic_platform import *
@@ -210,25 +209,6 @@ _connectors = [
 # Lanes 1 and 2 are swapped against the PCIe IP's default order, so targets must LOC them.
 M2_PCIE_GT_LOCS = ["GTPE2_CHANNEL_X0Y7", "GTPE2_CHANNEL_X0Y5", "GTPE2_CHANNEL_X0Y6", "GTPE2_CHANNEL_X0Y4"]
 
-# IOs for nextpnr ----------------------------------------------------------------------------------
-
-def _nextpnr_io(io):
-    """IOs with the pull resistors as nextpnr-xilinx reads them: the PULLTYPE property. It ignores
-    Vivado's PULLUP/PULLDOWN, which leaves an open-drain bus without external resistors (the
-    SI5351 I2C) floating."""
-    pulls = {"PULLUP=TRUE": "PULLTYPE=PULLUP", "PULLDOWN=TRUE": "PULLTYPE=PULLDOWN"}
-    def translate(constraint):
-        if isinstance(constraint, Misc):
-            constraint.misc = pulls.get(constraint.misc, constraint.misc)
-        elif isinstance(constraint, Subsignal):
-            for c in constraint.constraints:
-                translate(c)
-    io = copy.deepcopy(io)
-    for entry in io:
-        for constraint in entry[2:]:
-            translate(constraint)
-    return io
-
 # Platform -----------------------------------------------------------------------------------------
 
 class Platform(Xilinx7SeriesPlatform):
@@ -237,7 +217,7 @@ class Platform(Xilinx7SeriesPlatform):
 
     def __init__(self, build_multiboot=False, toolchain="vivado"):
         device = "xc7a200t"
-        io = _io if toolchain == "vivado" else _nextpnr_io(_io)
+        io = _io
         Xilinx7SeriesPlatform.__init__(self, f"{device}sbg484-3", io, _connectors, toolchain=toolchain)
         self.toolchain_name = toolchain
         self.image_size = {"xc7a200t" : 0x00800000}[device]
